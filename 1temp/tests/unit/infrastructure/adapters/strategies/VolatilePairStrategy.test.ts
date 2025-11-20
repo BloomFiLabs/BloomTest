@@ -41,7 +41,8 @@ describe('VolatilePairStrategy', () => {
       expect(result.positions).toHaveLength(1);
       expect(result.positions[0].asset).toBe('ETH-USDC');
       expect(result.positions[0].amount.value).toBeGreaterThan(0);
-      expect(result.positions[0].currentPrice.value).toBe(1.0); // LP price
+      expect(result.positions[0].entryPrice.value).toBe(2000); // Actual ETH price at entry
+      expect(result.positions[0].currentPrice.value).toBe(2000); // Current price initialized to entry
       expect(result.trades).toHaveLength(1); // Single trade for LP position (not two separate asset trades)
       expect(result.trades[0].asset).toBe('ETH-USDC'); // Trade uses pair name
       expect(result.trades[0].amount.value).toBe(result.positions[0].amount.value); // Trade amount matches position amount
@@ -75,25 +76,30 @@ describe('VolatilePairStrategy', () => {
         pair: 'ETH-USDC',
         rangeWidth: 0.05, // ±5%
         allocation: 0.4,
+        checkIntervalHours: 1, // Set short interval for test
       };
 
       // Create initial position
       await strategy.execute(portfolio, baseMarketData, config);
       
-      // Add position to portfolio for tracking
+      // Add position to portfolio for tracking (use actual ETH price)
       const initialPosition = Position.create({
         id: 'vp1-ETH-USDC',
         strategyId: 'vp1',
         asset: 'ETH-USDC',
         amount: Amount.create(40000),
-        entryPrice: Price.create(1.0),
-        currentPrice: Price.create(1.0),
+        entryPrice: Price.create(2000), // Actual ETH price
+        currentPrice: Price.create(2000),
       });
       portfolio.addPosition(initialPosition);
 
-      // Price moves 6% (outside ±5% range)
+      // Wait enough time for heartbeat (1 hour later)
+      const laterTime = new Date(baseMarketData.timestamp.getTime() + 60 * 60 * 1000);
+      
+      // Price moves 6% (outside ±5% range, threshold is 4.5% = 0.05 * 0.9 * 100)
       const driftedMarketData: MarketData = {
         ...baseMarketData,
+        timestamp: laterTime,
         price: Price.create(2120), // 6% increase
       };
 
@@ -120,18 +126,25 @@ describe('VolatilePairStrategy', () => {
         strategyId: 'vp1',
         asset: 'ETH-USDC',
         amount: Amount.create(40000),
-        entryPrice: Price.create(1.0),
-        currentPrice: Price.create(1.0),
+        entryPrice: Price.create(2000), // Actual ETH price
+        currentPrice: Price.create(2000),
       });
       portfolio.addPosition(initialPosition);
 
-      // Price moves 3% (within ±5% range)
+      // Wait for heartbeat (1 hour later)
+      const laterTime = new Date(baseMarketData.timestamp.getTime() + 60 * 60 * 1000);
+      
+      // Price moves 3% (within ±5% range, threshold is 4.5%)
       const inRangeMarketData: MarketData = {
         ...baseMarketData,
+        timestamp: laterTime,
         price: Price.create(2060), // 3% increase
       };
 
-      const result = await strategy.execute(portfolio, inRangeMarketData, config);
+      const result = await strategy.execute(portfolio, inRangeMarketData, {
+        ...config,
+        checkIntervalHours: 1, // Set short interval for test
+      });
 
       expect(result.shouldRebalance).toBe(false);
     });
@@ -150,24 +163,38 @@ describe('VolatilePairStrategy', () => {
         strategyId: 'vp1',
         asset: 'ETH-USDC',
         amount: Amount.create(40000),
-        entryPrice: Price.create(1.0),
-        currentPrice: Price.create(1.0),
+        entryPrice: Price.create(2000), // Actual ETH price
+        currentPrice: Price.create(2000),
       });
       portfolio.addPosition(initialPosition);
+
+      // Wait for heartbeat (1 hour later)
+      const hour1 = new Date(baseMarketData.timestamp.getTime() + 60 * 60 * 1000);
 
       // Price moves 6% - triggers rebalance
       const driftedData: MarketData = {
         ...baseMarketData,
+        timestamp: hour1,
         price: Price.create(2120), // 6% increase
       };
-      await strategy.execute(portfolio, driftedData, config);
+      await strategy.execute(portfolio, driftedData, {
+        ...config,
+        checkIntervalHours: 1,
+      });
 
-      // After rebalance, price moves 3% from NEW entry point
+      // Wait for next heartbeat (another hour later)
+      const hour2 = new Date(hour1.getTime() + 60 * 60 * 1000);
+
+      // After rebalance, price moves 3% from NEW entry point (2120)
       const afterRebalanceData: MarketData = {
         ...baseMarketData,
-        price: Price.create(2060), // 3% from original, but should be measured from rebalance point
+        timestamp: hour2,
+        price: Price.create(2183.6), // 3% from 2120 (new entry point)
       };
-      const result = await strategy.execute(portfolio, afterRebalanceData, config);
+      const result = await strategy.execute(portfolio, afterRebalanceData, {
+        ...config,
+        checkIntervalHours: 1,
+      });
 
       // Should not rebalance again (3% is within range from new entry point)
       expect(result.shouldRebalance).toBe(false);
@@ -215,13 +242,13 @@ describe('VolatilePairStrategy', () => {
     it('should reject invalid range width', () => {
       const config1 = {
         pair: 'ETH-USDC',
-        rangeWidth: 0.001, // Too narrow
+        rangeWidth: 0, // Too narrow (must be > 0)
       };
       expect(strategy.validateConfig(config1)).toBe(false);
 
       const config2 = {
         pair: 'ETH-USDC',
-        rangeWidth: 0.5, // Too wide
+        rangeWidth: 0.6, // Too wide
       };
       expect(strategy.validateConfig(config2)).toBe(false);
     });

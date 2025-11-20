@@ -3,7 +3,7 @@
  * Optimizes LP range width to hit target APY
  */
 
-import { Price, Amount, APR } from '@domain/value-objects';
+import { Price, Amount, APR } from '../../domain/value-objects';
 
 export interface OptimizationResult {
   optimalRangeWidth: number;

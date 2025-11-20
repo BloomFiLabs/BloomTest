@@ -31,15 +31,18 @@ export const DEFAULT_STABLE_PAIR_CONFIG: StablePairConfig = {
 /**
  * Default configuration for Volatile Pair Strategy
  * Delta-neutral concentrated LP with perp hedges
+ * Optimized based on backtest results: 12h interval, ±0.5% range
  */
 export const DEFAULT_VOLATILE_PAIR_CONFIG: VolatilePairConfig = {
   pair: 'ETH-USDC',
-  rangeWidth: 0.05, // ±5% range
+  mode: 'SPEED' as any, // Default mode
+  checkIntervalHours: 12, // Optimal interval for most pools
+  rangeWidth: 0.005, // ±0.5% range (optimal)
   hedgeRatio: 1.0, // Delta neutral
   allocation: 0.2, // 20% of portfolio
-  ammFeeAPR: 20, // 20% APR from AMM fees
-  incentiveAPR: 15, // 15% APR from incentives
-  fundingAPR: 5, // 5% APR from funding
+  ammFeeAPR: 20, // Placeholder
+  incentiveAPR: 0, 
+  fundingAPR: 0,
 };
 
 /**

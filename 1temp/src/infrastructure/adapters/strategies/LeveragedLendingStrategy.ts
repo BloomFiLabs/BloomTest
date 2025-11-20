@@ -4,15 +4,18 @@ import { Portfolio, StrategyConfig, MarketData, StrategyResult } from '@domain/e
 import { Amount, APR, HealthFactor } from '@domain/value-objects';
 import { Position } from '@domain/entities/Position';
 import { Trade } from '@domain/entities/Trade';
+import { AaveV3Adapter } from '@infrastructure/adapters/data/AaveV3Adapter';
 
 export interface LeveragedLendingConfig extends StrategyConfig {
   asset: string;
+  assetAddress?: string; // Asset address for Aave lookups
   loops?: number; // 3-5 recursive loops
   healthFactorThreshold?: number; // Default 1.5
-  borrowAPR?: number;
-  supplyAPR?: number;
-  incentiveAPR?: number;
+  borrowAPR?: number; // Static fallback if no adapter
+  supplyAPR?: number; // Static fallback if no adapter
+  incentiveAPR?: number; // Static fallback if no adapter
   allocation?: number;
+  ratesAdapter?: AaveV3Adapter; // Optional: dynamic rate fetching
 }
 
 export class LeveragedLendingStrategy extends BaseStrategy {
@@ -31,6 +34,35 @@ export class LeveragedLendingStrategy extends BaseStrategy {
     const trades: Trade[] = [];
     const positions: Position[] = [];
     let shouldRebalance = false;
+
+    // Fetch dynamic rates if adapter provided
+    let currentSupplyAPR = lendingConfig.supplyAPR || 6;
+    let currentBorrowAPR = lendingConfig.borrowAPR || 8;
+    let currentIncentiveAPR = lendingConfig.incentiveAPR || 10;
+
+    if (lendingConfig.ratesAdapter && lendingConfig.assetAddress) {
+      try {
+        const dayStart = new Date(marketData.timestamp);
+        dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = new Date(dayStart);
+        dayEnd.setDate(dayEnd.getDate() + 1);
+
+        const rates = await lendingConfig.ratesAdapter.fetchReserveRatesHistory(
+          lendingConfig.assetAddress,
+          dayStart,
+          dayEnd
+        );
+
+        if (rates && rates.length > 0) {
+          const latestRate = rates[rates.length - 1];
+          currentSupplyAPR = latestRate.supplyAPR;
+          currentBorrowAPR = latestRate.borrowAPR;
+          currentIncentiveAPR = latestRate.incentiveAPR;
+        }
+      } catch (error) {
+        console.warn(`Failed to fetch dynamic rates, using static config: ${error}`);
+      }
+    }
 
     const loops = lendingConfig.loops || 3;
     const allocation = lendingConfig.allocation || 0.2;
@@ -85,11 +117,38 @@ export class LeveragedLendingStrategy extends BaseStrategy {
     return { trades, positions, shouldRebalance };
   }
 
-  calculateExpectedYield(config: StrategyConfig, _marketData: MarketData): APR {
+  async calculateExpectedYield(config: StrategyConfig, marketData: MarketData): Promise<APR> {
     const lendingConfig = config as LeveragedLendingConfig;
-    const supplyAPR = lendingConfig.supplyAPR || 6;
-    const incentiveAPR = lendingConfig.incentiveAPR || 10;
-    const borrowAPR = lendingConfig.borrowAPR || 8;
+    
+    // Try to fetch dynamic rates
+    let supplyAPR = lendingConfig.supplyAPR || 6;
+    let incentiveAPR = lendingConfig.incentiveAPR || 10;
+    let borrowAPR = lendingConfig.borrowAPR || 8;
+
+    if (lendingConfig.ratesAdapter && lendingConfig.assetAddress) {
+      try {
+        const dayStart = new Date(marketData.timestamp);
+        dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = new Date(dayStart);
+        dayEnd.setDate(dayEnd.getDate() + 1);
+
+        const rates = await lendingConfig.ratesAdapter.fetchReserveRatesHistory(
+          lendingConfig.assetAddress,
+          dayStart,
+          dayEnd
+        );
+
+        if (rates && rates.length > 0) {
+          const latestRate = rates[rates.length - 1];
+          supplyAPR = latestRate.supplyAPR;
+          borrowAPR = latestRate.borrowAPR;
+          incentiveAPR = latestRate.incentiveAPR;
+        }
+      } catch (error) {
+        // Use static fallback
+      }
+    }
+
     const loops = lendingConfig.loops || 3;
     const leverage = 1 / (1 - 0.8 * (loops - 1) / loops);
 

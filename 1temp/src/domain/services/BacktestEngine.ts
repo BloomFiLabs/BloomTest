@@ -63,6 +63,7 @@ export class BacktestEngine {
   private lastRecordTime: Date | null = null; // Track last portfolio value recording time
   private aprCache: Map<string, number> = new Map(); // Cache APR per asset to avoid repeated API calls
   private rebalanceCosts: Map<string, number> = new Map(); // Track cumulative rebalance costs per position
+  private strategyFeeTiers: Map<string, number> = new Map(); // Per-strategy pool fee tiers
 
   constructor() {
     this.portfolioManager = new PortfolioManager();
@@ -114,18 +115,32 @@ export class BacktestEngine {
       console.log('');
     }
 
-    // Fetch pool fee tier and update cost model if not provided
-    if (config.applyCosts && config.costModel && 'fetchPoolFeeTier' in config.dataAdapter) {
+    // Fetch pool fee tier for each strategy (they may have different pools/fee tiers)
+    if (config.applyCosts && config.costModel) {
       try {
+        const feeTiers: Map<string, number> = new Map();
+        
         for (const strategyConfig of config.strategies) {
           const asset = this.getAssetFromConfig(strategyConfig.config);
-          if (!config.costModel.poolFeeTier) {
-            const feeTier = await (config.dataAdapter as any).fetchPoolFeeTier(asset);
-            config.costModel.poolFeeTier = feeTier;
-            console.log(`   Pool fee tier for ${asset}: ${(feeTier * 100).toFixed(2)}%`);
+          if (!feeTiers.has(asset)) {
+            // Try to use per-strategy adapter first, then fall back to global adapter
+            const strategyAdapter = (strategyConfig.config as any).dataAdapter || config.dataAdapter;
+            
+            if (strategyAdapter && 'fetchPoolFeeTier' in strategyAdapter) {
+              const feeTier = await strategyAdapter.fetchPoolFeeTier(asset);
+              feeTiers.set(asset, feeTier);
+              console.log(`   Pool fee tier for ${asset}: ${(feeTier * 100).toFixed(2)}%`);
+            }
           }
         }
-        // Update cost calculator with pool fee tier
+        
+        // Store fee tiers for later use (per-strategy)
+        this.strategyFeeTiers = feeTiers;
+        
+        // Update cost calculator with a default pool fee tier (will be overridden per-strategy)
+        if (!config.costModel.poolFeeTier && feeTiers.size > 0) {
+          config.costModel.poolFeeTier = Array.from(feeTiers.values())[0];
+        }
         this.costCalculator = new CostCalculator(config.costModel);
         
         // Inject cost model into strategy configs for optimization
@@ -172,6 +187,34 @@ export class BacktestEngine {
     // Process each unique asset's events separately to avoid loading everything into memory
     for (const asset of uniqueAssets) {
       try {
+        // Prefer hourly OHLCV data if available (more accurate for backtesting)
+        if ('fetchHourlyOHLCV' in config.dataAdapter && typeof (config.dataAdapter as any).fetchHourlyOHLCV === 'function') {
+          console.log(`   📊 Using hourly OHLCV data for ${asset}...`);
+          const hourlyData = await (config.dataAdapter as any).fetchHourlyOHLCV(asset, config.startDate, config.endDate);
+          
+          if (hourlyData && hourlyData.length > 0) {
+            console.log(`   ✅ Loaded ${hourlyData.length} hourly data points for ${asset}`);
+            
+            // Convert hourly OHLCV to trade events
+            for (const dataPoint of hourlyData) {
+              if (dataPoint.close && dataPoint.close.value > 0 && !isNaN(dataPoint.close.value)) {
+                const event: TradeEvent = {
+                  timestamp: dataPoint.timestamp,
+                  price: dataPoint.close,
+                  volume: dataPoint.volume,
+                  type: 'simulated',
+                };
+                await this.processTradeEvent(event, asset, portfolio, config, allTrades, historicalValues, historicalReturns);
+                eventCount++;
+              }
+            }
+            continue; // Skip to next asset
+          } else {
+            console.warn(`   ⚠️  No hourly data found for ${asset}, falling back to trade events...`);
+          }
+        }
+        
+        // Fallback: Try fetchTradeEvents if available
         if (config.dataAdapter.fetchTradeEvents) {
           // Fetch events in batches and process immediately
           const events = await config.dataAdapter.fetchTradeEvents(asset, config.startDate, config.endDate);
@@ -181,41 +224,60 @@ export class BacktestEngine {
           
           console.log(`   Processing ${events.length} events for ${asset}...`);
           
-          // Process events in batches
-          for (let i = 0; i < events.length; i += BATCH_SIZE) {
-            const batch = events.slice(i, Math.min(i + BATCH_SIZE, events.length));
-            
-            for (const event of batch) {
-              await this.processTradeEvent(event, asset, portfolio, config, allTrades, historicalValues, historicalReturns);
+          if (events.length === 0) {
+            console.warn(`   ⚠️  No trade events found for ${asset}, trying daily OHLCV fallback...`);
+          } else {
+            // Process events in batches
+            for (let i = 0; i < events.length; i += BATCH_SIZE) {
+              const batch = events.slice(i, Math.min(i + BATCH_SIZE, events.length));
               
-              eventCount++;
-              if (eventCount % 10000 === 0) {
-                process.stdout.write(`\r⏳ Processed ${eventCount} events...`);
+              for (const event of batch) {
+                await this.processTradeEvent(event, asset, portfolio, config, allTrades, historicalValues, historicalReturns);
+                
+                eventCount++;
+                if (eventCount % 10000 === 0) {
+                  process.stdout.write(`\r⏳ Processed ${eventCount} events...`);
+                }
               }
             }
+            continue; // Skip to next asset if we successfully processed events
           }
-        } else {
-          // Fallback: use OHLCV data and simulate hourly checks
-          console.log(`   ⚠️  Adapter doesn't support fetchTradeEvents, using hourly simulation`);
-          const allData = await config.dataAdapter.fetchOHLCV(asset, config.startDate, config.endDate);
-          const HOUR_MS = 60 * 60 * 1000;
-          let currentDate = new Date(config.startDate);
-          currentDate.setMinutes(0, 0, 0);
+        }
+        
+        // Final fallback: use daily OHLCV data
+        {
+          // Fallback: use hourly OHLCV data if available, otherwise daily
+          console.log(`   ⚠️  Adapter doesn't support fetchTradeEvents, using OHLCV simulation`);
           
-          while (currentDate <= config.endDate) {
-            const dayKey = Math.floor(currentDate.getTime() / (24 * 60 * 60 * 1000));
-            const dayData = allData.find(d => Math.floor(d.timestamp.getTime() / (24 * 60 * 60 * 1000)) === dayKey);
-            if (dayData) {
+          // Try hourly first if available
+          let allData: OHLCVData[] = [];
+          if ('fetchHourlyOHLCV' in config.dataAdapter && typeof (config.dataAdapter as any).fetchHourlyOHLCV === 'function') {
+            try {
+              allData = await (config.dataAdapter as any).fetchHourlyOHLCV(asset, config.startDate, config.endDate);
+              console.log(`   ✅ Using hourly OHLCV data (${allData.length} hours)`);
+            } catch (error) {
+              console.warn(`   ⚠️  Hourly fetch failed, falling back to daily:`, (error as Error).message);
+            }
+          }
+          
+          // Fallback to daily if hourly not available or failed
+          if (allData.length === 0) {
+            allData = await config.dataAdapter.fetchOHLCV(asset, config.startDate, config.endDate);
+            console.log(`   ✅ Using daily OHLCV data (${allData.length} days)`);
+          }
+          
+          // Process each data point as a trade event
+          for (const dataPoint of allData) {
+            if (dataPoint.close && dataPoint.close.value > 0 && !isNaN(dataPoint.close.value)) {
               const event: TradeEvent = {
-                timestamp: currentDate,
-                price: dayData.close,
-                volume: dayData.volume,
+                timestamp: dataPoint.timestamp,
+                price: dataPoint.close,
+                volume: dataPoint.volume,
                 type: 'simulated',
               };
               await this.processTradeEvent(event, asset, portfolio, config, allTrades, historicalValues, historicalReturns);
               eventCount++;
             }
-            currentDate = new Date(currentDate.getTime() + HOUR_MS);
           }
         }
       } catch (error) {
@@ -265,6 +327,12 @@ export class BacktestEngine {
       }
     }
 
+    // Calculate total rebalance costs across all positions
+    let totalRebalanceCosts = 0;
+    for (const cost of this.rebalanceCosts.values()) {
+      totalRebalanceCosts += cost;
+    }
+
     return {
       finalPortfolio: portfolio,
       trades: allTrades,
@@ -274,6 +342,7 @@ export class BacktestEngine {
         totalReturn,
         sharpeRatio: metrics.sharpeRatio,
         maxDrawdown: metrics.maxDrawdown,
+        totalRebalanceCosts,
       },
       historicalValues,
       historicalReturns,
@@ -409,10 +478,22 @@ export class BacktestEngine {
                   marketData.price
                 );
                 
+                
                 // Apply rebalance costs (gas + pool fees) if enabled
                 if (config.applyCosts && config.costModel) {
-                  const rebalanceCost = await this.costCalculator.estimateTotalRebalanceCost(position, marketData.price);
+                  // Get the correct pool fee tier for this strategy's asset
+                  const strategyAsset = this.getAssetFromConfig(strategyConfig.config);
+                  const poolFeeTier = this.strategyFeeTiers.get(strategyAsset) || config.costModel.poolFeeTier || 0.003;
+                  
+                  // Create a cost calculator with the correct pool fee tier for this strategy
+                  const strategyCostCalculator = new CostCalculator({
+                    ...config.costModel,
+                    poolFeeTier,
+                  });
+                  
+                  const rebalanceCost = await strategyCostCalculator.estimateTotalRebalanceCost(position, marketData.price);
                   const costValue = rebalanceCost.value;
+                  
                   
                   // Deduct cost from portfolio cash using temporary position pattern
                   if (portfolio.cash.value >= costValue) {
@@ -471,9 +552,14 @@ export class BacktestEngine {
           continue; // Skip this position update if no valid price data
         }
         
-        // For LP positions (pairs), use price = 1.0 (LP tokens priced in USD)
+        // For LP positions (pairs) OR stablecoins, use price = 1.0 for VALUATION
+        // But use the actual market price for REBALANCE CHECKS
         const isPairPosition = position.asset.includes('-');
-        const positionPrice = isPairPosition ? Price.create(1.0) : marketData.price;
+        const isStable = ['USDC', 'USDT', 'DAI', 'USD'].includes(position.asset.toUpperCase());
+        const positionPrice = (isPairPosition || isStable) ? Price.create(1.0) : marketData.price;
+        
+        // For range checks, always use the ACTUAL MARKET PRICE (not LP token price)
+        const marketPriceForRangeCheck = marketData.price;
         
         let updatedPosition = position.updatePrice(positionPrice);
         
@@ -484,14 +570,15 @@ export class BacktestEngine {
           if (strategyConfig) {
             const rangeWidth = (strategyConfig.config as any).rangeWidth || 0.05;
             // Use the CURRENT CENTER PRICE (last rebalance point) to determine if price is in range
-            // This reflects the live, continuously re-centered LP range where we are actually earning fees
-            // positionEntryPrices is updated on each rebalance; fall back to original entry if missing
+            // For LP positions, this is the underlying asset price (ETH), not the LP token price
+            // positionEntryPrices stores the market price at last rebalance
             const centerPrice =
               this.positionEntryPrices.get(position.id) ||
               tracker.getOriginalEntryPrice() ||
-              marketData.price;
-            const priceChange = Math.abs(marketData.price.percentageChange(centerPrice));
+              marketPriceForRangeCheck;
+            const priceChange = Math.abs(marketPriceForRangeCheck.percentageChange(centerPrice));
             const inRange = priceChange <= rangeWidth * 100;
+            
             
             // Calculate fees earned this day (only when in range)
             let feesEarned = 0;
@@ -517,7 +604,29 @@ export class BacktestEngine {
               
               const positionValue = updatedPosition.marketValue().value;
               const hourlyYieldRate = (expectedYield.value / 100) / (365 * 24);
-              feesEarned = positionValue * hourlyYieldRate;
+              
+              // Apply concentration multiplier for narrow ranges
+              // Formula: multiplier = (fullRange / strategyRange)^1.5
+              // For ±0.5% in a typical ±5% full range pool: (0.05 / 0.005)^1.5 ≈ 3.16x
+              const fullRangeWidth = 0.05; // Assume typical full-range LP is ±5%
+              const concentrationMultiplier = Math.pow(fullRangeWidth / rangeWidth, 1.5);
+              // Apply efficiency factor (not all volume routes through our range)
+              const efficiencyFactor = 0.65; // 65% efficiency
+              
+              // Apply fee dilution factor based on pool share
+              // Get pool-specific TVL from strategy config
+              const poolTVL = (strategyConfig.config as any)?.costModel?.poolTVL || config.costModel?.poolTVL || 180_000_000;
+              const positionShare = Math.min(1.0, positionValue / poolTVL);
+              
+              // Extreme dilution model (same as yield accrual)
+              let dilutionFactor = 1.0;
+              if (positionShare > 0.2) {
+                dilutionFactor = Math.max(0.01, Math.pow(1 - positionShare, 3) + 0.01);
+              }
+              
+              const effectiveMultiplier = concentrationMultiplier * efficiencyFactor * dilutionFactor;
+              
+              feesEarned = positionValue * hourlyYieldRate * effectiveMultiplier;
               expectedDailyFee = feesEarned * 24; // Expected daily fee = hourly * 24
             }
             
@@ -574,7 +683,7 @@ export class BacktestEngine {
         if (marketData) {
           const strategyConfig = config.strategies.find(s => s.strategy.id === position.strategyId);
           if (strategyConfig) {
-            let expectedYield = strategyConfig.strategy.calculateExpectedYield(
+            let expectedYield = await strategyConfig.strategy.calculateExpectedYield(
               strategyConfig.config,
               marketData
             );
@@ -597,11 +706,28 @@ export class BacktestEngine {
             const hoursSinceLastCheck = Math.max(0.01, (event.timestamp.getTime() - lastCheck.getTime()) / (60 * 60 * 1000));
             const aprDecimal = expectedYield.value / 100; // 40% -> 0.40
             const hourlyYieldRate = aprDecimal / (365 * 24); // Hourly compounding rate
-            const yieldRate = hourlyYieldRate * hoursSinceLastCheck; // Adjust for actual time elapsed
+            
+            // Apply fee dilution for large positions
+            // Get pool-specific TVL from strategy config (already have strategyConfig from line 677)
+            const poolTVL = (strategyConfig.config as any)?.costModel?.poolTVL || config.costModel?.poolTVL || 180_000_000;
+            const currentValue = updatedPosition.marketValue();
+            const positionShare = Math.min(1.0, currentValue.value / poolTVL);
+            
+            // Extreme dilution model:
+            // - At 0-20% share: 100% efficiency (you're small relative to pool)
+            // - At 50% share: 25% efficiency (major dilution)
+            // - At 100% share: ~1% efficiency (you're the entire market)
+            let dilutionFactor = 1.0;
+            if (positionShare > 0.2) {
+              // Exponential decay after 20% threshold
+              dilutionFactor = Math.max(0.01, Math.pow(1 - positionShare, 3) + 0.01);
+            }
+            
+            
+            const adjustedYieldRate = hourlyYieldRate * hoursSinceLastCheck * dilutionFactor;
             
             // Accrue yield to position amount
-            const currentValue = updatedPosition.marketValue();
-            const yieldAmount = currentValue.multiply(yieldRate);
+            const yieldAmount = currentValue.multiply(adjustedYieldRate);
             this.lastCheckTimes.set(position.id, event.timestamp);
             
             // Increase position amount by yield (simulating LP token growth)

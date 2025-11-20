@@ -4,8 +4,13 @@
  */
 
 import { DataAdapter, OHLCVData, TradeEvent } from './DataAdapter';
-import { Price, Amount, FundingRate, IV } from '@domain/value-objects';
+import { Price, Amount, FundingRate, IV } from '../../../domain/value-objects';
 import axios, { AxiosInstance } from 'axios';
+
+export interface HourlyPoolData extends OHLCVData {
+  feesUSD: number;
+  tvlUSD: number;
+}
 
 export interface TheGraphConfig {
   subgraphUrl: string;
@@ -338,6 +343,188 @@ export class TheGraphDataAdapter implements DataAdapter {
   }
 
   /**
+   * Fetch Hourly OHLCV data from The Graph
+   * Uses poolHourDatas entity
+   */
+  async fetchHourlyOHLCV(asset: string, startDate: Date, endDate: Date): Promise<HourlyPoolData[]> {
+    // Handle Stablecoins: Return constant $1.0 price to support Delta Neutral strategies
+    if (['USDC', 'USDT', 'DAI', 'USD'].includes(asset.toUpperCase())) {
+      return this.generateStablecoinData(startDate, endDate);
+    }
+
+    const poolAddress = await this.findPoolAddress();
+
+    // V3 query format for Hourly data
+    const v3Query = `
+      query PoolHourDataV3(
+        $poolId: String!,
+        $startTimestamp: Int!,
+        $endTimestamp: Int!
+      ) {
+        poolHourDatas(
+          where: {
+            pool: $poolId,
+            periodStartUnix_gte: $startTimestamp,
+            periodStartUnix_lte: $endTimestamp
+          }
+          orderBy: periodStartUnix
+          orderDirection: asc
+          first: 1000
+        ) {
+          periodStartUnix
+          open
+          high
+          low
+          close
+          volumeUSD
+          token0Price
+          token1Price
+          tvlUSD
+          feesUSD
+        }
+      }
+    `;
+
+    // We need to paginate because a year of hourly data is ~8760 records, limit is 1000
+    let allHourlyData: HourlyPoolData[] = [];
+    let currentStart = Math.floor(startDate.getTime() / 1000);
+    const finalEnd = Math.floor(endDate.getTime() / 1000);
+    let hasMore = true;
+
+    while (hasMore && currentStart < finalEnd) {
+      const variables = {
+        poolId: poolAddress.toLowerCase(),
+        startTimestamp: currentStart,
+        endTimestamp: finalEnd,
+      };
+
+      try {
+        const v3Data = await this.query<{
+          poolHourDatas: Array<{
+            periodStartUnix: number;
+            open: string;
+            high: string;
+            low: string;
+            close: string;
+            volumeUSD: string;
+            token0Price: string;
+            token1Price: string;
+            tvlUSD: string;
+            feesUSD: string;
+          }>;
+        }>(v3Query, variables);
+
+        if (!v3Data.poolHourDatas || v3Data.poolHourDatas.length === 0) {
+          hasMore = false;
+          continue;
+        }
+
+        const convertedBatch = this.convertV3PoolHourData(v3Data.poolHourDatas);
+        allHourlyData = allHourlyData.concat(convertedBatch);
+
+        if (v3Data.poolHourDatas.length < 1000) {
+          hasMore = false;
+        } else {
+          // Update start time for next page (last timestamp + 1)
+          currentStart = v3Data.poolHourDatas[v3Data.poolHourDatas.length - 1].periodStartUnix + 1;
+        }
+      } catch (error: any) {
+        console.warn('Failed to fetch hourly data batch:', error.message);
+        hasMore = false;
+      }
+    }
+
+    return allHourlyData;
+  }
+
+  /**
+   * Generate mock hourly data for stablecoins
+   */
+  private generateStablecoinData(startDate: Date, endDate: Date): HourlyPoolData[] {
+    const data: HourlyPoolData[] = [];
+    let currentDate = new Date(startDate);
+    currentDate.setMinutes(0, 0, 0); // Align to hour
+    
+    const endTimestamp = endDate.getTime();
+    
+    while (currentDate.getTime() <= endTimestamp) {
+        data.push({
+            timestamp: new Date(currentDate),
+            open: Price.create(1.0),
+            high: Price.create(1.0),
+            low: Price.create(1.0),
+            close: Price.create(1.0),
+            volume: Amount.zero(),
+            feesUSD: 0,
+            tvlUSD: 1000000000 // Arbitrary large TVL
+        });
+        currentDate = new Date(currentDate.getTime() + 3600 * 1000); // Add 1 hour
+    }
+    return data;
+  }
+
+  /**
+   * Convert V3 poolHourData to OHLCV format
+   * Note: poolHourDatas may not have open/high/low/close fields, so we use token0Price/token1Price
+   */
+  private convertV3PoolHourData(
+    poolHourData: Array<{
+      periodStartUnix: number;
+      open?: string;
+      high?: string;
+      low?: string;
+      close?: string;
+      volumeUSD: string;
+      token0Price: string;
+      token1Price: string;
+      tvlUSD: string;
+      feesUSD: string;
+    }>
+  ): HourlyPoolData[] {
+    const useToken0Price = this.shouldUseToken0Price();
+    
+    return poolHourData.map((hourData) => {
+      // Use token0Price or token1Price if open/high/low/close are missing or suspiciously small
+      let priceValue: number;
+      
+      if (hourData.close && parseFloat(hourData.close) > 100) {
+        // close > 100 means it's likely ETH price (not USDT price)
+        priceValue = parseFloat(hourData.close);
+      } else if (hourData.open && parseFloat(hourData.open) > 100) {
+        priceValue = parseFloat(hourData.open);
+      } else {
+        // Fallback to token price (use token1Price for ETH/USDT since token1=ETH)
+        priceValue = useToken0Price
+          ? parseFloat(hourData.token0Price)
+          : parseFloat(hourData.token1Price);
+      }
+      
+      // If we have high/low and they're reasonable (> 100), use them; otherwise estimate from price
+      const high = hourData.high && parseFloat(hourData.high) > 100
+        ? parseFloat(hourData.high)
+        : priceValue * 1.01; // Estimate ±1% range
+      const low = hourData.low && parseFloat(hourData.low) > 100
+        ? parseFloat(hourData.low)
+        : priceValue * 0.99;
+      const open = hourData.open && parseFloat(hourData.open) > 100
+        ? parseFloat(hourData.open)
+        : priceValue;
+      const close = priceValue;
+      
+      return {
+        timestamp: new Date(hourData.periodStartUnix * 1000),
+        open: Price.create(open),
+        high: Price.create(high),
+        low: Price.create(low),
+        close: Price.create(close),
+        volume: Amount.create(parseFloat(hourData.volumeUSD || '0')),
+        feesUSD: parseFloat(hourData.feesUSD || '0'),
+        tvlUSD: parseFloat(hourData.tvlUSD || '0'),
+      };
+    });
+  }
+
+  /**
    * Fetch daily fees and TVL for APR calculation
    * Supports both V3 and V4 query formats
    */
@@ -666,15 +853,17 @@ export class TheGraphDataAdapter implements DataAdapter {
 
   /**
    * Determine which token price to use
-   * Uses token0Price if token0 is the base asset (e.g., ETH)
+   * For ETH/USDT: token0=USDT, token1=ETH, so we want token1Price (ETH in USDT)
+   * For ETH/USDC: token0=WETH, token1=USDC, so we want token0Price (WETH in USDC) OR token1Price inverted
+   * Strategy: Use token1Price if token1 is a stablecoin (USDC/USDT), otherwise use token0Price
    */
   private shouldUseToken0Price(): boolean {
-    // Simple heuristic: if token0Symbol matches common base assets, use token0Price
-    const baseAssets = ['ETH', 'BTC', 'WETH', 'WBTC'];
-    return (
-      this.config.token0Symbol !== undefined &&
-      baseAssets.includes(this.config.token0Symbol.toUpperCase())
-    );
+    const stablecoins = ['USDC', 'USDT', 'DAI', 'FRAX'];
+    const token1IsStable = this.config.token1Symbol && stablecoins.includes(this.config.token1Symbol.toUpperCase());
+    
+    // If token1 is a stablecoin, we want token1Price (base asset priced in stablecoin)
+    // Otherwise, use token0Price
+    return !token1IsStable;
   }
 
   /**

@@ -1,8 +1,11 @@
-import { BaseStrategy as DomainBaseStrategy } from '@domain/entities/Strategy';
-import { Amount, Price } from '@domain/value-objects';
-import { Trade } from '@domain/entities/Trade';
+import { BaseStrategy as DomainBaseStrategy } from '../../../domain/entities/Strategy';
+import { Amount, Price } from '../../../domain/value-objects';
+import { Trade } from '../../../domain/entities/Trade';
 
 export abstract class BaseStrategy extends DomainBaseStrategy {
+  // DomainBaseStrategy already has constructor(id, name)
+  // We don't need to redeclare it unless we change it.
+  
   protected createTradeForStrategy(
     asset: string,
     side: 'buy' | 'sell',

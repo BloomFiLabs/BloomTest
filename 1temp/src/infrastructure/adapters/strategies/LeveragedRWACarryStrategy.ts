@@ -3,15 +3,18 @@ import { Portfolio, StrategyConfig, MarketData, StrategyResult } from '@domain/e
 import { Price, APR, HealthFactor } from '@domain/value-objects';
 import { Position } from '@domain/entities/Position';
 import { Trade } from '@domain/entities/Trade';
+import { AaveV3Adapter } from '@infrastructure/adapters/data/AaveV3Adapter';
 
 export interface LeveragedRWAConfig extends StrategyConfig {
   rwaVault: string;
   couponRate: number; // 7-10%
   leverage?: number; // 3-4x
-  borrowAPR?: number; // 2-8%
+  borrowAPR?: number; // 2-8% (static fallback)
+  borrowAssetAddress?: string; // Address of borrow asset (e.g., USDC)
   healthFactorThreshold?: number;
   allocation?: number;
   maturityDays?: number; // 30-90
+  borrowRatesAdapter?: AaveV3Adapter; // Optional: dynamic borrow rate fetching
 }
 
 export class LeveragedRWACarryStrategy extends BaseStrategy {
@@ -30,6 +33,31 @@ export class LeveragedRWACarryStrategy extends BaseStrategy {
     const trades: Trade[] = [];
     const positions: Position[] = [];
     let shouldRebalance = false;
+
+    // Fetch dynamic borrow rate if adapter provided
+    let currentBorrowAPR = rwaConfig.borrowAPR || 4;
+
+    if (rwaConfig.borrowRatesAdapter && rwaConfig.borrowAssetAddress) {
+      try {
+        const dayStart = new Date(marketData.timestamp);
+        dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = new Date(dayStart);
+        dayEnd.setDate(dayEnd.getDate() + 1);
+
+        const rates = await rwaConfig.borrowRatesAdapter.fetchReserveRatesHistory(
+          rwaConfig.borrowAssetAddress,
+          dayStart,
+          dayEnd
+        );
+
+        if (rates && rates.length > 0) {
+          const latestRate = rates[rates.length - 1];
+          currentBorrowAPR = latestRate.borrowAPR;
+        }
+      } catch (error) {
+        console.warn(`Failed to fetch dynamic borrow rates, using static config: ${error}`);
+      }
+    }
 
     const leverage = rwaConfig.leverage || 3.5;
     const allocation = rwaConfig.allocation || 0.15;
@@ -79,11 +107,35 @@ export class LeveragedRWACarryStrategy extends BaseStrategy {
     return { trades, positions, shouldRebalance };
   }
 
-  calculateExpectedYield(config: StrategyConfig, _marketData: MarketData): APR {
+  async calculateExpectedYield(config: StrategyConfig, marketData: MarketData): Promise<APR> {
     const rwaConfig = config as LeveragedRWAConfig;
     const couponRate = rwaConfig.couponRate || 8;
     const leverage = rwaConfig.leverage || 3.5;
-    const borrowAPR = rwaConfig.borrowAPR || 4;
+    
+    // Try to fetch dynamic borrow rate
+    let borrowAPR = rwaConfig.borrowAPR || 4;
+
+    if (rwaConfig.borrowRatesAdapter && rwaConfig.borrowAssetAddress) {
+      try {
+        const dayStart = new Date(marketData.timestamp);
+        dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = new Date(dayStart);
+        dayEnd.setDate(dayEnd.getDate() + 1);
+
+        const rates = await rwaConfig.borrowRatesAdapter.fetchReserveRatesHistory(
+          rwaConfig.borrowAssetAddress,
+          dayStart,
+          dayEnd
+        );
+
+        if (rates && rates.length > 0) {
+          const latestRate = rates[rates.length - 1];
+          borrowAPR = latestRate.borrowAPR;
+        }
+      } catch (error) {
+        // Use static fallback
+      }
+    }
 
     // Net carry = coupon * leverage - borrow cost * (leverage - 1)
     const netCarry = couponRate * leverage - borrowAPR * (leverage - 1);

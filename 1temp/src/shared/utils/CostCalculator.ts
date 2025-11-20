@@ -9,7 +9,7 @@ import { Position } from '@domain/entities/Position';
 import { GasPriceService } from './GasPriceService';
 
 export interface CostModel {
-  slippageBps: number; // Basis points (e.g., 10 = 0.1%)
+  slippageBps: number; // Basis points (e.g., 10 = 0.1%) - base slippage for small trades
   gasCostUSD?: number; // Gas cost in USD per transaction (deprecated - use gasModel instead)
   gasModel?: {
     gasUnitsPerRebalance: number; // Gas units for a full rebalance (mint + burn + swap)
@@ -18,6 +18,8 @@ export interface CostModel {
     network?: string; // Network name (e.g., 'base', 'mainnet', 'arbitrum') - will fetch gas price if provided
   };
   poolFeeTier?: number; // Uniswap pool fee tier (e.g., 0.0005 = 0.05%, 0.003 = 0.3%, 0.01 = 1%)
+  poolTVL?: number; // Pool TVL in USD - used for dynamic slippage calculation
+  useDynamicSlippage?: boolean; // If true, calculate slippage based on trade size / pool depth
 }
 
 export class CostCalculator {
@@ -30,6 +32,8 @@ export class CostCalculator {
     network?: string;
   };
   private poolFeeTier?: number; // Pool fee tier as decimal (e.g., 0.003 = 0.3%)
+  private poolTVL?: number; // Pool TVL in USD
+  private useDynamicSlippage: boolean;
   private cachedGasPriceGwei?: number; // Cache fetched gas price to avoid repeated RPC calls
 
   constructor(config: CostModel = { slippageBps: 10, gasCostUSD: 50 }) {
@@ -37,6 +41,8 @@ export class CostCalculator {
     this.gasCostUSD = config.gasCostUSD || 50; // Default to 50 if not provided
     this.gasModel = config.gasModel;
     this.poolFeeTier = config.poolFeeTier;
+    this.poolTVL = config.poolTVL;
+    this.useDynamicSlippage = config.useDynamicSlippage || false;
   }
 
   /**
@@ -46,9 +52,27 @@ export class CostCalculator {
    */
   calculateSlippage(trade: Trade): Amount {
     const tradeValue = trade.totalCost().value;
-    const slippagePercent = this.slippageBps / 10000; // Convert bps to decimal
-    const slippageAmount = tradeValue * slippagePercent;
-    return Amount.create(slippageAmount);
+    
+    if (this.useDynamicSlippage && this.poolTVL && this.poolTVL > 0) {
+      // Dynamic slippage model: Impact increases with square root of (trade size / pool depth)
+      // Formula: BaseSlippage + (TradeSize / PoolLiquidity)^0.5 * ImpactFactor
+      const baseSlippage = this.slippageBps / 10000;
+      const tradeSizeRatio = tradeValue / (this.poolTVL / 2); // Divide by 2 for single-side liquidity
+      const impactFactor = 0.03; // 3% impact at 100% of pool depth
+      const dynamicSlippage = baseSlippage + Math.sqrt(tradeSizeRatio) * impactFactor;
+      
+      // Cap slippage at 20% (catastrophic but prevents negative values)
+      const cappedSlippage = Math.min(dynamicSlippage, 0.20);
+      const slippageAmount = tradeValue * cappedSlippage;
+      
+      
+      return Amount.create(slippageAmount);
+    } else {
+      // Static slippage (legacy behavior)
+      const slippagePercent = this.slippageBps / 10000;
+      const slippageAmount = tradeValue * slippagePercent;
+      return Amount.create(slippageAmount);
+    }
   }
 
   /**
@@ -122,22 +146,31 @@ export class CostCalculator {
       return Amount.create(0); // No pool fee configured
     }
 
-    // Calculate position value in USD
-    const positionValue = position.marketValue().value;
+    // For LP positions, the amount is already in USD value (LP tokens priced at $1.00)
+    // For non-LP positions, calculate market value
+    const isPairPosition = position.asset.includes('-');
+    const positionValue = isPairPosition 
+      ? position.amount.value  // LP positions: amount is already USD value
+      : position.marketValue().value;  // Non-LP: calculate market value
     
     // Estimate swap notional: typically need to swap ~50% of position value to rebalance
     // This is a conservative estimate - actual swap amount depends on price deviation
     const estimatedSwapNotional = positionValue * 0.5;
     
     // Pool fee = swap notional * fee tier
-    // Fee tier is already a decimal (e.g., 0.003 = 0.3%)
+    // Fee tier is already a decimal (e.g., 0.003 = 0.3%, 0.0005 = 0.05%)
     const poolFeeCost = estimatedSwapNotional * this.poolFeeTier;
     
-    return Amount.create(poolFeeCost);
+    // Cap the fee cost to a reasonable maximum (e.g., 1% of position value)
+    // This prevents unrealistic costs if poolFeeTier is misconfigured
+    const maxFeeCost = positionValue * 0.01;
+    const finalFeeCost = Math.min(poolFeeCost, maxFeeCost);
+    
+    return Amount.create(finalFeeCost);
   }
 
   /**
-   * Estimate total rebalance cost (gas + pool fees)
+   * Estimate total rebalance cost (gas + pool fees + slippage)
    * @param position The LP position being rebalanced
    * @param marketPrice Current market price
    * @returns Total rebalance cost in USD
@@ -145,7 +178,40 @@ export class CostCalculator {
   async estimateTotalRebalanceCost(position: Position, marketPrice: Price): Promise<Amount> {
     const gasCost = await this.estimateGasCostUSD();
     const poolFeeCost = this.estimateRebalanceFeeCost(position, marketPrice);
-    return Amount.create(gasCost + poolFeeCost.value);
+    
+    // Calculate realistic slippage for concentrated liquidity rebalancing
+    // For Uni V3, rebalancing means: remove liquidity from old range, swap to rebalance, add to new range
+    // The swap amount is typically small (just rebalancing the 50/50 ratio after price moved)
+    const positionValue = position.marketValue().value;
+    
+    // Estimate swap size: when price moves, you need to rebalance the ratio
+    // For a 1% price move, you'd swap ~1-2% of position value to maintain 50/50
+    // For concentrated positions, this is amplified, so use ~5% of position value as swap size
+    const estimatedSwapSize = positionValue * 0.05; // 5% of position for rebalancing swaps
+    
+    // Calculate actual price impact using constant product formula
+    // Price impact = (tradeSize / poolLiquidity) for small trades
+    // For larger trades, use: impact = 1 - (1 - tradeSize/poolDepth)^0.5
+    let slippageCost = 0;
+    
+    if (this.useDynamicSlippage && this.poolTVL && this.poolTVL > 0) {
+      const poolDepth = this.poolTVL / 2; // Single-sided liquidity depth
+      const tradeSizeRatio = estimatedSwapSize / poolDepth;
+      
+      // Constant product AMM price impact formula
+      // For x*y=k, when you trade Δx, price impact = Δx / (x + Δx)
+      const priceImpactPercent = tradeSizeRatio / (1 + tradeSizeRatio);
+      
+      // Slippage cost = average price impact * trade size
+      // Average impact is half of the max impact (linear approximation)
+      slippageCost = estimatedSwapSize * priceImpactPercent * 0.5;
+    } else {
+      // Fallback: use static slippage model
+      const staticSlippage = this.slippageBps / 10000;
+      slippageCost = estimatedSwapSize * staticSlippage;
+    }
+    
+    return Amount.create(gasCost + poolFeeCost.value + slippageCost);
   }
 
   /**
