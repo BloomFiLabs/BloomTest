@@ -6,10 +6,7 @@ import { UniswapV3Adapter } from './infrastructure/adapters/data/TheGraphDataAda
 import { AaveV3Adapter } from './infrastructure/adapters/data/AaveV3Adapter';
 import { StrategyOptimizer } from './domain/services/StrategyOptimizer';
 import {
-  VolatilePairStrategy,
-  StrategyMode,
-  FundingRateCaptureStrategy,
-  OptionsOverlayStrategy,
+  TrendAwareStrategy,
   FundingRateCaptureStrategy,
 } from './infrastructure/adapters/strategies';
 import { HyperliquidAdapter } from './infrastructure/adapters/data/HyperliquidAdapter';
@@ -66,7 +63,13 @@ async function main() {
   const wbtcUsdtAdapter = new UniswapV3Adapter({ apiKey, token0Symbol: 'WBTC', token1Symbol: 'USDT', useUrlAuth: true });
   const aaveAdapter = new AaveV3Adapter({ apiKey });
   const hyperliquidAdapter = new HyperliquidAdapter();
-  
+
+  // Use recent date range with available data (last 90 days)
+  const endDate = new Date();
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - 90);
+  const initialCapital = 100000;
+
   // Preload funding history to avoid rate limits
   try {
       await hyperliquidAdapter.preloadFundingHistory('ETH', startDate, endDate);
@@ -75,12 +78,6 @@ async function main() {
   }
 
   const useCase = new RunBacktestUseCase();
-
-  // Use recent date range with available data (last 90 days)
-  const endDate = new Date();
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - 90);
-  const initialCapital = 100000;
   
   console.log(`📅 Date Range: ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`);
   console.log(`💰 Initial Capital: $${initialCapital.toLocaleString()}\n`);
@@ -143,55 +140,67 @@ async function main() {
     strategies: [
       // ETH/USDC
       {
-        strategy: new VolatilePairStrategy('eth-usdc-opt', 'ETH/USDC Optimal'),
+        strategy: new TrendAwareStrategy('eth-usdc-trend', 'ETH/USDC Trend Aware'),
         config: mergeWithDefaults('volatile-pair', {
           pair: 'ETH-USDC',
-          mode: StrategyMode.SPEED,
-          checkIntervalHours: optimalConfigs.get('ETH-USDC')?.interval || 12, // Use dynamic optimal
-          ammFeeAPR: ethUsdcAPR,
           allocation: 0.20,
-          dataAdapter: ethUsdcAdapter,
+          ammFeeAPR: ethUsdcAPR,
+          incentiveAPR: 0,
+          fundingAPR: 0,
+          costModel: {
+            gasCostPerRebalance: 0.50, // Base gas ≈ $0.50
+            poolFeeTier: 0.0005,
+          },
         }),
         allocation: 0.20,
       },
       // ETH/USDT
       {
-        strategy: new VolatilePairStrategy('eth-usdt-opt', 'ETH/USDT Optimal'),
+        strategy: new TrendAwareStrategy('eth-usdt-trend', 'ETH/USDT Trend Aware'),
         config: mergeWithDefaults('volatile-pair', {
           pair: 'ETH-USDT',
-          mode: StrategyMode.TANK,
-          checkIntervalHours: optimalConfigs.get('ETH-USDT')?.interval || 12, // Use dynamic optimal
-          ammFeeAPR: ethUsdtAPR,
           allocation: 0.20,
-          dataAdapter: ethUsdtAdapter,
+          ammFeeAPR: ethUsdtAPR,
+          incentiveAPR: 0,
+          fundingAPR: 0,
+          costModel: {
+            gasCostPerRebalance: 0.50,
+            poolFeeTier: 0.003,
+          },
         }),
         allocation: 0.20,
       },
       // WBTC/USDC
       {
-        strategy: new VolatilePairStrategy('wbtc-usdc-opt', 'WBTC/USDC Optimal'),
+        strategy: new TrendAwareStrategy('wbtc-usdc-trend', 'WBTC/USDC Trend Aware'),
         config: mergeWithDefaults('volatile-pair', {
           pair: 'WBTC-USDC',
-          mode: StrategyMode.TANK,
-          checkIntervalHours: optimalConfigs.get('WBTC-USDC')?.interval || 12, // Use dynamic optimal
-          ammFeeAPR: wbtcUsdcAPR,
           allocation: 0.20,
-          dataAdapter: wbtcUsdcAdapter,
+          ammFeeAPR: wbtcUsdcAPR,
+          incentiveAPR: 0,
+          fundingAPR: 0,
+          costModel: {
+            gasCostPerRebalance: 0.50,
+            poolFeeTier: 0.003,
+          },
         }),
         allocation: 0.20,
       },
       // WBTC/USDT
       {
-        strategy: new VolatilePairStrategy('wbtc-usdt-opt', 'WBTC/USDT Optimal'),
+        strategy: new TrendAwareStrategy('wbtc-usdt-trend', 'WBTC/USDT Trend Aware'),
         config: mergeWithDefaults('volatile-pair', {
           pair: 'WBTC-USDT',
-          mode: StrategyMode.HYBRID,
-          checkIntervalHours: optimalConfigs.get('WBTC-USDT')?.interval || 24, // Use dynamic optimal
+          allocation: 0.20,
           ammFeeAPR: wbtcUsdtAPR,
-          allocation: 0.25,
-          dataAdapter: wbtcUsdtAdapter,
+          incentiveAPR: 0,
+          fundingAPR: 0,
+          costModel: {
+            gasCostPerRebalance: 0.50,
+            poolFeeTier: 0.003,
+          },
         }),
-        allocation: 0.20, // Reduced from 0.25 to fit funding strategy
+        allocation: 0.20,
       },
       // Funding Rate Strategy (Hyperliquid + Aave)
       {

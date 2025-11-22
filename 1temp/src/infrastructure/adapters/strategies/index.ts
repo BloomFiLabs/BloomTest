@@ -6,3 +6,4 @@ export * from './FundingRateCaptureStrategy';
 export * from './OptionsOverlayStrategy';
 export * from './IVRegimeSwitcherStrategy';
 export * from './LeveragedRWACarryStrategy';
+export * from './TrendAwareStrategy';
