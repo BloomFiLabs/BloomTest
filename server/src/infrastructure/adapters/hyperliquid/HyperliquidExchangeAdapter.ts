@@ -913,16 +913,153 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
         throw new Error('Deposit amount must be greater than 0');
       }
 
-      this.logger.log(`Depositing $${amount.toFixed(2)} ${asset} to Hyperliquid...`);
+      // Minimum deposit is 5 USDC (per Bridge2 documentation)
+      if (amount < 5) {
+        throw new Error(`Deposit amount must be at least 5 USDC. Received: ${amount}`);
+      }
 
-      // Hyperliquid doesn't have a direct deposit API endpoint in the SDK
-      // Deposits are typically done by transferring funds to Hyperliquid's deposit address
-      // This would require on-chain interaction, which is outside the scope of the exchange adapter
-      // For now, we'll throw an error indicating this needs to be done externally
-      throw new Error(
-        'External deposits to Hyperliquid must be done by transferring funds to the deposit address on-chain. ' +
-        'This adapter does not support on-chain transactions. Please use a wallet or bridge contract.'
+      // Only USDC is supported for deposits via Bridge2
+      if (asset.toUpperCase() !== 'USDC') {
+        throw new Error(`Only USDC deposits are supported via Bridge2. Received: ${asset}`);
+      }
+
+      this.logger.log(`Depositing $${amount.toFixed(2)} ${asset} to Hyperliquid via Bridge2...`);
+
+      // Bridge2 contract addresses
+      const BRIDGE_CONTRACT_ADDRESS = '0x2df1c51e09aecf9cacb7bc98cb1742757f163df7'; // Arbitrum mainnet
+      const USDC_CONTRACT_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'; // USDC on Arbitrum
+      
+      // Get Arbitrum RPC URL
+      const arbitrumRpcUrl = this.configService.get<string>('ARBITRUM_RPC_URL') ||
+                             this.configService.get<string>('ARB_RPC_URL') ||
+                             'https://arb1.arbitrum.io/rpc'; // Public RPC fallback
+      
+      // Get private key for signing transactions
+      const privateKey = this.configService.get<string>('PRIVATE_KEY') || 
+                        this.configService.get<string>('HYPERLIQUID_PRIVATE_KEY');
+      if (!privateKey) {
+        throw new Error('PRIVATE_KEY or HYPERLIQUID_PRIVATE_KEY required for deposits');
+      }
+
+      const normalizedPrivateKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
+      const provider = new ethers.JsonRpcProvider(arbitrumRpcUrl);
+      const wallet = new ethers.Wallet(normalizedPrivateKey, provider);
+
+      this.logger.debug(
+        `Bridge deposit details:\n` +
+        `  Bridge contract: ${BRIDGE_CONTRACT_ADDRESS}\n` +
+        `  USDC contract: ${USDC_CONTRACT_ADDRESS}\n` +
+        `  Amount: ${amount} USDC\n` +
+        `  Wallet: ${wallet.address}\n` +
+        `  RPC: ${arbitrumRpcUrl}`
       );
+
+      // ERC20 ABI for USDC (approve, transfer, allowance, balanceOf, decimals)
+      const erc20Abi = [
+        'function approve(address spender, uint256 amount) external returns (bool)',
+        'function transfer(address to, uint256 amount) external returns (bool)',
+        'function allowance(address owner, address spender) external view returns (uint256)',
+        'function balanceOf(address account) external view returns (uint256)',
+        'function decimals() external view returns (uint8)',
+      ];
+
+      const usdcContract = new ethers.Contract(USDC_CONTRACT_ADDRESS, erc20Abi, wallet);
+
+      // Check USDC balance with retry logic (funds may be in transit from withdrawal)
+      // IMPORTANT: We deposit the ENTIRE available balance, not the requested amount,
+      // because withdrawal fees reduce the amount that actually arrives
+      const decimals = await usdcContract.decimals();
+      
+      const maxWaitTime = 300000; // 5 minutes maximum wait
+      const initialDelay = 2000; // 2 seconds initial delay
+      const maxDelay = 30000; // 30 seconds max delay between checks
+      const startTime = Date.now();
+      let attempt = 0;
+      let balanceFormatted = 0;
+      let balanceWei: bigint;
+      
+      // Wait for funds to arrive (at least the minimum deposit amount)
+      while (true) {
+        attempt++;
+        balanceWei = await usdcContract.balanceOf(wallet.address);
+        balanceFormatted = Number(ethers.formatUnits(balanceWei, decimals));
+        
+        this.logger.debug(
+          `Balance check attempt ${attempt}: ${balanceFormatted.toFixed(2)} USDC ` +
+          `(requested: ${amount.toFixed(2)} USDC, minimum: 5 USDC)`
+        );
+
+        // Wait until we have at least the minimum deposit amount (5 USDC)
+        if (balanceFormatted >= 5) {
+          this.logger.log(
+            `✅ Funds arrived. Available balance: ${balanceFormatted.toFixed(2)} USDC ` +
+            `(will deposit entire balance, not just requested ${amount.toFixed(2)} USDC)`
+          );
+          break;
+        }
+
+        const elapsed = Date.now() - startTime;
+        if (elapsed >= maxWaitTime) {
+          throw new Error(
+            `Insufficient USDC balance after ${Math.floor(elapsed / 1000)}s wait. ` +
+            `Required: 5 USDC (minimum), Available: ${balanceFormatted.toFixed(2)} USDC. ` +
+            `Funds may still be in transit from withdrawal.`
+          );
+        }
+
+        // Exponential backoff: 2s, 4s, 8s, 16s, capped at 30s
+        const delay = Math.min(initialDelay * Math.pow(2, attempt - 1), maxDelay);
+        const remaining = maxWaitTime - elapsed;
+        const waitTime = Math.min(delay, remaining);
+        
+        this.logger.warn(
+          `Waiting for funds to arrive (minimum 5 USDC required). ` +
+          `Current: ${balanceFormatted.toFixed(2)} USDC. ` +
+          `Waiting ${waitTime / 1000}s (attempt ${attempt}, ${Math.floor(elapsed / 1000)}s elapsed)...`
+        );
+        
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+
+      // Use the entire available balance (after withdrawal fees)
+      // This ensures we deposit whatever actually arrived, accounting for fees
+      const depositAmount = balanceFormatted;
+      const depositAmountWei = balanceWei;
+
+      // Check current allowance
+      const currentAllowance = await usdcContract.allowance(wallet.address, BRIDGE_CONTRACT_ADDRESS);
+      
+      // Approve bridge contract if needed (approve the full balance)
+      if (currentAllowance < depositAmountWei) {
+        this.logger.log(`Approving Bridge2 contract to spend ${depositAmount.toFixed(2)} USDC (full balance)...`);
+        const approveTx = await usdcContract.approve(BRIDGE_CONTRACT_ADDRESS, depositAmountWei);
+        this.logger.debug(`Approve transaction hash: ${approveTx.hash}`);
+        const approveReceipt = await approveTx.wait();
+        this.logger.log(`✅ Approval confirmed in block ${approveReceipt.blockNumber}`);
+      } else {
+        this.logger.debug(`Bridge contract already has sufficient allowance`);
+      }
+
+      // Transfer entire USDC balance to bridge contract
+      // Note: Bridge2 accepts direct transfers - sending USDC to the bridge contract credits the account
+      // We deposit the full balance to account for withdrawal fees reducing the amount
+      this.logger.log(
+        `Transferring ${depositAmount.toFixed(2)} USDC (full wallet balance) to Bridge2 contract... ` +
+        `(requested amount was ${amount.toFixed(2)} USDC, but depositing available balance after fees)`
+      );
+      const transferTx = await usdcContract.transfer(BRIDGE_CONTRACT_ADDRESS, depositAmountWei);
+      this.logger.debug(`Transfer transaction hash: ${transferTx.hash}`);
+      
+      // Wait for confirmation
+      const receipt = await transferTx.wait();
+      this.logger.log(
+        `✅ Deposit confirmed! Deposited ${depositAmount.toFixed(2)} USDC (full balance). ` +
+        `Transaction hash: ${receipt.hash}, Block: ${receipt.blockNumber}. ` +
+        `Funds should be credited to Hyperliquid account in <1 minute.`
+      );
+
+      // Return transaction hash
+      return receipt.hash;
     } catch (error: any) {
       if (error instanceof ExchangeError) {
         throw error;

@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ExchangeType } from '../../domain/value-objects/ExchangeConfig';
 import { PerpOrderRequest, PerpOrderResponse } from '../../domain/value-objects/PerpOrder';
 import { PerpPosition } from '../../domain/entities/PerpPosition';
@@ -11,6 +12,7 @@ import {
 import { AsterExchangeAdapter } from '../../infrastructure/adapters/aster/AsterExchangeAdapter';
 import { LighterExchangeAdapter } from '../../infrastructure/adapters/lighter/LighterExchangeAdapter';
 import { HyperliquidExchangeAdapter } from '../../infrastructure/adapters/hyperliquid/HyperliquidExchangeAdapter';
+import { MockExchangeAdapter } from '../../infrastructure/adapters/mock/MockExchangeAdapter';
 import { PerpKeeperPerformanceLogger } from '../../infrastructure/logging/PerpKeeperPerformanceLogger';
 import { ExchangeBalanceRebalancer, RebalanceResult } from '../../domain/services/ExchangeBalanceRebalancer';
 import { ArbitrageOpportunity } from '../../domain/services/FundingRateAggregator';
@@ -31,11 +33,37 @@ export class PerpKeeperService implements IPerpKeeperService {
     private readonly hyperliquidAdapter: HyperliquidExchangeAdapter,
     private readonly performanceLogger: PerpKeeperPerformanceLogger,
     private readonly balanceRebalancer: ExchangeBalanceRebalancer,
+    private readonly configService: ConfigService,
   ) {
-    // Initialize adapters map
-    this.adapters.set(ExchangeType.ASTER, asterAdapter);
-    this.adapters.set(ExchangeType.LIGHTER, lighterAdapter);
-    this.adapters.set(ExchangeType.HYPERLIQUID, hyperliquidAdapter);
+    // Check if test mode is enabled
+    const testMode = this.configService.get<string>('TEST_MODE') === 'true';
+    
+    if (testMode) {
+      // Use mock adapters in test mode (they wrap real adapters for market data)
+      const mockCapital = parseFloat(
+        this.configService.get<string>('MOCK_CAPITAL_USD') || '5000000'
+      );
+      this.logger.log(`🧪 TEST MODE ENABLED - Using mock adapters with $${mockCapital.toFixed(2)} capital`);
+      this.logger.log(`   Mock adapters use REAL market data (prices, order books) but track FAKE positions/balances`);
+      
+      this.adapters.set(
+        ExchangeType.ASTER, 
+        new MockExchangeAdapter(this.configService, ExchangeType.ASTER, asterAdapter, lighterAdapter, hyperliquidAdapter)
+      );
+      this.adapters.set(
+        ExchangeType.LIGHTER, 
+        new MockExchangeAdapter(this.configService, ExchangeType.LIGHTER, asterAdapter, lighterAdapter, hyperliquidAdapter)
+      );
+      this.adapters.set(
+        ExchangeType.HYPERLIQUID, 
+        new MockExchangeAdapter(this.configService, ExchangeType.HYPERLIQUID, asterAdapter, lighterAdapter, hyperliquidAdapter)
+      );
+    } else {
+      // Use real adapters
+      this.adapters.set(ExchangeType.ASTER, asterAdapter);
+      this.adapters.set(ExchangeType.LIGHTER, lighterAdapter);
+      this.adapters.set(ExchangeType.HYPERLIQUID, hyperliquidAdapter);
+    }
 
     this.logger.log(`PerpKeeperService initialized with ${this.adapters.size} exchange adapters`);
   }
@@ -62,6 +90,12 @@ export class PerpKeeperService implements IPerpKeeperService {
       response.isFilled(),
       !response.isSuccess(),
     );
+    
+    // Track volume (USD value of trade)
+    if (response.isFilled() && response.filledSize && response.averageFillPrice) {
+      const tradeVolume = response.filledSize * response.averageFillPrice;
+      this.performanceLogger.recordTradeVolume(tradeVolume);
+    }
     
     return response;
   }

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ExchangeType } from '../value-objects/ExchangeConfig';
 import { AsterFundingDataProvider } from '../../infrastructure/adapters/aster/AsterFundingDataProvider';
 import { LighterFundingDataProvider } from '../../infrastructure/adapters/lighter/LighterFundingDataProvider';
@@ -15,7 +15,7 @@ export interface ExchangeFundingRate {
   currentRate: number;
   predictedRate: number;
   markPrice: number;
-  openInterest: number;
+  openInterest: number | undefined; // undefined when OI is unavailable
   timestamp: Date;
 }
 
@@ -36,14 +36,16 @@ export interface FundingRateComparison {
  */
 export interface ArbitrageOpportunity {
   symbol: string;
-  longExchange: ExchangeType; // Exchange to go long on (should have negative funding rate to receive funding)
-  shortExchange: ExchangeType; // Exchange to go short on (should have positive funding rate to receive funding)
-  longRate: number; // Funding rate on long exchange (negative = we receive, positive = we pay)
-  shortRate: number; // Funding rate on short exchange (positive = we receive, negative = we pay)
+  longExchange: ExchangeType; // Exchange to go long on (receives funding)
+  shortExchange: ExchangeType; // Exchange to go short on (receives funding)
+  longRate: number;
+  shortRate: number;
   spread: number; // Absolute difference
   expectedReturn: number; // Annualized return estimate
   longMarkPrice?: number; // Mark price for long exchange (from funding rate data)
   shortMarkPrice?: number; // Mark price for short exchange (from funding rate data)
+  longOpenInterest?: number; // Open interest for long exchange (USD)
+  shortOpenInterest?: number; // Open interest for short exchange (USD)
   timestamp: Date;
 }
 
@@ -59,99 +61,6 @@ export interface ExchangeSymbolMapping {
 }
 
 /**
- * Allowed assets with high liquidity - orchestrator will only process these
- * Assets must be available on at least 2 perpetual exchanges
- * Auto-discovered from Lighter + Hyperliquid (85 common assets)
- */
-const ALLOWED_ASSETS = new Set([
-  '0G',
-  '2Z',
-  'AAVE',
-  'ADA',
-  'AERO',
-  'AI16Z',
-  'APEX',
-  'APT',
-  'ARB',
-  'ASTER',
-  'AVAX',
-  'AVNT',
-  'BCH',
-  'BERA',
-  'BNB',
-  'BTC',
-  'CC',
-  'CRV',
-  'DOGE',
-  'DOT',
-  'DYDX',
-  'EIGEN',
-  'ENA',
-  'ETH',
-  'ETHFI',
-  'FARTCOIN',
-  'FIL',
-  'GMX',
-  'GRASS',
-  'HBAR',
-  'HYPE',
-  'ICP',
-  'IP',
-  'JUP',
-  'KAITO',
-  'LAUNCHCOIN',
-  'LDO',
-  'LINEA',
-  'LINK',
-  'LTC',
-  'MEGA',
-  'MET',
-  'MKR',
-  'MNT',
-  'MON',
-  'MORPHO',
-  'NEAR',
-  'ONDO',
-  'OP',
-  'PAXG',
-  'PENDLE',
-  'PENGU',
-  'POL',
-  'POPCAT',
-  'PROVE',
-  'PUMP',
-  'PYTH',
-  'RESOLV',
-  'S',
-  'SEI',
-  'SKY',
-  'SOL',
-  'SPX',
-  'STBL',
-  'STRK',
-  'SUI',
-  'SYRUP',
-  'TAO',
-  'TIA',
-  'TON',
-  'TRUMP',
-  'TRX',
-  'UNI',
-  'VIRTUAL',
-  'VVV',
-  'WIF',
-  'WLD',
-  'WLFI',
-  'XPL',
-  'XRP',
-  'YZY',
-  'ZEC',
-  'ZK',
-  'ZORA',
-  'ZRO',
-]);
-
-/**
  * FundingRateAggregator - Aggregates funding rates from all exchanges
  */
 @Injectable()
@@ -164,6 +73,7 @@ export class FundingRateAggregator {
     private readonly lighterProvider: LighterFundingDataProvider,
     private readonly hyperliquidProvider: HyperLiquidDataProvider,
     private readonly hyperliquidWsProvider: HyperLiquidWebSocketProvider,
+    @Optional() private readonly lighterWsProvider?: any, // LighterWebSocketProvider (optional to avoid circular dependency)
   ) {}
 
   /**
@@ -235,6 +145,37 @@ export class FundingRateAggregator {
         this.logger.log(`Subscribed to ${hyperliquidAssets.length} Hyperliquid assets via WebSocket`);
       }
 
+      // Subscribe to all Lighter markets via WebSocket (for real-time OI data)
+      // Always subscribe (even if not connected yet - will subscribe on reconnect)
+      if (lighterMarkets.length > 0) {
+        const marketIndexes = lighterMarkets.map(m => m.marketIndex);
+        
+        // Always call subscribeToMarkets - it handles connection state internally
+        this.lighterWsProvider?.subscribeToMarkets(marketIndexes);
+        
+        // Always ensure subscriptions, even if check fails (handles race conditions)
+        if (this.lighterWsProvider?.isWsConnected()) {
+          this.logger.log(`📡 LIGHTER: Subscribed to ${marketIndexes.length} markets via WebSocket`);
+          // Force ensure all markets are subscribed (in case some were skipped)
+          setTimeout(() => {
+            this.lighterWsProvider?.ensureAllMarketsSubscribed();
+          }, 200);
+        } else {
+          this.logger.log(`📡 LIGHTER: Queued ${marketIndexes.length} markets for WebSocket subscription (will subscribe when connected)`);
+          // Also set up a delayed check in case websocket connects shortly after
+          setTimeout(() => {
+            if (this.lighterWsProvider?.isWsConnected()) {
+              this.logger.log(`📡 LIGHTER: WebSocket now connected - ensuring ${marketIndexes.length} markets are subscribed`);
+              this.lighterWsProvider?.ensureAllMarketsSubscribed();
+            } else {
+              // Even if check fails, try to ensure subscriptions (handles race conditions)
+              this.logger.debug(`📡 LIGHTER: WebSocket check failed but attempting to ensure subscriptions anyway`);
+              this.lighterWsProvider?.ensureAllMarketsSubscribed();
+            }
+          }, 2000);
+        }
+      }
+
       // Find common assets (available on at least 2 exchanges)
       const commonAssets: string[] = [];
       for (const [normalized, mapping] of this.symbolMappings.entries()) {
@@ -244,23 +185,14 @@ export class FundingRateAggregator {
         if (mapping.hyperliquidSymbol) exchangeCount++;
 
         // Only include if available on at least 2 exchanges (required for arbitrage)
-        // AND if it's in the allowed assets list
-        if (exchangeCount >= 2 && ALLOWED_ASSETS.has(normalized)) {
+        if (exchangeCount >= 2) {
           commonAssets.push(normalized);
-          this.logger.debug(
-            `Mapped ${normalized}: Aster=${mapping.asterSymbol || 'N/A'}, ` +
-            `Lighter=${mapping.lighterMarketIndex !== undefined ? `index ${mapping.lighterMarketIndex}` : 'N/A'}, ` +
-            `Hyperliquid=${mapping.hyperliquidSymbol || 'N/A'}`
-          );
-        } else if (exchangeCount >= 2) {
-          this.logger.debug(
-            `Skipping ${normalized} (not in allowed assets list)`
-          );
+          // Silenced mapping logs - too verbose
         }
       }
 
       this.logger.log(
-        `Discovered ${commonAssets.length} common assets (filtered to high-liquidity assets): ${commonAssets.join(', ')}`
+        `Discovered ${commonAssets.length} common assets available on 2+ exchanges: ${commonAssets.join(', ')}`
       );
 
       return commonAssets.sort();
@@ -316,6 +248,9 @@ export class FundingRateAggregator {
         const asterRate = await this.asterProvider.getCurrentFundingRate(asterSymbol);
         const asterPredicted = await this.asterProvider.getPredictedFundingRate(asterSymbol);
         const asterMarkPrice = await this.asterProvider.getMarkPrice(asterSymbol);
+        
+        // OI is critical - if it fails, log error and skip
+        try {
         const asterOI = await this.asterProvider.getOpenInterest(asterSymbol);
 
         rates.push({
@@ -327,10 +262,16 @@ export class FundingRateAggregator {
           openInterest: asterOI,
           timestamp: new Date(),
         });
+        } catch (oiError: any) {
+          const errorMsg = oiError.message || String(oiError);
+          this.logger.error(`Failed to get Aster OI for ${symbol} (${asterSymbol}): ${errorMsg}`);
+          this.logger.error(`  ⚠️  Skipping Aster for ${symbol} - OI is required but unavailable`);
+          // Don't add rate entry if OI is unavailable - it will show as N/A
+        }
       }
     } catch (error: any) {
-      // Only log actual errors (not missing mappings)
-      if (error.message && !error.message.includes('not found') && !error.message.includes('No funding rates')) {
+      // Only log actual errors (not missing mappings or OI errors which are handled above)
+      if (error.message && !error.message.includes('not found') && !error.message.includes('No funding rates') && !error.message.includes('OI')) {
         this.logger.error(`Failed to get Aster funding rate for ${symbol}: ${error.message}`);
       }
     }
@@ -344,38 +285,51 @@ export class FundingRateAggregator {
       if (marketIndex === undefined) {
         // No mapping - skip silently
       } else {
-        const lighterRate = await this.lighterProvider.getCurrentFundingRate(marketIndex);
-        
-        // Try to get additional data, but don't fail if mark price is unavailable
-        try {
-          const lighterPredicted = await this.lighterProvider.getPredictedFundingRate(marketIndex);
-          const lighterMarkPrice = await this.lighterProvider.getMarkPrice(marketIndex);
-          const lighterOI = await this.lighterProvider.getOpenInterest(marketIndex);
+          const lighterRate = await this.lighterProvider.getCurrentFundingRate(marketIndex);
+          
+          // Try to get additional data
+          // OI is critical - if it fails, we should log the error and skip this exchange
+          try {
+            const lighterPredicted = await this.lighterProvider.getPredictedFundingRate(marketIndex);
+            
+            // Get OI and mark price together (more efficient - single API call)
+            const { openInterest: lighterOI, markPrice: lighterMarkPrice } = 
+              await this.lighterProvider.getOpenInterestAndMarkPrice(marketIndex);
 
-          rates.push({
-            exchange: ExchangeType.LIGHTER,
-            symbol,
-            currentRate: lighterRate,
-            predictedRate: lighterPredicted,
-            markPrice: lighterMarkPrice,
-            openInterest: lighterOI,
-            timestamp: new Date(),
-          });
-        } catch (markPriceError: any) {
-          // If mark price fails but we have funding rate, still add it (mark price might not be critical)
+            rates.push({
+              exchange: ExchangeType.LIGHTER,
+              symbol,
+              currentRate: lighterRate,
+              predictedRate: lighterPredicted,
+              markPrice: lighterMarkPrice,
+              openInterest: lighterOI,
+              timestamp: new Date(),
+            });
+        } catch (dataError: any) {
+          // Log the error with full context
+          const errorMsg = dataError.message || String(dataError);
+          this.logger.error(`Failed to get Lighter data for ${symbol} (market ${marketIndex}): ${errorMsg}`);
+          
+          // If it's an OI error, we can't proceed - OI is required for liquidity checks
+          if (errorMsg.includes('OI') || errorMsg.includes('open interest') || errorMsg.includes('openInterest')) {
+            this.logger.error(`  ⚠️  Skipping Lighter for ${symbol} - OI is required but unavailable`);
+            // Don't add rate entry if OI is unavailable - it will show as N/A
+          } else {
+            // For other errors (mark price, predicted rate), we can still add with defaults
           // Only add if funding rate is non-zero (indicates active market)
           if (lighterRate !== 0) {
+              this.logger.warn(`  ⚠️  Adding Lighter rate for ${symbol} with default values (mark price/OI unavailable)`);
             rates.push({
               exchange: ExchangeType.LIGHTER,
               symbol,
               currentRate: lighterRate,
               predictedRate: lighterRate, // Use current as predicted if we can't get predicted
               markPrice: 0, // Will be skipped in execution if needed
-              openInterest: 0,
+                openInterest: undefined, // Explicitly undefined so it shows as N/A
               timestamp: new Date(),
             });
+            }
           }
-          // If funding rate is 0 and mark price unavailable, skip silently
         }
       }
     } catch (error: any) {
@@ -397,6 +351,9 @@ export class FundingRateAggregator {
         const hlRate = await this.hyperliquidProvider.getCurrentFundingRate(hlSymbol);
         const hlPredicted = await this.hyperliquidProvider.getPredictedFundingRate(hlSymbol);
         const hlMarkPrice = await this.hyperliquidProvider.getMarkPrice(hlSymbol);
+        
+        // OI is critical - if it fails, log error and skip
+        try {
         const hlOI = await this.hyperliquidProvider.getOpenInterest(hlSymbol);
 
         rates.push({
@@ -408,10 +365,16 @@ export class FundingRateAggregator {
           openInterest: hlOI,
           timestamp: new Date(),
         });
+        } catch (oiError: any) {
+          const errorMsg = oiError.message || String(oiError);
+          this.logger.error(`Failed to get Hyperliquid OI for ${symbol} (${hlSymbol}): ${errorMsg}`);
+          this.logger.error(`  ⚠️  Skipping Hyperliquid for ${symbol} - OI is required but unavailable`);
+          // Don't add rate entry if OI is unavailable - it will show as N/A
+        }
       }
     } catch (error: any) {
-      // Only log actual errors (not missing mappings)
-      if (error.message && !error.message.includes('not found') && !error.message.includes('No funding rates')) {
+      // Only log actual errors (not missing mappings or OI errors which are handled above)
+      if (error.message && !error.message.includes('not found') && !error.message.includes('No funding rates') && !error.message.includes('OI')) {
         this.logger.error(`Failed to get Hyperliquid funding rate for ${symbol}: ${error.message}`);
       }
     }
@@ -489,20 +452,16 @@ export class FundingRateAggregator {
 
             const symbolOpportunities: ArbitrageOpportunity[] = [];
 
-            // Find best long opportunity (most negative rate)
-            // When funding rate is negative, longs RECEIVE funding (shorts pay longs)
-            // So we want to go LONG where rate is most negative (we receive the most)
-            const negativeRates = comparison.rates.filter((r) => r.currentRate < 0);
-            const bestLong = negativeRates.length > 0
-              ? negativeRates.reduce((best, current) => current.currentRate < best.currentRate ? current : best)
+            // Find best long opportunity (highest positive rate)
+            const positiveRates = comparison.rates.filter((r) => r.currentRate > 0);
+            const bestLong = positiveRates.length > 0 
+              ? positiveRates.reduce((best, current) => current.currentRate > best.currentRate ? current : best)
               : null;
 
-            // Find best short opportunity (highest positive rate)
-            // When funding rate is positive, shorts RECEIVE funding (longs pay shorts)
-            // So we want to go SHORT where rate is most positive (we receive the most)
-            const positiveRates = comparison.rates.filter((r) => r.currentRate > 0);
-            const bestShort = positiveRates.length > 0 
-              ? positiveRates.reduce((best, current) => current.currentRate > best.currentRate ? current : best)
+            // Find best short opportunity (lowest/most negative rate)
+            const negativeRates = comparison.rates.filter((r) => r.currentRate < 0);
+            const bestShort = negativeRates.length > 0
+              ? negativeRates.reduce((best, current) => current.currentRate < best.currentRate ? current : best)
               : null;
 
             // If we have both long and short opportunities, create arbitrage
@@ -526,13 +485,14 @@ export class FundingRateAggregator {
                   expectedReturn,
                   longMarkPrice: bestLong.markPrice > 0 ? bestLong.markPrice : undefined,
                   shortMarkPrice: bestShort.markPrice > 0 ? bestShort.markPrice : undefined,
+                  longOpenInterest: bestLong.openInterest !== undefined && bestLong.openInterest > 0 ? bestLong.openInterest : undefined,
+                  shortOpenInterest: bestShort.openInterest !== undefined && bestShort.openInterest > 0 ? bestShort.openInterest : undefined,
                   timestamp: new Date(),
                 });
               }
             }
 
-            // Also check for simple spread arbitrage (long on lowest/most negative, short on highest/most positive)
-            // Long on most negative rate (receive funding), Short on most positive rate (receive funding)
+            // Also check for simple spread arbitrage (long on highest, short on lowest)
             if (comparison.highestRate && comparison.lowestRate && 
                 comparison.highestRate.exchange !== comparison.lowestRate.exchange) {
               const spread = comparison.highestRate.currentRate - comparison.lowestRate.currentRate;
@@ -543,21 +503,23 @@ export class FundingRateAggregator {
                 const periodsPerYear = periodsPerDay * 365;
                 const expectedReturn = spread * periodsPerYear;
 
-                const highestRate = comparison.highestRate; // Most positive (go SHORT here to receive)
-                const lowestRate = comparison.lowestRate;  // Most negative (go LONG here to receive)
+                const highestRate = comparison.highestRate;
+                const lowestRate = comparison.lowestRate;
                 const highestMarkPrice = highestRate.markPrice > 0 ? highestRate.markPrice : undefined;
                 const lowestMarkPrice = lowestRate.markPrice > 0 ? lowestRate.markPrice : undefined;
 
                 symbolOpportunities.push({
                   symbol,
-                  longExchange: lowestRate.exchange,   // Long on most negative (receive funding)
-                  shortExchange: highestRate.exchange, // Short on most positive (receive funding)
-                  longRate: lowestRate.currentRate,
-                  shortRate: highestRate.currentRate,
+                  longExchange: highestRate.exchange,
+                  shortExchange: lowestRate.exchange,
+                  longRate: highestRate.currentRate,
+                  shortRate: lowestRate.currentRate,
                   spread,
                   expectedReturn,
-                  longMarkPrice: lowestMarkPrice,
-                  shortMarkPrice: highestMarkPrice,
+                  longMarkPrice: highestMarkPrice,
+                  shortMarkPrice: lowestMarkPrice,
+                  longOpenInterest: highestRate.openInterest !== undefined && highestRate.openInterest > 0 ? highestRate.openInterest : undefined,
+                  shortOpenInterest: lowestRate.openInterest !== undefined && lowestRate.openInterest > 0 ? lowestRate.openInterest : undefined,
                   timestamp: new Date(),
                 });
               }

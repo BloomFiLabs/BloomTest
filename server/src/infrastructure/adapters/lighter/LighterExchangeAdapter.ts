@@ -87,8 +87,53 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
     if (!this.marketHelpers.has(marketIndex)) {
       await this.ensureInitialized();
       const market = new MarketHelper(marketIndex, this.orderApi!);
-      await market.initialize();
-      this.marketHelpers.set(marketIndex, market);
+      
+      // Add retry logic with exponential backoff for market config fetch (rate limiting)
+      const maxRetries = 6;
+      const baseDelay = 2000; // 2 seconds base delay
+      const maxDelay = 60000; // 60 seconds max delay
+      let lastError: any = null;
+      
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          if (attempt > 0) {
+            // Exponential backoff with jitter: 2s, 4s, 8s, 16s, 32s, 60s (capped)
+            const exponentialDelay = Math.min(baseDelay * Math.pow(2, attempt - 1), maxDelay);
+            const jitter = exponentialDelay * 0.2 * (Math.random() * 2 - 1);
+            const delay = Math.max(1000, exponentialDelay + jitter);
+            
+            this.logger.debug(
+              `Retrying market config fetch for market ${marketIndex} after ${Math.floor(delay / 1000)}s ` +
+              `(attempt ${attempt + 1}/${maxRetries})`
+            );
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+          
+          await market.initialize();
+          this.marketHelpers.set(marketIndex, market);
+          return market;
+        } catch (error: any) {
+          lastError = error;
+          const errorMsg = error?.message || String(error);
+          const isRateLimit = errorMsg.includes('Too Many Requests') || 
+                             errorMsg.includes('429') ||
+                             errorMsg.includes('rate limit');
+          
+          if (isRateLimit && attempt < maxRetries - 1) {
+            this.logger.warn(
+              `Market config fetch rate limited for market ${marketIndex} ` +
+              `(attempt ${attempt + 1}/${maxRetries}): ${errorMsg}. Will retry.`
+            );
+            continue;
+          }
+          
+          // Not retryable or max retries reached
+          throw error;
+        }
+      }
+      
+      // Should never reach here, but just in case
+      throw lastError || new Error(`Failed to initialize market helper for market ${marketIndex}`);
     }
     return this.marketHelpers.get(marketIndex)!;
   }
@@ -215,95 +260,165 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
   }
 
   async placeOrder(request: PerpOrderRequest): Promise<PerpOrderResponse> {
-    try {
-      await this.ensureInitialized();
-
-      const marketIndex = await this.getMarketIndex(request.symbol);
-      const market = await this.getMarketHelper(marketIndex);
-
-      const isBuy = request.side === OrderSide.LONG;
-      const isAsk = !isBuy;
-
-      // Convert size to market units
-      const baseAmount = market.amountToUnits(request.size);
-
-      let orderParams: any;
-      if (request.type === OrderType.MARKET) {
-        // For market orders, we need to use a limit order with current market price
-        // Cast to any since SDK types may be incomplete (script shows this works)
-        const orderBook = await this.orderApi!.getOrderBookDetails({ marketIndex: marketIndex } as any) as any;
-        const price = isBuy 
-          ? parseFloat(orderBook.bestAsk?.price || '0')
-          : parseFloat(orderBook.bestBid?.price || '0');
+    // Add retry logic with exponential backoff for order placement (rate limiting)
+    const maxRetries = 6;
+    const baseDelay = 2000; // 2 seconds base delay
+    const maxDelay = 60000; // 60 seconds max delay
+    let lastError: any = null;
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        if (attempt > 0) {
+          // Exponential backoff with jitter: 2s, 4s, 8s, 16s, 32s, 60s (capped)
+          const exponentialDelay = Math.min(baseDelay * Math.pow(2, attempt - 1), maxDelay);
+          const jitter = exponentialDelay * 0.2 * (Math.random() * 2 - 1);
+          const delay = Math.max(1000, exponentialDelay + jitter);
+          
+          this.logger.warn(
+            `Retrying order placement for ${request.symbol} after ${Math.floor(delay / 1000)}s ` +
+            `(attempt ${attempt + 1}/${maxRetries})`
+          );
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
         
-        orderParams = {
-          marketIndex,
-          clientOrderIndex: Date.now(),
-          baseAmount,
-          price: market.priceToUnits(price),
-          isAsk,
-          orderType: LighterOrderType.MARKET,
-          orderExpiry: Date.now() + 3600000, // 1 hour expiry
-        };
-      } else {
-        // Limit order
-        if (!request.price) {
-          throw new Error('Limit price is required for LIMIT orders');
+        await this.ensureInitialized();
+
+        const marketIndex = await this.getMarketIndex(request.symbol);
+        const market = await this.getMarketHelper(marketIndex);
+
+        const isBuy = request.side === OrderSide.LONG;
+        const isAsk = !isBuy;
+
+        // Convert size to market units
+        const baseAmount = market.amountToUnits(request.size);
+
+        let orderParams: any;
+        if (request.type === OrderType.MARKET) {
+          // For market orders, we need to use a limit order with current market price
+          // Add retry logic for order book fetch
+          let orderBook: any;
+          const orderBookMaxRetries = 5;
+          for (let obAttempt = 0; obAttempt < orderBookMaxRetries; obAttempt++) {
+            try {
+              if (obAttempt > 0) {
+                const obDelay = Math.min(baseDelay * Math.pow(2, obAttempt - 1), maxDelay);
+                const obJitter = obDelay * 0.2 * (Math.random() * 2 - 1);
+                const delay = Math.max(1000, obDelay + obJitter);
+                this.logger.debug(`Retrying order book fetch (attempt ${obAttempt + 1}/${orderBookMaxRetries})`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+              }
+              // Cast to any since SDK types may be incomplete (script shows this works)
+              orderBook = await this.orderApi!.getOrderBookDetails({ marketIndex: marketIndex } as any) as any;
+              break;
+            } catch (obError: any) {
+              const obErrorMsg = obError?.message || String(obError);
+              const isObRateLimit = obErrorMsg.includes('Too Many Requests') || 
+                                    obErrorMsg.includes('429') ||
+                                    obErrorMsg.includes('rate limit');
+              if (isObRateLimit && obAttempt < orderBookMaxRetries - 1) {
+                continue;
+              }
+              throw obError;
+            }
+          }
+          
+          const price = isBuy 
+            ? parseFloat(orderBook.bestAsk?.price || '0')
+            : parseFloat(orderBook.bestBid?.price || '0');
+          
+          orderParams = {
+            marketIndex,
+            clientOrderIndex: Date.now(),
+            baseAmount,
+            price: market.priceToUnits(price),
+            isAsk,
+            orderType: LighterOrderType.MARKET,
+            orderExpiry: Date.now() + 3600000, // 1 hour expiry
+          };
+        } else {
+          // Limit order
+          if (!request.price) {
+            throw new Error('Limit price is required for LIMIT orders');
+          }
+
+          orderParams = {
+            marketIndex,
+            clientOrderIndex: Date.now(),
+            baseAmount,
+            price: market.priceToUnits(request.price),
+            isAsk,
+            orderType: LighterOrderType.LIMIT,
+            orderExpiry: Date.now() + 3600000, // 1 hour expiry
+          };
         }
 
-        orderParams = {
-          marketIndex,
-          clientOrderIndex: Date.now(),
-          baseAmount,
-          price: market.priceToUnits(request.price),
-          isAsk,
-          orderType: LighterOrderType.LIMIT,
-          orderExpiry: Date.now() + 3600000, // 1 hour expiry
-        };
-      }
+        const result = await this.signerClient!.createUnifiedOrder(orderParams);
 
-      const result = await this.signerClient!.createUnifiedOrder(orderParams);
+        if (!result.success) {
+          const errorMsg = result.mainOrder.error || 'Order creation failed';
+          throw new Error(errorMsg);
+        }
 
-      if (!result.success) {
-        const errorMsg = result.mainOrder.error || 'Order creation failed';
-        throw new Error(errorMsg);
-      }
+        const orderId = result.mainOrder.hash;
+        
+        // Wait for transaction to be processed (matching script behavior)
+        try {
+          await this.signerClient!.waitForTransaction(orderId, 30000, 2000);
+        } catch (error: any) {
+          // Transaction wait might fail, but order may still be submitted
+          this.logger.warn(`Order transaction wait failed: ${error.message}`);
+        }
 
-      const orderId = result.mainOrder.hash;
-      
-      // Wait for transaction to be processed (matching script behavior)
-      try {
-        await this.signerClient!.waitForTransaction(orderId, 30000, 2000);
+        // Check if order was filled immediately or is resting
+        // Lighter doesn't provide immediate fill status, so we mark as SUBMITTED
+        // The actual status can be checked later via getOrderStatus
+        const status = OrderStatus.SUBMITTED;
+
+        return new PerpOrderResponse(
+          orderId,
+          status,
+          request.symbol,
+          request.side,
+          request.clientOrderId,
+          undefined,
+          undefined,
+          undefined,
+          new Date(),
+        );
       } catch (error: any) {
-        // Transaction wait might fail, but order may still be submitted
-        this.logger.warn(`Order transaction wait failed: ${error.message}`);
+        lastError = error;
+        const errorMsg = error?.message || String(error);
+        const isRateLimit = errorMsg.includes('Too Many Requests') || 
+                           errorMsg.includes('429') ||
+                           errorMsg.includes('rate limit') ||
+                           errorMsg.includes('market config');
+        
+        if (isRateLimit && attempt < maxRetries - 1) {
+          this.logger.warn(
+            `Order placement rate limited for ${request.symbol} ` +
+            `(attempt ${attempt + 1}/${maxRetries}): ${errorMsg}. Will retry.`
+          );
+          continue;
+        }
+        
+        // Not retryable or max retries reached
+        this.logger.error(`Failed to place order: ${errorMsg}`);
+        throw new ExchangeError(
+          `Failed to place order: ${errorMsg}`,
+          ExchangeType.LIGHTER,
+          undefined,
+          error,
+        );
       }
-
-      // Check if order was filled immediately or is resting
-      // Lighter doesn't provide immediate fill status, so we mark as SUBMITTED
-      // The actual status can be checked later via getOrderStatus
-      const status = OrderStatus.SUBMITTED;
-
-      return new PerpOrderResponse(
-        orderId,
-        status,
-        request.symbol,
-        request.side,
-        request.clientOrderId,
-        undefined,
-        undefined,
-        undefined,
-        new Date(),
-      );
-    } catch (error: any) {
-      this.logger.error(`Failed to place order: ${error.message}`);
-      throw new ExchangeError(
-        `Failed to place order: ${error.message}`,
-        ExchangeType.LIGHTER,
-        undefined,
-        error,
-      );
     }
+    
+    // Should never reach here, but just in case
+    throw new ExchangeError(
+      `Failed to place order after ${maxRetries} attempts: ${lastError?.message || 'Unknown error'}`,
+      ExchangeType.LIGHTER,
+      undefined,
+      lastError,
+    );
   }
 
   async getPosition(symbol: string): Promise<PerpPosition | null> {
@@ -646,14 +761,24 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
 
       // Method 0: Try candlesticks endpoint (proven to work reliably)
       // Using axios directly to avoid ES module import issues with @api/zklighter
-      // Add retry logic for rate limiting (429 errors)
-      const maxRetries = 3;
+      // Add retry logic for rate limiting (429 errors) with improved exponential backoff
+      const maxRetries = 6; // Increased from 3 to 6
+      const baseDelay = 2000; // 2 seconds base delay
+      const maxDelay = 60000; // 60 seconds max delay
+      
       for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
           if (attempt > 0) {
-            // Exponential backoff: 2s, 4s, 8s
-            const delay = Math.pow(2, attempt) * 1000;
-            this.logger.debug(`Retrying candlesticks API for ${symbol} after ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+            // Exponential backoff with jitter: 2s, 4s, 8s, 16s, 32s, 60s (capped)
+            const exponentialDelay = Math.min(baseDelay * Math.pow(2, attempt - 1), maxDelay);
+            // Add jitter (±20%) to avoid thundering herd problem
+            const jitter = exponentialDelay * 0.2 * (Math.random() * 2 - 1); // Random between -20% and +20%
+            const delay = Math.max(1000, exponentialDelay + jitter); // Minimum 1 second
+            
+            this.logger.debug(
+              `Retrying candlesticks API for ${symbol} after ${Math.floor(delay / 1000)}s ` +
+              `(attempt ${attempt + 1}/${maxRetries}, exponential: ${Math.floor(exponentialDelay / 1000)}s)`
+            );
             await new Promise(resolve => setTimeout(resolve, delay));
           }
           
@@ -695,11 +820,12 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
           const errorResponse = candlestickError?.response?.data || candlestickError?.response || candlestickError?.data;
           const statusCode = candlestickError?.response?.status;
           
-          // If it's a 429 (rate limit), retry
+          // If it's a 429 (rate limit), retry with improved backoff
           if (statusCode === 429 && attempt < maxRetries - 1) {
             lastError = `Candlesticks API: Rate limited (429), will retry`;
-            this.logger.debug(
-              `Candlesticks method rate limited for ${symbol} (attempt ${attempt + 1}/${maxRetries}): ${errorMsg}`
+            this.logger.warn(
+              `Candlesticks method rate limited for ${symbol} (attempt ${attempt + 1}/${maxRetries}): ${errorMsg}. ` +
+              `Will retry with exponential backoff.`
             );
             continue; // Retry
           }
@@ -854,11 +980,24 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
       }
 
       // Method 3: Try Explorer API: https://explorer.elliot.ai/api/markets/{SYMBOL}/logs
-      // Retry up to 2 times with exponential backoff
-      for (let attempt = 0; attempt < 3; attempt++) {
+      // Retry with improved exponential backoff for rate limiting
+      const explorerMaxRetries = 5;
+      const explorerBaseDelay = 2000;
+      const explorerMaxDelay = 60000;
+      
+      for (let attempt = 0; attempt < explorerMaxRetries; attempt++) {
         try {
           if (attempt > 0) {
-            await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000)); // 2s, 4s delays
+            // Exponential backoff with jitter: 2s, 4s, 8s, 16s, 32s, 60s (capped)
+            const exponentialDelay = Math.min(explorerBaseDelay * Math.pow(2, attempt - 1), explorerMaxDelay);
+            const jitter = exponentialDelay * 0.2 * (Math.random() * 2 - 1);
+            const delay = Math.max(1000, exponentialDelay + jitter);
+            
+            this.logger.debug(
+              `Retrying explorer API for ${symbol} after ${Math.floor(delay / 1000)}s ` +
+              `(attempt ${attempt + 1}/${explorerMaxRetries})`
+            );
+            await new Promise(resolve => setTimeout(resolve, delay));
           }
 
           const explorerUrl = `https://explorer.elliot.ai/api/markets/${symbol}/logs`;
@@ -979,15 +1118,25 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
 
   async getBalance(): Promise<number> {
     const accountIndex = this.config.accountIndex!;
-    const maxRetries = 3;
     
-    // Retry logic for rate limiting (429 errors) - same as Hyperliquid
+    // Retry logic for rate limiting (429 errors) with improved exponential backoff
+    const maxRetries = 6; // Increased from 3 to 6
+    const baseDelay = 2000; // 2 seconds base delay
+    const maxDelay = 60000; // 60 seconds max delay
+    
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         if (attempt > 0) {
-          // Exponential backoff: 2s, 4s, 8s
-          const delay = Math.pow(2, attempt) * 1000;
-          this.logger.debug(`Retrying Lighter balance query after ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+          // Exponential backoff with jitter: 2s, 4s, 8s, 16s, 32s, 60s (capped)
+          const exponentialDelay = Math.min(baseDelay * Math.pow(2, attempt - 1), maxDelay);
+          // Add jitter (±20%) to avoid thundering herd problem
+          const jitter = exponentialDelay * 0.2 * (Math.random() * 2 - 1); // Random between -20% and +20%
+          const delay = Math.max(1000, exponentialDelay + jitter); // Minimum 1 second
+          
+          this.logger.debug(
+            `Retrying Lighter balance query after ${Math.floor(delay / 1000)}s ` +
+            `(attempt ${attempt + 1}/${maxRetries}, exponential: ${Math.floor(exponentialDelay / 1000)}s)`
+          );
           await new Promise(resolve => setTimeout(resolve, delay));
         }
 
@@ -1045,10 +1194,11 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
         const statusCode = error?.response?.status;
         const errorMsg = error?.message || String(error);
         
-        // If it's a 429 (rate limit), retry
+        // If it's a 429 (rate limit), retry with improved backoff
         if (statusCode === 429 && attempt < maxRetries - 1) {
-          this.logger.debug(
-            `Lighter balance query rate limited (attempt ${attempt + 1}/${maxRetries}): ${errorMsg}`
+          this.logger.warn(
+            `Lighter balance query rate limited (attempt ${attempt + 1}/${maxRetries}): ${errorMsg}. ` +
+            `Will retry with exponential backoff.`
           );
           continue; // Retry
         }

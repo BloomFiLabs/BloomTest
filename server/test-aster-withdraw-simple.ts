@@ -202,7 +202,7 @@ async function testWithdrawal() {
       console.log(`   Full response: ${JSON.stringify(response.data, null, 2)}\n`);
     }
   } catch (error: any) {
-    console.error('\n❌ Withdrawal failed:',error);
+    console.error('\n❌ Withdrawal failed:');
     if (error.response) {
       console.error(`   Status: ${error.response.status} ${error.response.statusText}`);
       console.error(`   Error Code: ${error.response.data?.code || 'N/A'}`);

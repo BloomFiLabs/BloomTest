@@ -918,12 +918,12 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
           this.logger.debug(`Withdrawal fee from API: ${fee} ${asset}`);
         } else {
           // Fallback to a default fee if API doesn't return expected format
-          fee = '0.01';
+          fee = '0.5'; // Match test script fallback
           this.logger.warn(`Failed to get fee from API, using default: ${fee}`);
         }
       } catch (feeError: any) {
         // Fallback to a default fee if API call fails
-        fee = '0.01';
+        fee = '0.5'; // Match test script fallback
         this.logger.warn(
           `Failed to query withdrawal fee from API: ${feeError.message}. Using default: ${fee}`
         );
@@ -968,25 +968,22 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
       // Build EIP712 message (per Aster documentation)
       // Note: nonce must be a number (not BigInt) for ethers.js signTypedData
       // ethers.js will handle the conversion to uint256 internally
+      // Format amount as string with 2 decimal places (Aster API requirement)
+      // Aster API rejects amounts with too many decimal places (error: "amount or fee has too many decimal places")
+      // USDC/USDT typically use 2 decimal places, so format to 2 decimals
+      const amountString = amount.toFixed(2);
+      
       const message = {
         type: 'Withdraw',
         destination: destination.toLowerCase(),
         'destination Chain': destinationChain,
         token: asset.toUpperCase(),
-        amount: amount.toFixed(2),
+        amount: amountString, // Format to 2 decimal places to match Aster API requirements
         fee: fee,
         nonce: nonceValue, // Use number, ethers.js will convert to uint256
         'aster chain': 'Mainnet',
       };
       
-      // Sign using EIP712 typed data (uses ASTER_PRIVATE_KEY from wallet)
-      this.logger.debug(
-        `EIP712 signature: domain=${JSON.stringify(domain)}, ` +
-        `message=${JSON.stringify(message)}`
-      );
-      
-      const userSignature = await this.wallet.signTypedData(domain, types, message);
-
       // Use /fapi/aster/user-withdraw endpoint (matches web interface and EIP712 test script)
       // This endpoint uses API key + HMAC signature with PRIVATE_KEY, and includes EIP712 userSignature
       if (!this.apiKey) {
@@ -998,38 +995,60 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
 
       // For HMAC signature, use PRIVATE_KEY (per user requirement)
       // User explicitly stated: "PRIVATE_KEY needs to be used for this call from the .env"
-      let privateKeyForHmac = this.configService.get<string>('PRIVATE_KEY');
-      if (!privateKeyForHmac) {
-        privateKeyForHmac = process.env.PRIVATE_KEY;
-      }
-      if (!privateKeyForHmac) {
-        // Fallback to ASTER_PRIVATE_KEY if PRIVATE_KEY not available
-        privateKeyForHmac = this.configService.get<string>('ASTER_PRIVATE_KEY') || process.env.ASTER_PRIVATE_KEY;
-      }
-      if (!privateKeyForHmac) {
+      // CRITICAL: Use PRIVATE_KEY for BOTH EIP712 and HMAC signatures (no fallback)
+      const privateKeyForBoth = this.configService.get<string>('PRIVATE_KEY') || process.env.PRIVATE_KEY;
+      if (!privateKeyForBoth) {
         throw new Error(
-          'Private key required for withdrawal HMAC signature. ' +
-          'Provide PRIVATE_KEY or ASTER_PRIVATE_KEY in .env.'
+          'PRIVATE_KEY required for withdrawal signatures. ' +
+          'Provide PRIVATE_KEY in .env.'
         );
       }
       
-      // Remove 0x prefix if present
-      const privateKeyHex = privateKeyForHmac.replace(/^0x/, '');
+      // Create EIP712 wallet using PRIVATE_KEY (same key as HMAC)
+      const normalizedEip712Key = privateKeyForBoth.startsWith('0x') ? privateKeyForBoth : `0x${privateKeyForBoth}`;
+      const eip712Wallet = new ethers.Wallet(normalizedEip712Key);
+      
+      this.logger.debug(
+        `Using PRIVATE_KEY for both EIP712 and HMAC signatures ` +
+        `(wallet: ${eip712Wallet.address})`
+      );
+      
+      // Sign using EIP712 typed data
+      // CRITICAL: Use the same private key as HMAC (PRIVATE_KEY || ASTER_PRIVATE_KEY)
+      // This ensures both signatures match the test script behavior
+      this.logger.debug(
+        `EIP712 signature: domain=${JSON.stringify(domain)}, ` +
+        `message=${JSON.stringify(message)}`
+      );
+      
+      const userSignature = await eip712Wallet.signTypedData(domain, types, message);
+      
+      // Debug: Log signature details for troubleshooting
+      this.logger.debug(
+        `EIP712 signature generated: ${userSignature.substring(0, 20)}... ` +
+        `(wallet: ${eip712Wallet.address})`
+      );
+      
+      // Remove 0x prefix if present for HMAC
+      const privateKeyHex = privateKeyForBoth.replace(/^0x/, '');
 
       // Build parameters for HMAC signing (per Aster docs section 6)
       // Parameters: chainId, asset, amount, fee, receiver, nonce, userSignature, recvWindow, timestamp
       // Note: userSignature (EIP712) IS included in the HMAC calculation
-      // nonceString already declared above (line 936)
+      // Match script exactly: generate timestamp once and use it
+      const timestamp = Date.now();
+      const recvWindow = 60000;
+      
       const hmacParams: Record<string, any> = {
         chainId: chainId.toString(),
         asset: asset.toUpperCase(),
-        amount: amount.toFixed(2),
+        amount: amountString, // Match script: use same string as EIP712 message
         fee: fee,
         receiver: destination.toLowerCase(),
         nonce: nonceString,
         userSignature: userSignature, // EIP712 signature - included in HMAC
-        recvWindow: 60000, // Match EIP712 test script
-        timestamp: Date.now(),
+        recvWindow: recvWindow, // Match EIP712 test script
+        timestamp: timestamp, // Match script: use variable instead of Date.now() directly
       };
 
       // Remove null/undefined values
@@ -1038,17 +1057,18 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
       );
 
       // Build query string for HMAC signing (sorted alphabetically)
+      // Match script exactly: use template literals (they auto-convert to strings)
       const queryString = Object.keys(cleanParams)
         .sort()
-        .map((key) => `${key}=${cleanParams[key]}`) // No URL encoding
+        .map((key) => `${key}=${cleanParams[key]}`) // No URL encoding, template literal auto-converts
         .join('&');
 
       // Create HMAC SHA256 signature using PRIVATE_KEY
       this.logger.debug(
         `HMAC signing details:\n` +
-        `  Private key source: ${this.configService.get<string>('PRIVATE_KEY') ? 'PRIVATE_KEY' : 'ASTER_PRIVATE_KEY'}\n` +
+        `  Private key source: PRIVATE_KEY\n` +
         `  Private key (first 10 chars): ${privateKeyHex.substring(0, 10)}...\n` +
-        `  Query string: ${queryString.substring(0, 200)}...\n` +
+        `  Query string: ${queryString}\n` +
         `  Query string length: ${queryString.length}`
       );
       
@@ -1058,6 +1078,7 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
         .digest('hex');
       
       this.logger.debug(`HMAC signature: ${hmacSignature}`);
+      this.logger.debug(`Full final query string: ${queryString}&signature=${hmacSignature}`);
 
       // Build final query string: include all params + signature last
       const finalQueryString = `${queryString}&signature=${hmacSignature}`;
@@ -1117,6 +1138,28 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
           // Check for specific error messages that need longer delays
           const isMultiChainLimit = errorMsg && errorMsg.toLowerCase().includes('multi chain limit');
           const isRateLimit = errorMsg && (errorMsg.toLowerCase().includes('rate limit') || errorMsg.toLowerCase().includes('too many'));
+          
+          // Signature mismatch is NOT retryable - it means the signature is wrong, retrying won't help
+          // Only retry on transient server errors, not authentication/signature errors
+          const isSignatureError = errorMsg && (
+            errorMsg.toLowerCase().includes('signature mismatch') ||
+            errorMsg.toLowerCase().includes('signature') ||
+            errorCode === -1022 // INVALID_SIGNATURE
+          );
+          
+          // Don't retry on signature errors - they indicate a code issue, not a transient server error
+          if (isSignatureError) {
+            this.logger.error(
+              `Signature error detected - this indicates a code issue, not a transient error. ` +
+              `Error: ${errorMsg}. Please check signature generation logic.`
+            );
+            throw new ExchangeError(
+              `Withdrawal signature mismatch: ${errorMsg}. This indicates a code issue with signature generation.`,
+              ExchangeType.ASTER,
+              undefined,
+              error,
+            );
+          }
 
           if (isRetryable && attempt < maxRetries) {
             // Use longer delay for rate limits (30s, 60s, 90s)

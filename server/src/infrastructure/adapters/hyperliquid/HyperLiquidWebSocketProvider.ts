@@ -124,8 +124,7 @@ export class HyperLiquidWebSocketProvider implements OnModuleInit, OnModuleDestr
    */
   private handleMessage(message: WsMessage): void {
     if (message.channel === 'subscriptionResponse') {
-      // Subscription acknowledgment
-      this.logger.debug('Subscription acknowledged');
+      // Subscription acknowledgment - silently handled
       return;
     }
 

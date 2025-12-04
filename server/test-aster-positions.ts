@@ -234,3 +234,11 @@ async function testAsterPositions() {
 
 testAsterPositions().catch(console.error);
 
+
+
+
+
+
+
+
+

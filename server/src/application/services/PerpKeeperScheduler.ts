@@ -245,10 +245,13 @@ export class PerpKeeperScheduler implements OnModuleInit {
     try {
       const positions = await this.keeperService.getAllPositions();
       
-      // Get funding rate comparisons for all discovered symbols
-      const symbols = await this.discoverAssetsIfNeeded();
+      // Only get funding rates for symbols that have positions (not all discovered symbols)
+      // This prevents excessive API calls that cause rate limiting
+      const symbolsWithPositions = new Set(positions.map(p => p.symbol));
       const allFundingRates: Array<{ symbol: string; exchange: ExchangeType; fundingRate: number }> = [];
-      for (const symbol of symbols) {
+      
+      // Only fetch funding rates for symbols with active positions
+      for (const symbol of symbolsWithPositions) {
         try {
           const comparison = await this.orchestrator.compareFundingRates(symbol);
           if (comparison && comparison.rates) {

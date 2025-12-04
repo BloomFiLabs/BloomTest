@@ -171,3 +171,11 @@ async function testAsterPositionsDocs() {
 
 testAsterPositionsDocs().catch(console.error);
 
+
+
+
+
+
+
+
+

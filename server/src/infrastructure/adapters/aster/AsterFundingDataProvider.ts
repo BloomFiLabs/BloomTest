@@ -72,13 +72,65 @@ export class AsterFundingDataProvider {
         params: { symbol },
       });
 
-      const openInterest = parseFloat(response.data.openInterest || '0');
-      const markPrice = parseFloat(response.data.markPrice || await this.getMarkPrice(symbol));
+      // Validate response structure
+      if (!response.data) {
+        throw new Error(`Aster OI API error for ${symbol}: Empty response`);
+      }
+
+      const openInterestRaw = response.data.openInterest;
+      const markPriceRaw = response.data.markPrice;
+
+      // Validate openInterest exists
+      if (openInterestRaw === undefined || openInterestRaw === null) {
+        throw new Error(`Aster OI API error for ${symbol}: openInterest field missing. Response: ${JSON.stringify(response.data)}`);
+      }
+
+      const openInterest = parseFloat(openInterestRaw);
+      if (isNaN(openInterest)) {
+        throw new Error(`Aster OI API error for ${symbol}: Failed to parse openInterest "${openInterestRaw}" as number`);
+      }
+
+      // Get mark price (from response or fallback)
+      let markPrice: number;
+      if (markPriceRaw !== undefined && markPriceRaw !== null) {
+        markPrice = parseFloat(markPriceRaw);
+        if (isNaN(markPrice) || markPrice <= 0) {
+          this.logger.warn(`Aster OI: Invalid markPrice in response (${markPriceRaw}), fetching separately...`);
+          markPrice = await this.getMarkPrice(symbol);
+        }
+      } else {
+        markPrice = await this.getMarkPrice(symbol);
+      }
+
+      if (isNaN(markPrice) || markPrice <= 0) {
+        throw new Error(`Aster OI API error for ${symbol}: Invalid mark price: ${markPrice}`);
+      }
       
-      return openInterest * markPrice; // Convert to USD value
+      const oiUsd = openInterest * markPrice;
+      
+      if (isNaN(oiUsd) || oiUsd < 0) {
+        throw new Error(`Aster OI API error for ${symbol}: Invalid calculated OI USD: ${oiUsd} (OI=${openInterest}, Price=${markPrice})`);
+      }
+      
+      return oiUsd; // Convert to USD value
     } catch (error: any) {
-      this.logger.error(`Failed to get open interest for ${symbol}: ${error.message}`);
-      return 0;
+      // If it's already our error, re-throw it
+      if (error.message && error.message.includes('Aster OI API error')) {
+        this.logger.error(`Aster OI error for ${symbol}: ${error.message}`);
+        throw error;
+      }
+      
+      // Otherwise, wrap it with context
+      const errorMsg = error.response 
+        ? `HTTP ${error.response.status}: ${JSON.stringify(error.response.data)}`
+        : error.message || 'Unknown error';
+      
+      this.logger.error(`Aster OI API error for ${symbol}: ${errorMsg}`);
+      if (error.stack) {
+        this.logger.error(`Full error: ${error.stack}`);
+      }
+      
+      throw new Error(`Aster OI API error for ${symbol}: ${errorMsg}`);
     }
   }
 

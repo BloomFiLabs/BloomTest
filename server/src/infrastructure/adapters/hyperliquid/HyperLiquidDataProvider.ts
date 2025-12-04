@@ -128,21 +128,28 @@ export class HyperLiquidDataProvider implements IFundingDataProvider, OnModuleIn
    * @returns Open interest in USD
    */
   async getOpenInterest(asset: string): Promise<number> {
-    const data = await this.fetchMetaAndAssetCtxs();
-    const index = await this.getAssetIndex(asset, data.meta);
-    
-    if (index === -1) {
-      throw new Error(`Asset ${asset} not found on HyperLiquid`);
-    }
+    try {
+      const data = await this.fetchMetaAndAssetCtxs();
+      const index = await this.getAssetIndex(asset, data.meta);
+      
+      if (index === -1) {
+        this.logger.error(`Hyperliquid OI: Asset ${asset} not found in universe`);
+        throw new Error(`Asset ${asset} not found on HyperLiquid`);
+      }
 
-    const assetCtx = data.assetCtxs[index];
-    const openInterest = parseFloat(assetCtx.openInterest);
-    const markPrice = parseFloat(assetCtx.markPx);
-    
-    // OI is in contracts, multiply by mark price for USD value
-    const oiUsd = openInterest * markPrice;
-    
-    return oiUsd;
+      const assetCtx = data.assetCtxs[index];
+      
+      const openInterest = parseFloat(assetCtx.openInterest);
+      const markPrice = parseFloat(assetCtx.markPx);
+      
+      // OI is in contracts, multiply by mark price for USD value
+      const oiUsd = openInterest * markPrice;
+      
+      return oiUsd;
+    } catch (error: any) {
+      this.logger.error(`Failed to get Hyperliquid open interest for ${asset}: ${error.message}`);
+      throw error;
+    }
   }
 
   /**

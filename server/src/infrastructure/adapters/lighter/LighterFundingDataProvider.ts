@@ -1,7 +1,8 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiClient } from '@reservoir0x/lighter-ts-sdk';
 import axios from 'axios';
+import { LighterWebSocketProvider } from './LighterWebSocketProvider';
 
 interface LighterFundingRate {
   market_id: number;
@@ -31,7 +32,10 @@ export class LighterFundingDataProvider implements OnModuleInit {
   private lastCacheUpdate: number = 0;
   private readonly CACHE_TTL = 60000; // 1 minute cache (funding rates update hourly)
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    @Optional() private readonly wsProvider?: LighterWebSocketProvider,
+  ) {
     this.baseUrl = this.configService.get<string>('LIGHTER_API_BASE_URL') || 'https://mainnet.zklighter.elliot.ai';
     this.apiClient = new ApiClient({ host: this.baseUrl });
   }
@@ -123,45 +127,277 @@ export class LighterFundingDataProvider implements OnModuleInit {
    * @returns Open interest in USD
    */
   async getOpenInterest(marketIndex: number): Promise<number> {
+    this.logger.log(`🔍 LIGHTER OI CALL: getOpenInterest(${marketIndex}) - Starting...`);
+    
+    // Use orderBookDetails API endpoint (REST API)
+    this.logger.log(`  🌐 Calling orderBookDetails API for market_id=${marketIndex}...`);
+    
     try {
-      // Cast to any since SDK types may be incomplete
-      const marketData = await (this.apiClient as any).market?.getMarketData({ marketIndex });
+      const orderBookUrl = `${this.baseUrl}/api/v1/orderBookDetails`;
+      const response = await axios.get(orderBookUrl, {
+        timeout: 10000,
+        params: { market_id: marketIndex },
+      });
       
-      if (!marketData) {
-        return 0;
+      this.logger.log(`  📥 Response: code=${response.data?.code}, has order_book_details=${!!response.data?.order_book_details?.length}`);
+        
+      // Validate response structure
+      if (response.data?.code !== 200) {
+        const errorMsg = `Invalid response code: ${response.data?.code}. Response: ${JSON.stringify(response.data)}`;
+        this.logger.error(`  ❌ ERROR: ${errorMsg}`);
+        throw new Error(`Lighter OI API error for market ${marketIndex}: ${errorMsg}`);
+        }
+        
+      if (!response.data?.order_book_details || response.data.order_book_details.length === 0) {
+        const errorMsg = `No order_book_details in response. Response: ${JSON.stringify(response.data)}`;
+        this.logger.error(`  ❌ ERROR: ${errorMsg}`);
+        throw new Error(`Lighter OI API error for market ${marketIndex}: ${errorMsg}`);
       }
       
-      // Extract open interest (adjust field name as needed)
-      const openInterest = parseFloat(marketData.openInterest || '0');
-      const markPrice = parseFloat(marketData.markPrice || await this.getMarkPrice(marketIndex));
+      const orderBookDetail = response.data.order_book_details[0];
       
-      return openInterest * markPrice; // Convert to USD value
+      // Validate market_id matches
+      if (orderBookDetail.market_id !== marketIndex) {
+        const errorMsg = `Market ID mismatch: expected ${marketIndex}, got ${orderBookDetail.market_id}`;
+        this.logger.error(`  ❌ ERROR: ${errorMsg}`);
+        throw new Error(`Lighter OI API error for market ${marketIndex}: ${errorMsg}`);
+      }
+
+      // Extract and parse values
+      const openInterestRaw = orderBookDetail.open_interest;
+      const markPriceRaw = orderBookDetail.last_trade_price;
+      
+      // Validate raw values exist
+      if (openInterestRaw === undefined || openInterestRaw === null) {
+        const errorMsg = `open_interest field missing or null. Response: ${JSON.stringify(orderBookDetail)}`;
+        this.logger.error(`  ❌ ERROR: ${errorMsg}`);
+        throw new Error(`Lighter OI API error for market ${marketIndex}: ${errorMsg}`);
+      }
+      
+      if (markPriceRaw === undefined || markPriceRaw === null) {
+        const errorMsg = `last_trade_price field missing or null. Response: ${JSON.stringify(orderBookDetail)}`;
+        this.logger.error(`  ❌ ERROR: ${errorMsg}`);
+        throw new Error(`Lighter OI API error for market ${marketIndex}: ${errorMsg}`);
+      }
+      
+      // Parse values
+      const openInterest = typeof openInterestRaw === 'string' ? parseFloat(openInterestRaw) : (openInterestRaw || 0);
+      const markPrice = typeof markPriceRaw === 'string' ? parseFloat(markPriceRaw) : (markPriceRaw || 0);
+      
+      this.logger.log(`  📊 Parsed values: Raw OI=${openInterestRaw}, Parsed OI=${openInterest}, Raw Price=${markPriceRaw}, Parsed Price=${markPrice}`);
+      
+      // Validate parsed values
+      if (isNaN(openInterest)) {
+        const errorMsg = `Failed to parse open_interest: "${openInterestRaw}" is not a valid number`;
+        this.logger.error(`  ❌ ERROR: ${errorMsg}`);
+        throw new Error(`Lighter OI API error for market ${marketIndex}: ${errorMsg}`);
+      }
+      
+      if (isNaN(markPrice) || markPrice <= 0) {
+        const errorMsg = `Invalid mark price: "${markPriceRaw}" parsed to ${markPrice} (must be > 0)`;
+        this.logger.error(`  ❌ ERROR: ${errorMsg}`);
+        throw new Error(`Lighter OI API error for market ${marketIndex}: ${errorMsg}`);
+      }
+      
+      // open_interest is in base token units, multiply by mark price for USD value
+      // Note: OI can be 0 (valid case), so we allow it
+            const oiUsd = openInterest * markPrice;
+            
+      if (isNaN(oiUsd) || oiUsd < 0) {
+        const errorMsg = `Invalid calculated OI USD: ${oiUsd} (OI=${openInterest}, Price=${markPrice})`;
+        this.logger.error(`  ❌ ERROR: ${errorMsg}`);
+        throw new Error(`Lighter OI API error for market ${marketIndex}: ${errorMsg}`);
+      }
+      
+      this.logger.log(`  ✅ SUCCESS: Returned $${oiUsd.toLocaleString()} (OI: ${openInterest}, Price: ${markPrice})`);
+            return oiUsd;
+      
     } catch (error: any) {
-      this.logger.error(`Failed to get open interest for market ${marketIndex}: ${error.message}`);
-      return 0;
+      // If it's already our error, re-throw it
+      if (error.message && error.message.includes('Lighter OI API error')) {
+        throw error;
+      }
+
+      // Otherwise, wrap it with context
+      const errorMsg = error.response 
+        ? `HTTP ${error.response.status}: ${JSON.stringify(error.response.data)}`
+        : error.message || 'Unknown error';
+      
+      this.logger.error(`  ❌ ERROR: Failed to get Lighter OI for market ${marketIndex}: ${errorMsg}`);
+      this.logger.error(`  📄 Full error: ${error.stack || error}`);
+      
+      throw new Error(`Lighter OI API error for market ${marketIndex}: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Get both open interest and mark price together from orderBookDetails API
+   * This is more efficient than calling them separately
+   * @param marketIndex Market index
+   * @returns Object with openInterest (USD) and markPrice
+   */
+  async getOpenInterestAndMarkPrice(marketIndex: number): Promise<{ openInterest: number; markPrice: number }> {
+    this.logger.log(`🔍 LIGHTER: getOpenInterestAndMarkPrice(${marketIndex}) - Starting...`);
+    
+    try {
+      const orderBookUrl = `${this.baseUrl}/api/v1/orderBookDetails`;
+      const response = await axios.get(orderBookUrl, {
+            timeout: 10000,
+        params: { market_id: marketIndex },
+      });
+      
+      // Validate response structure
+      if (response.data?.code !== 200) {
+        const errorMsg = `Invalid response code: ${response.data?.code}. Response: ${JSON.stringify(response.data)}`;
+        this.logger.error(`  ❌ ERROR: ${errorMsg}`);
+        throw new Error(`Lighter API error for market ${marketIndex}: ${errorMsg}`);
+      }
+      
+      if (!response.data?.order_book_details || response.data.order_book_details.length === 0) {
+        const errorMsg = `No order_book_details in response. Response: ${JSON.stringify(response.data)}`;
+        this.logger.error(`  ❌ ERROR: ${errorMsg}`);
+        throw new Error(`Lighter API error for market ${marketIndex}: ${errorMsg}`);
+      }
+      
+      const orderBookDetail = response.data.order_book_details[0];
+      
+      // Validate market_id matches
+      if (orderBookDetail.market_id !== marketIndex) {
+        const errorMsg = `Market ID mismatch: expected ${marketIndex}, got ${orderBookDetail.market_id}`;
+        this.logger.error(`  ❌ ERROR: ${errorMsg}`);
+        throw new Error(`Lighter API error for market ${marketIndex}: ${errorMsg}`);
+      }
+      
+      // Extract and parse values
+      const openInterestRaw = orderBookDetail.open_interest;
+      const markPriceRaw = orderBookDetail.last_trade_price;
+      
+      // Validate raw values exist
+      if (openInterestRaw === undefined || openInterestRaw === null) {
+        const errorMsg = `open_interest field missing or null. Response: ${JSON.stringify(orderBookDetail)}`;
+        this.logger.error(`  ❌ ERROR: ${errorMsg}`);
+        throw new Error(`Lighter API error for market ${marketIndex}: ${errorMsg}`);
+      }
+      
+      if (markPriceRaw === undefined || markPriceRaw === null) {
+        const errorMsg = `last_trade_price field missing or null. Response: ${JSON.stringify(orderBookDetail)}`;
+        this.logger.error(`  ❌ ERROR: ${errorMsg}`);
+        throw new Error(`Lighter API error for market ${marketIndex}: ${errorMsg}`);
+      }
+      
+      // Parse values
+      const openInterest = typeof openInterestRaw === 'string' ? parseFloat(openInterestRaw) : (openInterestRaw || 0);
+      const markPrice = typeof markPriceRaw === 'string' ? parseFloat(markPriceRaw) : (markPriceRaw || 0);
+      
+      // Validate parsed values
+      if (isNaN(openInterest)) {
+        const errorMsg = `Failed to parse open_interest: "${openInterestRaw}" is not a valid number`;
+        this.logger.error(`  ❌ ERROR: ${errorMsg}`);
+        throw new Error(`Lighter API error for market ${marketIndex}: ${errorMsg}`);
+      }
+      
+      if (isNaN(markPrice) || markPrice <= 0) {
+        const errorMsg = `Invalid mark price: "${markPriceRaw}" parsed to ${markPrice} (must be > 0)`;
+        this.logger.error(`  ❌ ERROR: ${errorMsg}`);
+        throw new Error(`Lighter API error for market ${marketIndex}: ${errorMsg}`);
+      }
+      
+      // open_interest is in base token units, multiply by mark price for USD value
+              const oiUsd = openInterest * markPrice;
+              
+      if (isNaN(oiUsd) || oiUsd < 0) {
+        const errorMsg = `Invalid calculated OI USD: ${oiUsd} (OI=${openInterest}, Price=${markPrice})`;
+        this.logger.error(`  ❌ ERROR: ${errorMsg}`);
+        throw new Error(`Lighter API error for market ${marketIndex}: ${errorMsg}`);
+      }
+      
+      this.logger.log(`  ✅ SUCCESS: OI=$${oiUsd.toLocaleString()}, MarkPrice=$${markPrice.toFixed(2)}`);
+      return { openInterest: oiUsd, markPrice };
+      
+    } catch (error: any) {
+      // If it's already our error, re-throw it
+      if (error.message && error.message.includes('Lighter API error')) {
+        throw error;
+      }
+      
+      // Otherwise, wrap it with context
+      const errorMsg = error.response 
+        ? `HTTP ${error.response.status}: ${JSON.stringify(error.response.data)}`
+        : error.message || 'Unknown error';
+      
+      this.logger.error(`  ❌ ERROR: Failed to get Lighter OI and mark price for market ${marketIndex}: ${errorMsg}`);
+      this.logger.error(`  📄 Full error: ${error.stack || error}`);
+      
+      throw new Error(`Lighter API error for market ${marketIndex}: ${errorMsg}`);
     }
   }
 
   /**
    * Get mark price for a market
-   * Tries multiple methods: order book, funding rates API, or market data
+   * Tries multiple methods: orderBookDetails API, order book SDK, funding rates API, or market data SDK
    * @param marketIndex Market index
    * @returns Mark price
    */
   async getMarkPrice(marketIndex: number): Promise<number> {
-    // Try order book first (most accurate)
+    const errors: string[] = [];
+
+    // Method 0: Try orderBookDetails API first (same as getOpenInterest, most reliable)
+    try {
+      const orderBookUrl = `${this.baseUrl}/api/v1/orderBookDetails`;
+      const response = await axios.get(orderBookUrl, {
+        timeout: 10000,
+        params: { market_id: marketIndex },
+      });
+      
+      if (response.data?.code === 200 && response.data?.order_book_details?.length > 0) {
+        const detail = response.data.order_book_details[0];
+        if (detail.last_trade_price !== undefined && detail.last_trade_price !== null) {
+          const markPrice = typeof detail.last_trade_price === 'string' 
+            ? parseFloat(detail.last_trade_price) 
+            : detail.last_trade_price;
+          
+          if (!isNaN(markPrice) && markPrice > 0) {
+            this.logger.debug(`Got mark price from orderBookDetails API for market ${marketIndex}: ${markPrice}`);
+            return markPrice;
+          } else {
+            errors.push(`orderBookDetails: Invalid last_trade_price value: ${detail.last_trade_price}`);
+          }
+        } else {
+          errors.push(`orderBookDetails: No last_trade_price in response`);
+        }
+      } else {
+        errors.push(`orderBookDetails: Invalid response (code=${response.data?.code}, hasDetails=${!!response.data?.order_book_details?.length})`);
+      }
+    } catch (error: any) {
+      const errorMsg = error.response 
+        ? `HTTP ${error.response.status}: ${JSON.stringify(error.response.data)}`
+        : error.message;
+      errors.push(`orderBookDetails API: ${errorMsg}`);
+    }
+
+    // Method 1: Try order book SDK (most accurate if available)
     try {
       const orderBook = await (this.apiClient as any).order?.getOrderBookDetails({ marketIndex: marketIndex } as any) as any;
       
       if (orderBook?.bestBid?.price && orderBook?.bestAsk?.price) {
         const midPrice = (parseFloat(orderBook.bestBid.price) + parseFloat(orderBook.bestAsk.price)) / 2;
+        if (!isNaN(midPrice) && midPrice > 0) {
+          this.logger.debug(`Got mark price from OrderBook SDK for market ${marketIndex}: ${midPrice}`);
         return midPrice;
+        } else {
+          errors.push(`OrderBook SDK: Invalid midPrice calculated: ${midPrice} (bid=${orderBook.bestBid.price}, ask=${orderBook.bestAsk.price})`);
+        }
+      } else {
+        errors.push(`OrderBook SDK: Missing bestBid/bestAsk (hasBestBid=${!!orderBook?.bestBid?.price}, hasBestAsk=${!!orderBook?.bestAsk?.price})`);
+        if (orderBook) {
+          this.logger.debug(`OrderBook SDK response structure: ${JSON.stringify(orderBook).substring(0, 200)}`);
+        }
       }
     } catch (error: any) {
-      // Fall through to next method - only log actual errors
+      errors.push(`OrderBook SDK: ${error.message || String(error)}`);
     }
 
-    // Try funding rates API (may include mark price)
+    // Method 2: Try funding rates API (may include mark price)
     try {
       const fundingUrl = `${this.baseUrl}/api/v1/funding-rates`;
       const response = await axios.get(fundingUrl, {
@@ -172,31 +408,67 @@ export class LighterFundingDataProvider implements OnModuleInit {
       if (response.data && Array.isArray(response.data) && response.data.length > 0) {
         const latest = response.data[0];
         if (latest.mark_price) {
-          return parseFloat(latest.mark_price);
+          const markPrice = parseFloat(latest.mark_price);
+          if (!isNaN(markPrice) && markPrice > 0) {
+            this.logger.debug(`Got mark price from funding-rates API for market ${marketIndex}: ${markPrice}`);
+            return markPrice;
+          } else {
+            errors.push(`Funding Rates: Invalid mark_price value: ${latest.mark_price}`);
+          }
+        } else if (latest.price) {
+          const price = parseFloat(latest.price);
+          if (!isNaN(price) && price > 0) {
+            this.logger.debug(`Got mark price from funding-rates API (price field) for market ${marketIndex}: ${price}`);
+            return price;
+          } else {
+            errors.push(`Funding Rates: Invalid price value: ${latest.price}`);
         }
-        if (latest.price) {
-          return parseFloat(latest.price);
+        } else {
+          errors.push(`Funding Rates: No mark_price or price in response. Response keys: ${Object.keys(latest).join(', ')}`);
         }
+      } else {
+        errors.push(`Funding Rates: Empty or invalid response (isArray=${Array.isArray(response.data)}, length=${response.data?.length || 0})`);
       }
     } catch (error: any) {
-      // Fall through to next method - only log actual errors
+      const errorMsg = error.response 
+        ? `HTTP ${error.response.status}: ${JSON.stringify(error.response.data)}`
+        : error.message;
+      errors.push(`Funding Rates API: ${errorMsg}`);
     }
 
-    // Try market data API as last resort
+    // Method 3: Try market data SDK as last resort
     try {
       const marketData = await (this.apiClient as any).market?.getMarketData({ marketIndex });
       if (marketData?.markPrice) {
-        return parseFloat(marketData.markPrice);
-      }
-      if (marketData?.price) {
-        return parseFloat(marketData.price);
+        const markPrice = parseFloat(marketData.markPrice);
+        if (!isNaN(markPrice) && markPrice > 0) {
+          this.logger.debug(`Got mark price from Market Data SDK for market ${marketIndex}: ${markPrice}`);
+          return markPrice;
+        } else {
+          errors.push(`Market Data SDK: Invalid markPrice value: ${marketData.markPrice}`);
+        }
+      } else if (marketData?.price) {
+        const price = parseFloat(marketData.price);
+        if (!isNaN(price) && price > 0) {
+          this.logger.debug(`Got mark price from Market Data SDK (price field) for market ${marketIndex}: ${price}`);
+          return price;
+        } else {
+          errors.push(`Market Data SDK: Invalid price value: ${marketData.price}`);
+        }
+      } else {
+        errors.push(`Market Data SDK: No markPrice or price in response. Response keys: ${marketData ? Object.keys(marketData).join(', ') : 'null'}`);
       }
     } catch (error: any) {
-      // All methods failed
+      errors.push(`Market Data SDK: ${error.message || String(error)}`);
     }
 
-    // If all methods fail, throw error
-    throw new Error(`Failed to get Lighter mark price for market ${marketIndex}: All methods failed`);
+    // If all methods fail, throw error with detailed information
+    const errorDetails = errors.join('; ');
+    this.logger.error(`Failed to get Lighter mark price for market ${marketIndex}. All methods failed:`);
+    errors.forEach((err, idx) => {
+      this.logger.error(`  Method ${idx}: ${err}`);
+    });
+    throw new Error(`Failed to get Lighter mark price for market ${marketIndex}: All methods failed. Details: ${errorDetails}`);
   }
 
   /**
