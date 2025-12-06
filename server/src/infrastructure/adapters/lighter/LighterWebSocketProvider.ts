@@ -197,15 +197,6 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
           
           if (!this.hasInitialData.has(marketIndex)) {
             this.hasInitialData.add(marketIndex);
-            this.logger.log(
-              `✅ LIGHTER: Received initial market_stats for market ${marketIndex}: ` +
-              `OI=$${oiUsd.toLocaleString()}, MarkPrice=$${markPrice.toFixed(2)}`
-            );
-          } else if (wasNew) {
-            this.logger.debug(
-              `✅ LIGHTER: Updated market_stats for market ${marketIndex}: ` +
-              `OI=$${oiUsd.toLocaleString()}, MarkPrice=$${markPrice.toFixed(2)}`
-            );
           }
         } else {
           this.logger.warn(

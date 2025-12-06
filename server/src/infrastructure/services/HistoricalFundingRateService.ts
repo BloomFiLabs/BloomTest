@@ -327,7 +327,6 @@ export class HistoricalFundingRateService implements OnModuleInit {
           }));
           allEntries.push(...entries);
           
-          this.logger.debug(`✅ Hyperliquid: Fetched ${response.data.length} entries for ${symbol} (request ${requestCount + 1}, ${requestDays.toFixed(1)} days)`);
           
           // If we got less than 500, we've reached the end of available data
           if (response.data.length < MAX_ENTRIES_PER_REQUEST) {
@@ -545,7 +544,6 @@ export class HistoricalFundingRateService implements OnModuleInit {
       });
       
       if (Array.isArray(response.data) && response.data.length > 0) {
-        this.logger.debug(`✅ Aster: Fetched ${response.data.length} historical entries for ${symbol}`);
         return response.data.map((entry: any) => ({
           symbol: symbol, // Exchange-specific symbol (will be normalized by caller)
           exchange: ExchangeType.ASTER,
@@ -642,7 +640,6 @@ export class HistoricalFundingRateService implements OnModuleInit {
                 totalFetched++;
                 lighterCount++;
               }
-              this.logger.debug(`✅ Lighter: ${lighterData.length} entries for ${symbol} (market ${mapping.lighterMarketIndex})`);
             } else {
               lighterFailed++;
             }

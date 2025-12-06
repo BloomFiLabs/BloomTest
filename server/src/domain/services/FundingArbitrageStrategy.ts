@@ -1,7 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ExchangeType } from '../value-objects/ExchangeConfig';
-import { PerpOrderRequest, OrderSide, OrderType, TimeInForce } from '../value-objects/PerpOrder';
+import { PerpOrderRequest, PerpOrderResponse, OrderSide, OrderType, TimeInForce, OrderStatus } from '../value-objects/PerpOrder';
 import { PerpPosition } from '../entities/PerpPosition';
 import { FundingRateAggregator, ArbitrageOpportunity, ExchangeSymbolMapping } from './FundingRateAggregator';
 import { IPerpExchangeAdapter } from '../ports/IPerpExchangeAdapter';
@@ -1300,7 +1300,7 @@ export class FundingArbitrageStrategy {
 
       result.opportunitiesEvaluated = opportunities.length;
 
-      this.logger.log(`Found ${opportunities.length} arbitrage opportunities`);
+      this.logger.debug(`Found ${opportunities.length} arbitrage opportunities`);
 
       if (opportunities.length === 0) {
         return result;
@@ -1568,54 +1568,25 @@ export class FundingArbitrageStrategy {
                (shortOI !== undefined && shortOI !== null && shortOI > 0);
       });
       
-      // Log all available opportunities with their APY (including unprofitable ones)
-      // This helps user see alternatives if current opportunity drops in funding
-      // Exclude opportunities with N/A OI
-      this.logger.log('\n📊 All Arbitrage Opportunities (sorted by net return, excluding N/A OI):');
-      opportunitiesWithValidOI.forEach((item, index) => {
-        // An opportunity is profitable if it has a plan (executable) OR has positive net return
-        // (some may have positive returns but were rejected for liquidity/other reasons)
-        const isProfitable = item.plan !== null;
-        const hasPositiveReturn = item.netReturn > 0 && item.netReturn !== -Infinity;
-        // Consider opportunities with break-even < 24 hours as potentially profitable
-        const hasQuickBreakEven = item.breakEvenHours !== null && item.breakEvenHours !== undefined && item.breakEvenHours < 24;
-        const isBest = index === 0 && isProfitable;
-        const prefix = isBest ? '🥇' : isProfitable ? `  ${index + 1}.` : hasPositiveReturn ? '  ⚠️' : hasQuickBreakEven ? '  ⚠️' : '  ❌';
-        const profitability = isProfitable ? '✅' : hasPositiveReturn ? '⚠️ (rejected)' : hasQuickBreakEven ? '⚠️ (quick break-even)' : '❌';
-        
-        // Format break-even info for opportunities that aren't immediately profitable
-        let breakEvenInfo = '';
-        if (item.breakEvenHours !== null && item.breakEvenHours !== undefined) {
-          const hours = Math.ceil(item.breakEvenHours);
-          const days = (hours / 24).toFixed(1);
-          breakEvenInfo = ` | Break-even: ${hours}h (${days}d) at current funding`;
-        }
-        
-        // Format liquidity info
-        const longOI = item.opportunity.longOpenInterest ?? 0;
-        const shortOI = item.opportunity.shortOpenInterest ?? 0;
-        const hasValidOI = (item.opportunity.longOpenInterest !== undefined && item.opportunity.longOpenInterest !== null && item.opportunity.longOpenInterest > 0) &&
-                           (item.opportunity.shortOpenInterest !== undefined && item.opportunity.shortOpenInterest !== null && item.opportunity.shortOpenInterest > 0);
-        const minOI = hasValidOI ? Math.min(longOI, shortOI) : 0;
-        const liquidityInfo = hasValidOI && minOI > 0
-          ? ` | OI: $${(minOI / 1000).toFixed(1)}k`
-          : ' | OI: N/A';
-        
-        const maxPortfolioInfo = item.maxPortfolioFor35APY !== null && item.maxPortfolioFor35APY !== undefined
-          ? ` | Max Portfolio (35% APY): $${(item.maxPortfolioFor35APY / 1000).toFixed(1)}k`
-          : ' | Max Portfolio (35% APY): N/A';
-        
-        this.logger.log(
-          `${prefix} ${item.opportunity.symbol}: ` +
-          `APY: ${(item.opportunity.expectedReturn * 100).toFixed(2)}% | ` +
-          `Spread: ${(item.opportunity.spread * 100).toFixed(4)}% | ` +
-          `Net Return: ${item.netReturn !== -Infinity ? '$' + item.netReturn.toFixed(4) : 'N/A'}/period ${profitability}${breakEvenInfo}${liquidityInfo}${maxPortfolioInfo} | ` +
-          `Position: ${item.positionValueUsd > 0 ? '$' + item.positionValueUsd.toFixed(2) : 'N/A'} | ` +
-          `${item.opportunity.longExchange} LONG @ ${(item.opportunity.longRate * 100).toFixed(4)}% / ` +
-          `${item.opportunity.shortExchange} SHORT @ ${(item.opportunity.shortRate * 100).toFixed(4)}%`
-        );
-      });
-      this.logger.log('');
+      // Log top opportunities only (top 5 profitable + top 3 unprofitable for reference)
+      const profitable = opportunitiesWithValidOI.filter(item => item.plan !== null).slice(0, 5);
+      const unprofitable = opportunitiesWithValidOI.filter(item => item.plan === null).slice(0, 3);
+      
+      if (profitable.length > 0 || unprofitable.length > 0) {
+        this.logger.log(`\n📊 Top Opportunities: ${profitable.length} profitable, ${unprofitable.length} unprofitable (showing top ${profitable.length + unprofitable.length} of ${opportunitiesWithValidOI.length} total)`);
+        [...profitable, ...unprofitable].forEach((item, index) => {
+          const isProfitable = item.plan !== null;
+          const prefix = isProfitable ? `  ${index + 1}.` : '  ⚠️';
+          const maxPortfolioInfo = item.maxPortfolioFor35APY !== null && item.maxPortfolioFor35APY !== undefined
+            ? ` | Max: $${(item.maxPortfolioFor35APY / 1000).toFixed(1)}k`
+            : '';
+          this.logger.log(
+            `${prefix} ${item.opportunity.symbol}: ` +
+            `APY: ${(item.opportunity.expectedReturn * 100).toFixed(2)}% | ` +
+            `Net: $${item.netReturn !== -Infinity ? item.netReturn.toFixed(4) : 'N/A'}/period${maxPortfolioInfo}`
+          );
+        });
+      }
 
       // Log optimal portfolio allocation results
       if (optimalPortfolio.opportunityCount > 0) {
@@ -1697,44 +1668,10 @@ export class FundingArbitrageStrategy {
           (item) => item.maxPortfolioFor35APY !== null && item.maxPortfolioFor35APY !== undefined && item.maxPortfolioFor35APY > 0
         );
         
+        // What-if analysis moved to debug level (not actionable)
         if (opportunitiesWithMaxPortfolio.length > 0) {
-          const totalMaxPortfolio = opportunitiesWithMaxPortfolio.reduce(
-            (sum, item) => sum + (item.maxPortfolioFor35APY || 0),
-            0
-          );
-          
-          this.logger.log(`\n   📊 What-If Analysis (${opportunitiesWithMaxPortfolio.length} opportunities with maxPortfolioFor35APY calculated):`);
-          this.logger.log(`      Total Max Portfolio (if data quality relaxed): $${totalMaxPortfolio.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-          this.logger.log(`      Top 5 Opportunities by Max Portfolio:`);
-          
-          const sortedByMaxPortfolio = [...opportunitiesWithMaxPortfolio].sort(
-            (a, b) => (b.maxPortfolioFor35APY || 0) - (a.maxPortfolioFor35APY || 0)
-          );
-          
-          sortedByMaxPortfolio.slice(0, 5).forEach((item) => {
-            const longData = this.historicalService.getHistoricalData(
-              item.opportunity.symbol,
-              item.opportunity.longExchange,
-            );
-            const shortData = this.historicalService.getHistoricalData(
-              item.opportunity.symbol,
-              item.opportunity.shortExchange,
-            );
-            const longPts = longData.length;
-            const shortPts = shortData.length;
-            const minRequired = Math.max(
-              item.opportunity.longExchange === ExchangeType.ASTER ? 21 : 168,
-              item.opportunity.shortExchange === ExchangeType.ASTER ? 21 : 168,
-            );
-            
-            this.logger.log(
-              `        ${item.opportunity.symbol}: $${(item.maxPortfolioFor35APY || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ` +
-              `(Long: ${longPts}pts, Short: ${shortPts}pts, need ${minRequired}+)`
-            );
-          });
+          this.logger.debug(`What-If Analysis: ${opportunitiesWithMaxPortfolio.length} opportunities with maxPortfolioFor35APY available`);
         }
-        
-        this.logger.log('');
       }
 
       if (executionPlans.length === 0) {
@@ -1845,19 +1782,7 @@ export class FundingArbitrageStrategy {
       let remainingCapital = totalAvailableCapital;
       let cumulativeCapitalUsed = 0;
       
-      this.logger.log('\n📊 Ladder Allocation Strategy:');
-      this.logger.log(`   Starting Capital: $${totalAvailableCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-      this.logger.log(`   Existing Positions: ${existingPositionsBySymbol.size} symbol(s)`);
-      if (existingPositionsBySymbol.size > 0) {
-        const existingSymbols = Array.from(existingPositionsBySymbol.keys());
-        this.logger.log(`   Existing Position Symbols: ${existingSymbols.join(', ')}`);
-        for (const [sym, pair] of existingPositionsBySymbol.entries()) {
-          this.logger.log(
-            `     - ${sym}: $${pair.currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ` +
-            `($${pair.currentCollateral.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} collateral)`
-          );
-        }
-      }
+      this.logger.log(`\n📊 Ladder Allocation: $${totalAvailableCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} capital, ${existingPositionsBySymbol.size} existing position(s)`);
       
       // First pass: Top up existing positions that are below their max
       for (let i = 0; i < opportunitiesWithMaxPortfolio.length; i++) {
@@ -1894,51 +1819,27 @@ export class FundingArbitrageStrategy {
               
               remainingCapital -= topUpAmount;
               
+              const isFullyFilled = topUpAmount >= additionalCollateralNeeded - 0.01;
               this.logger.log(
-                `   🔼 Position ${i + 1} (${symbol}) - TOPPING UP: ` +
-                `Current: $${existingPair.currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ` +
-                `($${currentCollateral.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} collateral). ` +
-                `Adding: $${topUpAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ` +
-                `to reach $${scaledMaxPortfolio.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ` +
-                `($${(currentCollateral + topUpAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} collateral). ` +
-                `Capital range: $${capitalRangeStart.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ` +
-                `to $${capitalRangeEnd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. ` +
-                `Remaining: $${remainingCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                `   🔼 ${symbol}: Adding $${topUpAmount.toFixed(2)} ` +
+                `(${isFullyFilled ? 'FULL' : 'PARTIAL'}) | Remaining: $${remainingCapital.toFixed(2)}`
               );
               
               // If we've topped up to max, we can move to next position
-              if (topUpAmount >= additionalCollateralNeeded - 0.01) {
+              if (isFullyFilled) {
                 cumulativeCapitalUsed = capitalRangeStart + maxCollateral; // Set to full max
-                this.logger.log(
-                  `   ✅ Position ${i + 1} (${symbol}) is now FULLY FILLED. Moving to Position ${i + 2}...`
-                );
                 continue; // Move to next position
               } else {
-                // Position is partially filled - stop here, don't move to next position
-                this.logger.log(
-                  `   ⏸️  Position ${i + 1} (${symbol}) is partially filled. ` +
-                  `Need $${(additionalCollateralNeeded - topUpAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} more ` +
-                  `to complete before moving to Position ${i + 2}.`
-                );
+                // Position is partially filled - stop here
                 break; // Stop here - don't move to next position until this one is full
               }
             } else {
               // Can't top up even $0.01 - stop here
-              this.logger.log(
-                `   ⏸️  Position ${i + 1} (${symbol}): ` +
-                `Insufficient capital to top up (need $${additionalCollateralNeeded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}). ` +
-                `Stopping ladder allocation.`
-              );
               break;
             }
           } else {
             // Position is already at or above max - move to next position
             cumulativeCapitalUsed += maxCollateral;
-            this.logger.log(
-              `   ✅ Position ${i + 1} (${symbol}): ` +
-              `Already at max ($${existingPair.currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}). ` +
-              `Moving to Position ${i + 2}...`
-            );
             continue;
           }
         } else {
@@ -1961,34 +1862,19 @@ export class FundingArbitrageStrategy {
             remainingCapital -= partialCollateral;
             
             const isFullyFilled = partialCollateral >= maxCollateral - 0.01;
-            const status = isFullyFilled ? 'Filled completely' : 'Filled partially';
-            
             this.logger.log(
-              `   ${isFullyFilled ? '✅' : '🔄'} Position ${i + 1} (${symbol}): ` +
-              `NEW - ${status} at $${partialMaxPortfolio.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ` +
-              `(Collateral: $${partialCollateral.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ` +
-              `of $${maxCollateral.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} max). ` +
-              `Capital range: $${capitalRangeStart.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ` +
-              `to $${capitalRangeEnd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. ` +
-              `Remaining: $${remainingCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              `   ${isFullyFilled ? '✅' : '🔄'} ${symbol}: NEW $${partialMaxPortfolio.toFixed(2)} ` +
+              `($${partialCollateral.toFixed(2)}/${maxCollateral.toFixed(2)} collateral, ${isFullyFilled ? 'FULL' : 'PARTIAL'}) | ` +
+              `Remaining: $${remainingCapital.toFixed(2)}`
             );
             
             // If this position is fully filled, we can move to the next position
             // Otherwise, we stop here and wait for more capital
             if (!isFullyFilled) {
-              this.logger.log(
-                `   ⏸️  Position ${i + 1} (${symbol}) is partially filled. ` +
-                `Need $${(maxCollateral - partialCollateral).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} more ` +
-                `to complete before moving to Position ${i + 2}.`
-              );
               break; // Stop here - don't move to next position until this one is full
             }
           } else {
             // No capital left - stop
-            this.logger.log(
-              `   ⏸️  Position ${i + 1} (${symbol}): ` +
-              `No capital remaining. Stopping ladder allocation.`
-            );
             break;
           }
         }
@@ -2003,30 +1889,16 @@ export class FundingArbitrageStrategy {
         0
       );
       
-      this.logger.log('\n📊 Ladder Allocation Summary:');
-      this.logger.log(`   Total Available Capital: $${totalAvailableCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-      this.logger.log(`   Total Max Portfolio (all opportunities): $${totalMaxPortfolio.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-      this.logger.log(`   Selected Max Portfolio: $${selectedMaxPortfolio.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-      this.logger.log(`   Opportunities Available: ${opportunitiesWithMaxPortfolio.length}`);
-      this.logger.log(`   Positions to Open: ${selectedOpportunities.length} (filled completely via ladder allocation)`);
-      this.logger.log(`   Capital Used: $${(totalAvailableCapital - remainingCapital).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-      this.logger.log(`   Remaining Capital: $${remainingCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-      
       if (selectedOpportunities.length === 0) {
-        this.logger.warn('⚠️ Insufficient capital to open any positions at max portfolio allocation');
+        this.logger.warn('⚠️ Insufficient capital to open any positions');
         return result;
       }
       
-      this.logger.log(`\n🎯 Selected ${selectedOpportunities.length} opportunities for execution:`);
-      selectedOpportunities.forEach((item, index) => {
-        const allocation = item.maxPortfolioFor35APY || 0;
-        this.logger.log(
-          `   ${index + 1}. ${item.opportunity.symbol}: ` +
-          `$${allocation.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ` +
-          `(Max Portfolio: $${(item.maxPortfolioFor35APY || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) ` +
-          `| APY: ${(item.opportunity.expectedReturn * 100).toFixed(2)}%`
-        );
-      });
+      this.logger.log(
+        `\n📊 Allocation: ${selectedOpportunities.length} positions, ` +
+        `$${(totalAvailableCapital - remainingCapital).toFixed(2)} used, ` +
+        `$${remainingCapital.toFixed(2)} remaining`
+      );
       
       // Only close positions that are NOT being topped up (positions we're replacing with new ones)
       const positionsToClose: PerpPosition[] = [];
@@ -2043,13 +1915,27 @@ export class FundingArbitrageStrategy {
       }
       
       if (positionsToClose.length > 0) {
-        this.logger.log(`\n🔄 Closing ${positionsToClose.length} existing position(s) that are not being topped up...`);
+        this.logger.log(`🔄 Closing ${positionsToClose.length} position(s)...`);
         await this.closeAllPositions(positionsToClose, adapters, result);
         await new Promise(resolve => setTimeout(resolve, 1000));
-      } else if (selectedOpportunities.some(item => item.isExisting)) {
-        this.logger.log(`\n🔼 Topping up existing positions - no positions to close`);
       }
       
+      // Refresh balances after closing positions (they may have changed)
+      for (const [exchange, adapter] of adapters) {
+        try {
+          const allPositions = await adapter.getPositions();
+          const marginUsed = allPositions.reduce((sum, pos) => {
+            const posValue = pos.getPositionValue();
+            return sum + (pos.marginUsed ?? (posValue / this.leverage));
+          }, 0);
+          const totalBalance = await adapter.getBalance();
+          const availableBalance = Math.max(0, totalBalance - marginUsed);
+          exchangeBalances.set(exchange, availableBalance);
+        } catch (error: any) {
+          this.logger.debug(`Failed to refresh balance for ${exchange}: ${error.message}`);
+        }
+      }
+
       // Execute all selected positions
       const executionResults = await this.executeMultiplePositions(
         selectedOpportunities,
@@ -2129,7 +2015,21 @@ export class FundingArbitrageStrategy {
 
         const closeResponse = await adapter.placeOrder(closeOrder);
         
-        if (closeResponse.isSuccess()) {
+        // Wait and retry if order didn't fill immediately
+        let finalResponse = closeResponse;
+        if (!closeResponse.isFilled() && closeResponse.orderId) {
+          finalResponse = await this.waitForOrderFill(
+            adapter,
+            closeResponse.orderId,
+            position.symbol,
+            position.exchangeType,
+            position.size,
+            5, // maxRetries
+            2000, // pollIntervalMs
+          );
+        }
+        
+        if (finalResponse.isSuccess() && finalResponse.isFilled()) {
           // Record position exit in loss tracker
           const exitFeeRate = this.EXCHANGE_FEE_RATES.get(position.exchangeType) || 0.0005;
           const positionValueUsd = position.size * (position.markPrice || 0);
@@ -2148,7 +2048,7 @@ export class FundingArbitrageStrategy {
           this.logger.log(`✅ Successfully closed position: ${position.symbol} on ${position.exchangeType}`);
         } else {
           this.logger.warn(
-            `⚠️ Failed to close position ${position.symbol} on ${position.exchangeType}: ${closeResponse.error || 'unknown error'}`
+            `⚠️ Failed to close position ${position.symbol} on ${position.exchangeType}: ${finalResponse.error || 'order not filled'}`
           );
           result.errors.push(`Failed to close position ${position.symbol} on ${position.exchangeType}`);
         }
@@ -2160,6 +2060,91 @@ export class FundingArbitrageStrategy {
         result.errors.push(`Error closing position ${position.symbol}: ${error.message}`);
       }
     }
+  }
+
+  /**
+   * Wait for an order to fill by polling order status
+   * Retries if order doesn't fill within the timeout
+   */
+  private async waitForOrderFill(
+    adapter: IPerpExchangeAdapter,
+    orderId: string,
+    symbol: string,
+    exchangeType: ExchangeType,
+    expectedSize: number,
+    maxRetries: number = 5,
+    pollIntervalMs: number = 2000,
+  ): Promise<PerpOrderResponse> {
+    this.logger.log(
+      `⏳ Waiting for order ${orderId} to fill on ${exchangeType} (${symbol})...`
+    );
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        // Wait before polling (except first attempt)
+        if (attempt > 0) {
+          await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+        }
+
+        const statusResponse = await adapter.getOrderStatus(orderId, symbol);
+        
+        if (statusResponse.isFilled()) {
+          this.logger.log(
+            `✅ Order ${orderId} filled on attempt ${attempt + 1}/${maxRetries} ` +
+            `(filled: ${statusResponse.filledSize || expectedSize})`
+          );
+          return statusResponse;
+        }
+
+        if (statusResponse.status === OrderStatus.CANCELLED || statusResponse.error) {
+          this.logger.warn(
+            `⚠️ Order ${orderId} was cancelled or has error: ${statusResponse.error || 'cancelled'}`
+          );
+          return statusResponse;
+        }
+
+        // Order is still resting/submitted - continue polling
+        this.logger.debug(
+          `   Order ${orderId} still ${statusResponse.status} (attempt ${attempt + 1}/${maxRetries})...`
+        );
+      } catch (error: any) {
+        this.logger.warn(
+          `   Failed to check order status for ${orderId} (attempt ${attempt + 1}/${maxRetries}): ${error.message}`
+        );
+        
+        // If this is the last attempt, return error response
+        if (attempt === maxRetries - 1) {
+          return new PerpOrderResponse(
+            orderId,
+            OrderStatus.REJECTED,
+            symbol,
+            OrderSide.LONG,
+            undefined,
+            undefined,
+            undefined,
+            `Failed to check order status after ${maxRetries} attempts: ${error.message}`,
+          );
+        }
+      }
+    }
+
+    // Max retries reached - order still not filled
+    this.logger.warn(
+      `⚠️ Order ${orderId} did not fill after ${maxRetries} attempts (${(maxRetries * pollIntervalMs) / 1000}s). ` +
+      `Order may still be resting on the order book.`
+    );
+    
+    // Return a response indicating the order is still pending
+    return new PerpOrderResponse(
+      orderId,
+      OrderStatus.SUBMITTED,
+      symbol,
+      OrderSide.LONG,
+      undefined,
+      undefined,
+      undefined,
+      `Order did not fill within ${(maxRetries * pollIntervalMs) / 1000} seconds`,
+    );
   }
 
   /**
@@ -2276,9 +2261,8 @@ export class FundingArbitrageStrategy {
       return false;
     }
 
-    this.logger.log(
-      `🔄 Attempting to rebalance capital for ${opportunity.symbol}: ` +
-      `Need $${requiredCollateral.toFixed(2)} on both ${longExchange} and ${shortExchange}`
+    this.logger.debug(
+      `Rebalancing for ${opportunity.symbol}: Need $${requiredCollateral.toFixed(2)} on both exchanges`
     );
 
     // Get all exchange balances to identify unused exchanges
@@ -2288,7 +2272,7 @@ export class FundingArbitrageStrategy {
     for (const [exchange, balance] of allBalances) {
       if (exchange !== longExchange && exchange !== shortExchange && balance > 0) {
         unusedExchanges.push(exchange);
-        this.logger.log(`   Found unused exchange ${exchange} with $${balance.toFixed(2)}`);
+        this.logger.debug(`   Found unused exchange ${exchange} with $${balance.toFixed(2)}`);
       }
     }
 
@@ -2298,7 +2282,7 @@ export class FundingArbitrageStrategy {
     const totalDeficit = longDeficit + shortDeficit;
 
     if (totalDeficit === 0) {
-      this.logger.log('✅ No rebalancing needed - both exchanges have sufficient balance');
+      this.logger.debug('No rebalancing needed - both exchanges have sufficient balance');
       return true;
     }
 
@@ -2310,9 +2294,9 @@ export class FundingArbitrageStrategy {
     }
 
     if (totalAvailableFromUnused > 0 && totalDeficit > 0) {
-      this.logger.log(
-        `   Strategy 1: Found $${totalAvailableFromUnused.toFixed(2)} on unused exchanges, ` +
-        `need $${totalDeficit.toFixed(2)} total`
+      this.logger.debug(
+        `Rebalancing: $${totalAvailableFromUnused.toFixed(2)} available from unused exchanges, ` +
+        `need $${totalDeficit.toFixed(2)}`
       );
 
       // Distribute unused funds proportionally to deficits
@@ -2338,9 +2322,7 @@ export class FundingArbitrageStrategy {
         if (remainingLongNeeded > 0 && unusedBalance > 0) {
           const transferAmount = Math.min(remainingLongNeeded, unusedBalance);
           try {
-            this.logger.log(
-              `   📤 Transferring $${transferAmount.toFixed(2)} from ${unusedExchange} to ${longExchange}...`
-            );
+            this.logger.debug(`Transferring $${transferAmount.toFixed(2)} from ${unusedExchange} to ${longExchange}`);
             await (this.balanceRebalancer as any).transferBetweenExchanges(
               unusedExchange,
               longExchange,
@@ -2353,7 +2335,7 @@ export class FundingArbitrageStrategy {
             allBalances.set(unusedExchange, unusedBalance);
             await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for transfer to settle
           } catch (error: any) {
-            this.logger.warn(`   ⚠️ Failed to transfer from ${unusedExchange} to ${longExchange}: ${error.message}`);
+            this.logger.warn(`Failed to transfer from ${unusedExchange} to ${longExchange}: ${error.message}`);
           }
         }
 
@@ -2361,9 +2343,7 @@ export class FundingArbitrageStrategy {
         if (remainingShortNeeded > 0 && unusedBalance > 0) {
           const transferAmount = Math.min(remainingShortNeeded, unusedBalance);
           try {
-            this.logger.log(
-              `   📤 Transferring $${transferAmount.toFixed(2)} from ${unusedExchange} to ${shortExchange}...`
-            );
+            this.logger.debug(`Transferring $${transferAmount.toFixed(2)} from ${unusedExchange} to ${shortExchange}`);
             await (this.balanceRebalancer as any).transferBetweenExchanges(
               unusedExchange,
               shortExchange,
@@ -2374,27 +2354,47 @@ export class FundingArbitrageStrategy {
             remainingShortNeeded -= transferAmount;
             await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for transfer to settle
           } catch (error: any) {
-            this.logger.warn(`   ⚠️ Failed to transfer from ${unusedExchange} to ${shortExchange}: ${error.message}`);
+            this.logger.warn(`Failed to transfer from ${unusedExchange} to ${shortExchange}: ${error.message}`);
           }
         }
       }
     }
 
     // Strategy 2: Rebalance between the two exchanges if one has excess
-    const updatedLongBalance = await longAdapter.getBalance();
-    const updatedShortBalance = await shortAdapter.getBalance();
-    const updatedLongDeficit = Math.max(0, requiredCollateral - updatedLongBalance);
-    const updatedShortDeficit = Math.max(0, requiredCollateral - updatedShortBalance);
+    // Refresh balances and account for locked margin
+    const [updatedLongBalance, updatedShortBalance] = await Promise.all([
+      longAdapter.getBalance(),
+      shortAdapter.getBalance(),
+    ]);
+    
+    // Get positions to calculate locked margin
+    const [updatedLongPositions, updatedShortPositions] = await Promise.all([
+      longAdapter.getPositions(),
+      shortAdapter.getPositions(),
+    ]);
+    
+    const updatedLongMarginUsed = updatedLongPositions.reduce((sum, pos) => {
+      const posValue = pos.getPositionValue();
+      return sum + (pos.marginUsed ?? (posValue / this.leverage));
+    }, 0);
+    const updatedShortMarginUsed = updatedShortPositions.reduce((sum, pos) => {
+      const posValue = pos.getPositionValue();
+      return sum + (pos.marginUsed ?? (posValue / this.leverage));
+    }, 0);
+    
+    const updatedLongAvailable = Math.max(0, updatedLongBalance - updatedLongMarginUsed);
+    const updatedShortAvailable = Math.max(0, updatedShortBalance - updatedShortMarginUsed);
+    
+    const updatedLongDeficit = Math.max(0, requiredCollateral - updatedLongAvailable);
+    const updatedShortDeficit = Math.max(0, requiredCollateral - updatedShortAvailable);
 
-    if (updatedLongDeficit > 0 && updatedShortBalance > requiredCollateral) {
+    if (updatedLongDeficit > 0 && updatedShortAvailable > requiredCollateral) {
       // Short has excess, transfer to long
-      const excess = updatedShortBalance - requiredCollateral;
+      const excess = updatedShortAvailable - requiredCollateral;
       const transferAmount = Math.min(updatedLongDeficit, excess);
       if (transferAmount > 0) {
         try {
-          this.logger.log(
-            `   Strategy 2: Transferring $${transferAmount.toFixed(2)} from ${shortExchange} (excess) to ${longExchange} (deficit)...`
-          );
+          this.logger.debug(`Rebalancing: $${transferAmount.toFixed(2)} from ${shortExchange} to ${longExchange}`);
           await (this.balanceRebalancer as any).transferBetweenExchanges(
             shortExchange,
             longExchange,
@@ -2404,18 +2404,16 @@ export class FundingArbitrageStrategy {
           );
           await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for transfer to settle
         } catch (error: any) {
-          this.logger.warn(`   ⚠️ Failed to transfer between exchanges: ${error.message}`);
+          this.logger.warn(`Failed to transfer between exchanges: ${error.message}`);
         }
       }
-    } else if (updatedShortDeficit > 0 && updatedLongBalance > requiredCollateral) {
+    } else if (updatedShortDeficit > 0 && updatedLongAvailable > requiredCollateral) {
       // Long has excess, transfer to short
-      const excess = updatedLongBalance - requiredCollateral;
+      const excess = updatedLongAvailable - requiredCollateral;
       const transferAmount = Math.min(updatedShortDeficit, excess);
       if (transferAmount > 0) {
         try {
-          this.logger.log(
-            `   Strategy 2: Transferring $${transferAmount.toFixed(2)} from ${longExchange} (excess) to ${shortExchange} (deficit)...`
-          );
+          this.logger.debug(`Rebalancing: $${transferAmount.toFixed(2)} from ${longExchange} to ${shortExchange}`);
           await (this.balanceRebalancer as any).transferBetweenExchanges(
             longExchange,
             shortExchange,
@@ -2425,28 +2423,48 @@ export class FundingArbitrageStrategy {
           );
           await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for transfer to settle
         } catch (error: any) {
-          this.logger.warn(`   ⚠️ Failed to transfer between exchanges: ${error.message}`);
+          this.logger.warn(`Failed to transfer between exchanges: ${error.message}`);
         }
       }
     }
 
-    // Final check
-    const finalLongBalance = await longAdapter.getBalance();
-    const finalShortBalance = await shortAdapter.getBalance();
-    const finalLongDeficit = Math.max(0, requiredCollateral - finalLongBalance);
-    const finalShortDeficit = Math.max(0, requiredCollateral - finalShortBalance);
+    // Final check - refresh balances and account for locked margin
+    const [finalLongBalance, finalShortBalance] = await Promise.all([
+      longAdapter.getBalance(),
+      shortAdapter.getBalance(),
+    ]);
+    
+    // Get positions to calculate locked margin
+    const [finalLongPositions, finalShortPositions] = await Promise.all([
+      longAdapter.getPositions(),
+      shortAdapter.getPositions(),
+    ]);
+    
+    const finalLongMarginUsed = finalLongPositions.reduce((sum, pos) => {
+      const posValue = pos.getPositionValue();
+      return sum + (pos.marginUsed ?? (posValue / this.leverage));
+    }, 0);
+    const finalShortMarginUsed = finalShortPositions.reduce((sum, pos) => {
+      const posValue = pos.getPositionValue();
+      return sum + (pos.marginUsed ?? (posValue / this.leverage));
+    }, 0);
+    
+    const finalLongAvailable = Math.max(0, finalLongBalance - finalLongMarginUsed);
+    const finalShortAvailable = Math.max(0, finalShortBalance - finalShortMarginUsed);
+    
+    const finalLongDeficit = Math.max(0, requiredCollateral - finalLongAvailable);
+    const finalShortDeficit = Math.max(0, requiredCollateral - finalShortAvailable);
 
     if (finalLongDeficit === 0 && finalShortDeficit === 0) {
-      this.logger.log(
-        `✅ Rebalancing successful! Both exchanges now have sufficient balance: ` +
-        `${longExchange}: $${finalLongBalance.toFixed(2)}, ${shortExchange}: $${finalShortBalance.toFixed(2)}`
+      this.logger.debug(
+        `Rebalancing successful: ${longExchange}: $${finalLongAvailable.toFixed(2)}, ` +
+        `${shortExchange}: $${finalShortAvailable.toFixed(2)}`
       );
       return true;
     } else {
       this.logger.warn(
-        `⚠️ Rebalancing partially successful but still insufficient: ` +
-        `${longExchange}: $${finalLongBalance.toFixed(2)} (need $${requiredCollateral.toFixed(2)}), ` +
-        `${shortExchange}: $${finalShortBalance.toFixed(2)} (need $${requiredCollateral.toFixed(2)})`
+        `Rebalancing insufficient: ${longExchange}: $${finalLongAvailable.toFixed(2)} (need $${requiredCollateral.toFixed(2)}), ` +
+        `${shortExchange}: $${finalShortAvailable.toFixed(2)} (need $${requiredCollateral.toFixed(2)})`
       );
       return false;
     }
@@ -2490,11 +2508,13 @@ export class FundingArbitrageStrategy {
       try {
         let allocation: number;
         let isTopUp = false;
+        let collateralNeeded = 0;
         
         if (item.isExisting && item.additionalCollateralNeeded && item.additionalCollateralNeeded > 0) {
           // This is a top-up - calculate additional size needed
           // Additional collateral * leverage = additional notional size
           allocation = item.additionalCollateralNeeded * this.leverage;
+          collateralNeeded = item.additionalCollateralNeeded;
           isTopUp = true;
           this.logger.log(
             `🔼 [${i + 1}/${opportunities.length}] Topping up ${item.opportunity.symbol}: ` +
@@ -2505,24 +2525,11 @@ export class FundingArbitrageStrategy {
         } else {
           // New position - use full allocation
           allocation = item.maxPortfolioFor35APY || 0;
+          collateralNeeded = allocation / this.leverage;
           if (allocation <= 0) {
             this.logger.warn(`Skipping ${item.opportunity.symbol}: invalid allocation`);
             continue;
           }
-        }
-
-        // Create execution plan with the specific allocation amount
-        const plan = await this.createExecutionPlanWithAllocation(
-          item.opportunity,
-          adapters,
-          allocation,
-          item.opportunity.longMarkPrice,
-          item.opportunity.shortMarkPrice,
-        );
-
-        if (!plan) {
-          this.logger.warn(`Failed to create execution plan for ${item.opportunity.symbol} with allocation $${allocation.toFixed(2)}`);
-          continue;
         }
 
         const { opportunity } = item;
@@ -2538,13 +2545,114 @@ export class FundingArbitrageStrategy {
           continue;
         }
 
+        // Refresh balances before execution to ensure we have accurate data
+        // This is critical after rebalancing or previous executions
+        try {
+          const [longBalance, shortBalance] = await Promise.all([
+            longAdapter.getBalance(),
+            shortAdapter.getBalance(),
+          ]);
+          
+          // Get current positions to calculate locked margin
+          const [longPositions, shortPositions] = await Promise.all([
+            longAdapter.getPositions(),
+            shortAdapter.getPositions(),
+          ]);
+          
+          const longMarginUsed = longPositions.reduce((sum, pos) => {
+            const posValue = pos.getPositionValue();
+            return sum + (pos.marginUsed ?? (posValue / this.leverage));
+          }, 0);
+          const shortMarginUsed = shortPositions.reduce((sum, pos) => {
+            const posValue = pos.getPositionValue();
+            return sum + (pos.marginUsed ?? (posValue / this.leverage));
+          }, 0);
+          
+          const longAvailable = Math.max(0, longBalance - longMarginUsed);
+          const shortAvailable = Math.max(0, shortBalance - shortMarginUsed);
+          
+          exchangeBalances.set(opportunity.longExchange, longAvailable);
+          exchangeBalances.set(opportunity.shortExchange, shortAvailable);
+          
+          // Check if we still have sufficient balance after refresh
+          if (longAvailable < collateralNeeded || shortAvailable < collateralNeeded) {
+            this.logger.warn(
+              `⚠️ Insufficient balance after refresh for ${opportunity.symbol}: ` +
+              `${opportunity.longExchange}: $${longAvailable.toFixed(2)} (need $${collateralNeeded.toFixed(2)}), ` +
+              `${opportunity.shortExchange}: $${shortAvailable.toFixed(2)} (need $${collateralNeeded.toFixed(2)})`
+            );
+            
+            // Attempt rebalancing one more time with fresh balances
+            const rebalanceSuccess = await this.attemptRebalanceForOpportunity(
+              opportunity,
+              adapters,
+              collateralNeeded,
+              longAvailable,
+              shortAvailable
+            );
+            
+            if (!rebalanceSuccess) {
+              this.logger.warn(`Skipping ${opportunity.symbol}: insufficient balance even after rebalancing`);
+              result.errors.push(
+                `Insufficient balance for ${opportunity.symbol} even after rebalancing: ` +
+                `${opportunity.longExchange}: $${longAvailable.toFixed(2)}, ` +
+                `${opportunity.shortExchange}: $${shortAvailable.toFixed(2)}`
+              );
+              continue; // Skip this opportunity, capital remains available for next
+            }
+            
+            // Re-check balances after rebalancing
+            const [updatedLongBalance, updatedShortBalance] = await Promise.all([
+              longAdapter.getBalance(),
+              shortAdapter.getBalance(),
+            ]);
+            const [updatedLongPositions, updatedShortPositions] = await Promise.all([
+              longAdapter.getPositions(),
+              shortAdapter.getPositions(),
+            ]);
+            const updatedLongMarginUsed = updatedLongPositions.reduce((sum, pos) => {
+              const posValue = pos.getPositionValue();
+              return sum + (pos.marginUsed ?? (posValue / this.leverage));
+            }, 0);
+            const updatedShortMarginUsed = updatedShortPositions.reduce((sum, pos) => {
+              const posValue = pos.getPositionValue();
+              return sum + (pos.marginUsed ?? (posValue / this.leverage));
+            }, 0);
+            const updatedLongAvailable = Math.max(0, updatedLongBalance - updatedLongMarginUsed);
+            const updatedShortAvailable = Math.max(0, updatedShortBalance - updatedShortMarginUsed);
+            
+            if (updatedLongAvailable < collateralNeeded || updatedShortAvailable < collateralNeeded) {
+              this.logger.warn(`Still insufficient balance after rebalancing for ${opportunity.symbol}, skipping`);
+              continue;
+            }
+            
+            exchangeBalances.set(opportunity.longExchange, updatedLongAvailable);
+            exchangeBalances.set(opportunity.shortExchange, updatedShortAvailable);
+          }
+        } catch (error: any) {
+          this.logger.warn(`Failed to refresh balances before execution: ${error.message}`);
+          // Continue anyway - might still work
+        }
+
+        // Create execution plan with the specific allocation amount
+        const plan = await this.createExecutionPlanWithAllocation(
+          item.opportunity,
+          adapters,
+          allocation,
+          item.opportunity.longMarkPrice,
+          item.opportunity.shortMarkPrice,
+        );
+
+        if (!plan) {
+          this.logger.warn(`Failed to create execution plan for ${item.opportunity.symbol} with allocation $${allocation.toFixed(2)}`);
+          continue; // Capital remains available for next opportunity
+        }
+
         // Place orders (in parallel for speed)
         const actionType = isTopUp ? 'Topping up' : 'Opening';
         this.logger.log(
           `📤 [${i + 1}/${opportunities.length}] ${actionType} ${opportunity.symbol}: ` +
-          `LONG ${plan.positionSize.toFixed(4)} on ${opportunity.longExchange}, ` +
-          `SHORT ${plan.positionSize.toFixed(4)} on ${opportunity.shortExchange} ` +
-          `(${isTopUp ? 'Additional' : 'Total'} Allocation: $${allocation.toFixed(2)})`
+          `$${allocation.toFixed(2)} (${plan.positionSize.toFixed(4)} size)`
         );
 
         const [longResponse, shortResponse] = await Promise.all([
@@ -2552,26 +2660,71 @@ export class FundingArbitrageStrategy {
           shortAdapter.placeOrder(plan.shortOrder),
         ]);
 
+        // Wait for orders to fill if they're not immediately filled
+        let finalLongResponse = longResponse;
+        let finalShortResponse = shortResponse;
+        
+        if (!longResponse.isFilled() && longResponse.orderId) {
+          finalLongResponse = await this.waitForOrderFill(
+            longAdapter,
+            longResponse.orderId,
+            opportunity.symbol,
+            opportunity.longExchange,
+            plan.positionSize,
+          );
+        }
+        
+        if (!shortResponse.isFilled() && shortResponse.orderId) {
+          finalShortResponse = await this.waitForOrderFill(
+            shortAdapter,
+            shortResponse.orderId,
+            opportunity.symbol,
+            opportunity.shortExchange,
+            plan.positionSize,
+          );
+        }
+
         // Track volume for filled orders
         if (this.performanceLogger) {
-          if (longResponse.isFilled() && longResponse.filledSize && longResponse.averageFillPrice) {
-            const longVolume = longResponse.filledSize * longResponse.averageFillPrice;
+          if (finalLongResponse.isFilled() && finalLongResponse.filledSize && finalLongResponse.averageFillPrice) {
+            const longVolume = finalLongResponse.filledSize * finalLongResponse.averageFillPrice;
             this.performanceLogger.recordTradeVolume(longVolume);
           }
-          if (shortResponse.isFilled() && shortResponse.filledSize && shortResponse.averageFillPrice) {
-            const shortVolume = shortResponse.filledSize * shortResponse.averageFillPrice;
+          if (finalShortResponse.isFilled() && finalShortResponse.filledSize && finalShortResponse.averageFillPrice) {
+            const shortVolume = finalShortResponse.filledSize * finalShortResponse.averageFillPrice;
             this.performanceLogger.recordTradeVolume(shortVolume);
           }
         }
 
-        if (longResponse.isSuccess() && shortResponse.isSuccess()) {
-          // Record position entries in loss tracker
+        // Check if both orders succeeded and filled
+        const longSuccess = finalLongResponse.isSuccess() && finalLongResponse.isFilled();
+        const shortSuccess = finalShortResponse.isSuccess() && finalShortResponse.isFilled();
+        
+        // Handle partial fills
+        const longFilled = finalLongResponse.filledSize || 0;
+        const shortFilled = finalShortResponse.filledSize || 0;
+        const minFilled = Math.min(longFilled, shortFilled);
+        const isPartialFill = (longSuccess && shortSuccess) && (minFilled < plan.positionSize - 0.0001);
+        
+        if (longSuccess && shortSuccess) {
+          if (isPartialFill) {
+            this.logger.warn(
+              `⚠️ Partial fill for ${opportunity.symbol}: ` +
+              `Long: ${longFilled.toFixed(4)}/${plan.positionSize.toFixed(4)}, ` +
+              `Short: ${shortFilled.toFixed(4)}/${plan.positionSize.toFixed(4)}`
+            );
+            // Capital for the unfilled portion remains available, but we still count this as a success
+            // The unfilled capital will be available in the next execution cycle
+          }
+          
+          // Record position entries in loss tracker (use actual filled size)
           const longFeeRate = this.EXCHANGE_FEE_RATES.get(opportunity.longExchange) || 0.0005;
           const shortFeeRate = this.EXCHANGE_FEE_RATES.get(opportunity.shortExchange) || 0.0005;
           const avgMarkPrice = opportunity.longMarkPrice && opportunity.shortMarkPrice
             ? (opportunity.longMarkPrice + opportunity.shortMarkPrice) / 2
             : opportunity.longMarkPrice || opportunity.shortMarkPrice || 0;
-          const positionSizeUsd = plan.positionSize * avgMarkPrice;
+          const actualFilledSize = isPartialFill ? minFilled : plan.positionSize;
+          const positionSizeUsd = actualFilledSize * avgMarkPrice;
           const longEntryCost = longFeeRate * positionSizeUsd;
           const shortEntryCost = shortFeeRate * positionSizeUsd;
           
@@ -2590,21 +2743,48 @@ export class FundingArbitrageStrategy {
           
           successfulExecutions++;
           totalOrders += 2;
-          totalExpectedReturn += plan.expectedNetReturn;
+          totalExpectedReturn += plan.expectedNetReturn * (isPartialFill ? (actualFilledSize / plan.positionSize) : 1);
 
           this.logger.log(
-            `✅ [${i + 1}/${opportunities.length}] Successfully executed ${opportunity.symbol}: ` +
-            `Expected return: $${plan.expectedNetReturn.toFixed(4)} per period ` +
-            `(APY: ${(opportunity.expectedReturn * 100).toFixed(2)}%)`
+            `✅ [${i + 1}/${opportunities.length}] ${opportunity.symbol}${isPartialFill ? ' (PARTIAL)' : ''}: ` +
+            `$${(plan.expectedNetReturn * (isPartialFill ? (actualFilledSize / plan.positionSize) : 1)).toFixed(4)}/period ` +
+            `(${(opportunity.expectedReturn * 100).toFixed(2)}% APY)`
           );
+          
+          // Refresh balances after successful execution to account for locked margin
+          try {
+            const [newLongBalance, newShortBalance] = await Promise.all([
+              longAdapter.getBalance(),
+              shortAdapter.getBalance(),
+            ]);
+            const [newLongPositions, newShortPositions] = await Promise.all([
+              longAdapter.getPositions(),
+              shortAdapter.getPositions(),
+            ]);
+            const newLongMarginUsed = newLongPositions.reduce((sum, pos) => {
+              const posValue = pos.getPositionValue();
+              return sum + (pos.marginUsed ?? (posValue / this.leverage));
+            }, 0);
+            const newShortMarginUsed = newShortPositions.reduce((sum, pos) => {
+              const posValue = pos.getPositionValue();
+              return sum + (pos.marginUsed ?? (posValue / this.leverage));
+            }, 0);
+            exchangeBalances.set(opportunity.longExchange, Math.max(0, newLongBalance - newLongMarginUsed));
+            exchangeBalances.set(opportunity.shortExchange, Math.max(0, newShortBalance - newShortMarginUsed));
+          } catch (error: any) {
+            this.logger.debug(`Failed to refresh balances after execution: ${error.message}`);
+          }
         } else {
+          // Execution failed - capital remains available for next opportunity
+          const longError = finalLongResponse.error || (finalLongResponse.isFilled() ? 'none' : 'not filled');
+          const shortError = finalShortResponse.error || (finalShortResponse.isFilled() ? 'none' : 'not filled');
           result.errors.push(
             `Order execution failed for ${opportunity.symbol}: ` +
-            `Long: ${longResponse.error || 'unknown'}, Short: ${shortResponse.error || 'unknown'}`
+            `Long: ${longError}, Short: ${shortError}`
           );
-          this.logger.error(
-            `❌ [${i + 1}/${opportunities.length}] Order execution failed for ${opportunity.symbol}: ` +
-            `Long success: ${longResponse.isSuccess()}, Short success: ${shortResponse.isSuccess()}`
+          this.logger.warn(
+            `❌ [${i + 1}/${opportunities.length}] ${opportunity.symbol} failed: ` +
+            `${longError} / ${shortError}`
           );
         }
 
@@ -2614,13 +2794,13 @@ export class FundingArbitrageStrategy {
         }
       } catch (error: any) {
         result.errors.push(`Error executing ${item.opportunity.symbol}: ${error.message}`);
-        this.logger.error(`Failed to execute ${item.opportunity.symbol}: ${error.message}`);
+        this.logger.error(`Failed to execute ${item.opportunity.symbol}: ${error.message}. Capital remains available.`);
       }
     }
 
     this.logger.log(
-      `\n✅ Portfolio execution complete: ${successfulExecutions}/${opportunities.length} positions opened, ` +
-      `${totalOrders} orders placed, Total expected return: $${totalExpectedReturn.toFixed(4)} per period`
+      `✅ Execution: ${successfulExecutions}/${opportunities.length} positions, ` +
+      `$${totalExpectedReturn.toFixed(2)}/period expected`
     );
 
     return {
@@ -3476,7 +3656,7 @@ export class FundingArbitrageStrategy {
       if (longResponse.isSuccess() && shortResponse.isSuccess()) {
         result.opportunitiesExecuted = 1;
         result.ordersPlaced = 2;
-        this.logger.log(`✅ Successfully executed worst-case opportunity: ${worstCase.opportunity.symbol}`);
+        // Worst-case opportunity executed successfully - no log needed for routine operation
       } else {
         result.errors.push(`Failed to execute worst-case opportunity orders`);
       }

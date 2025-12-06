@@ -127,10 +127,7 @@ export class LighterFundingDataProvider implements OnModuleInit {
    * @returns Open interest in USD
    */
   async getOpenInterest(marketIndex: number): Promise<number> {
-    this.logger.log(`🔍 LIGHTER OI CALL: getOpenInterest(${marketIndex}) - Starting...`);
-    
     // Use orderBookDetails API endpoint (REST API)
-    this.logger.log(`  🌐 Calling orderBookDetails API for market_id=${marketIndex}...`);
     
     try {
       const orderBookUrl = `${this.baseUrl}/api/v1/orderBookDetails`;
@@ -237,8 +234,6 @@ export class LighterFundingDataProvider implements OnModuleInit {
    * @returns Object with openInterest (USD) and markPrice
    */
   async getOpenInterestAndMarkPrice(marketIndex: number): Promise<{ openInterest: number; markPrice: number }> {
-    this.logger.log(`🔍 LIGHTER: getOpenInterestAndMarkPrice(${marketIndex}) - Starting...`);
-    
     try {
       const orderBookUrl = `${this.baseUrl}/api/v1/orderBookDetails`;
       const response = await axios.get(orderBookUrl, {

@@ -5,7 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { PerpKeeperPerformanceLogger } from '../../infrastructure/logging/PerpKeeperPerformanceLogger';
 import { PerpKeeperService } from './PerpKeeperService';
 import { ExchangeType } from '../../domain/value-objects/ExchangeConfig';
-import { PerpOrderRequest, OrderSide, OrderType, TimeInForce } from '../../domain/value-objects/PerpOrder';
+import { PerpOrderRequest, OrderSide, OrderType, TimeInForce, OrderStatus } from '../../domain/value-objects/PerpOrder';
 import { Contract, JsonRpcProvider, Wallet, formatUnits } from 'ethers';
 import * as cliProgress from 'cli-progress';
 
@@ -196,7 +196,39 @@ export class PerpKeeperScheduler implements OnModuleInit {
               );
               
               this.logger.log(`   Closing ${position.symbol} on ${position.exchangeType}...`);
-              const closeResponse = await adapter.placeOrder(closeOrder);
+              let closeResponse = await adapter.placeOrder(closeOrder);
+              
+              // Wait and retry if order didn't fill immediately
+              if (!closeResponse.isFilled() && closeResponse.orderId) {
+                this.logger.log(`   ⏳ Order not filled immediately, polling for fill...`);
+                const maxRetries = 5;
+                const pollIntervalMs = 2000;
+                
+                for (let attempt = 0; attempt < maxRetries; attempt++) {
+                  if (attempt > 0) {
+                    await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+                  }
+                  
+                  try {
+                    const statusResponse = await adapter.getOrderStatus(closeResponse.orderId, position.symbol);
+                    if (statusResponse.isFilled()) {
+                      closeResponse = statusResponse;
+                      this.logger.log(`   ✅ Order filled on attempt ${attempt + 1}/${maxRetries}`);
+                      break;
+                    }
+                    if (statusResponse.status === OrderStatus.CANCELLED || statusResponse.error) {
+                      closeResponse = statusResponse;
+                      break;
+                    }
+                    this.logger.debug(`   Order still ${statusResponse.status} (attempt ${attempt + 1}/${maxRetries})...`);
+                  } catch (error: any) {
+                    this.logger.warn(`   Failed to check order status (attempt ${attempt + 1}/${maxRetries}): ${error.message}`);
+                    if (attempt === maxRetries - 1) {
+                      this.logger.warn(`   ⚠️ Could not verify order fill after ${maxRetries} attempts`);
+                    }
+                  }
+                }
+              }
               
               if (closeResponse.isFilled()) {
                 this.logger.log(`   ✅ Successfully closed position: ${position.symbol} on ${position.exchangeType}`);
