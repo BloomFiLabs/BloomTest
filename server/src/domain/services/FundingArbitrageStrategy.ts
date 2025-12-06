@@ -1787,26 +1787,151 @@ export class FundingArbitrageStrategy {
         return await this.executeSinglePosition(bestOpportunity, adapters, result, this.lossTracker);
       }
       
-      // Greedily select positions: keep adding positions at maxPortfolioFor35APY until we run out of capital
+      // Ladder allocation: Fill positions sequentially, completely filling each before moving to the next
+      // Position 1: $0 to position1Max, Position 2: position1Max+1 to position2Max, etc.
       // Each position requires maxPortfolioFor35APY / leverage as collateral
+      // First, check existing positions and calculate where we are in the ladder
+      const currentPositions = await this.getAllPositions(adapters);
+      
+      // Map existing positions by symbol (for arbitrage pairs, we need both long and short)
+      const existingPositionsBySymbol = new Map<string, {
+        long?: PerpPosition;
+        short?: PerpPosition;
+        currentValue: number; // Total position value (long + short)
+        currentCollateral: number; // Current collateral deployed
+      }>();
+      
+      for (const position of currentPositions) {
+        if (!existingPositionsBySymbol.has(position.symbol)) {
+          existingPositionsBySymbol.set(position.symbol, {
+            currentValue: 0,
+            currentCollateral: 0,
+          });
+        }
+        const pair = existingPositionsBySymbol.get(position.symbol)!;
+        if (position.side === 'LONG') {
+          pair.long = position;
+        } else if (position.side === 'SHORT') {
+          pair.short = position;
+        }
+        pair.currentValue += position.getPositionValue();
+        const marginUsed = position.marginUsed ?? (position.getPositionValue() / this.leverage);
+        pair.currentCollateral += marginUsed;
+      }
+      
       const selectedOpportunities: Array<{
         opportunity: ArbitrageOpportunity;
         plan: ArbitrageExecutionPlan | null;
         maxPortfolioFor35APY: number | null;
+        isExisting: boolean; // Whether this is topping up an existing position
+        currentValue?: number; // Current position value if existing
+        currentCollateral?: number; // Current collateral if existing
+        additionalCollateralNeeded?: number; // Additional collateral needed to reach max
       }> = [];
       let remainingCapital = totalAvailableCapital;
+      let cumulativeCapitalUsed = 0;
       
-      for (const item of opportunitiesWithMaxPortfolio) {
+      this.logger.log('\n📊 Ladder Allocation Strategy:');
+      this.logger.log(`   Starting Capital: $${totalAvailableCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+      this.logger.log(`   Existing Positions: ${existingPositionsBySymbol.size} symbol(s)`);
+      
+      // First pass: Top up existing positions that are below their max
+      for (let i = 0; i < opportunitiesWithMaxPortfolio.length; i++) {
+        const item = opportunitiesWithMaxPortfolio[i];
+        const symbol = item.opportunity.symbol;
+        const existingPair = existingPositionsBySymbol.get(symbol);
         const maxPortfolio = item.maxPortfolioFor35APY || 0;
-        // Required collateral = maxPortfolio / leverage (since maxPortfolio is notional size with leverage)
-        const requiredCollateral = maxPortfolio / this.leverage;
+        const maxCollateral = maxPortfolio / this.leverage;
         
-        if (remainingCapital >= requiredCollateral) {
-          selectedOpportunities.push(item);
-          remainingCapital -= requiredCollateral;
+        if (existingPair && existingPair.currentCollateral > 0) {
+          // We have an existing position for this opportunity
+          const currentCollateral = existingPair.currentCollateral;
+          const additionalCollateralNeeded = maxCollateral - currentCollateral;
+          
+          if (additionalCollateralNeeded > 0.01) { // Need at least $0.01 more
+            // Position exists but is below max - calculate how much we can top up
+            const capitalRangeStart = cumulativeCapitalUsed;
+            const topUpAmount = Math.min(additionalCollateralNeeded, remainingCapital);
+            
+            if (topUpAmount >= 0.01) { // Can top up at least $0.01
+              cumulativeCapitalUsed += topUpAmount;
+              const capitalRangeEnd = cumulativeCapitalUsed;
+              
+              // Create a scaled opportunity for the top-up
+              const scaledMaxPortfolio = (currentCollateral + topUpAmount) * this.leverage;
+              selectedOpportunities.push({
+                ...item,
+                maxPortfolioFor35APY: scaledMaxPortfolio,
+                isExisting: true,
+                currentValue: existingPair.currentValue,
+                currentCollateral: currentCollateral,
+                additionalCollateralNeeded: topUpAmount,
+              });
+              
+              remainingCapital -= topUpAmount;
+              
+              this.logger.log(
+                `   🔼 Position ${i + 1} (${symbol}) - TOPPING UP: ` +
+                `Current: $${existingPair.currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ` +
+                `($${currentCollateral.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} collateral). ` +
+                `Adding: $${topUpAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ` +
+                `to reach $${scaledMaxPortfolio.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ` +
+                `($${(currentCollateral + topUpAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} collateral). ` +
+                `Capital range: $${capitalRangeStart.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ` +
+                `to $${capitalRangeEnd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. ` +
+                `Remaining: $${remainingCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              );
+              
+              // If we've topped up to max, mark as complete
+              if (topUpAmount >= additionalCollateralNeeded - 0.01) {
+                cumulativeCapitalUsed = capitalRangeStart + maxCollateral; // Set to full max
+                continue; // Move to next position
+              }
+            }
+          } else {
+            // Position is already at or above max - skip to next
+            cumulativeCapitalUsed += maxCollateral;
+            this.logger.log(
+              `   ✅ Position ${i + 1} (${symbol}): ` +
+              `Already at max ($${existingPair.currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}). ` +
+              `Skipping to next position.`
+            );
+            continue;
+          }
         } else {
-          // Can't afford this position, stop
-          break;
+          // No existing position - check if we can open a new one completely
+          const requiredCollateral = maxCollateral;
+          
+          if (remainingCapital >= requiredCollateral) {
+            // We can fill this position completely
+            const capitalRangeStart = cumulativeCapitalUsed;
+            cumulativeCapitalUsed += requiredCollateral;
+            const capitalRangeEnd = cumulativeCapitalUsed;
+            
+            selectedOpportunities.push({
+              ...item,
+              isExisting: false,
+            });
+            remainingCapital -= requiredCollateral;
+            
+            this.logger.log(
+              `   ✅ Position ${i + 1} (${symbol}): ` +
+              `NEW - Filled completely at $${maxPortfolio.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ` +
+              `(Collateral: $${requiredCollateral.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}). ` +
+              `Capital range: $${capitalRangeStart.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ` +
+              `to $${capitalRangeEnd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. ` +
+              `Remaining: $${remainingCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+            );
+          } else {
+            // Can't afford to fill this position completely - skip it and move to next
+            this.logger.log(
+              `   ⏸️  Position ${i + 1} (${symbol}): ` +
+              `Skipped - need $${requiredCollateral.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ` +
+              `but only have $${remainingCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. ` +
+              `Moving to next position...`
+            );
+            // Continue to next position (don't break - might be able to fill smaller positions)
+          }
         }
       }
       
@@ -1819,12 +1944,13 @@ export class FundingArbitrageStrategy {
         0
       );
       
-      this.logger.log('\n📊 Multi-Position Portfolio Execution:');
+      this.logger.log('\n📊 Ladder Allocation Summary:');
       this.logger.log(`   Total Available Capital: $${totalAvailableCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
       this.logger.log(`   Total Max Portfolio (all opportunities): $${totalMaxPortfolio.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
       this.logger.log(`   Selected Max Portfolio: $${selectedMaxPortfolio.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
       this.logger.log(`   Opportunities Available: ${opportunitiesWithMaxPortfolio.length}`);
-      this.logger.log(`   Positions to Open: ${selectedOpportunities.length} (can afford to max out ${selectedOpportunities.length} positions)`);
+      this.logger.log(`   Positions to Open: ${selectedOpportunities.length} (filled completely via ladder allocation)`);
+      this.logger.log(`   Capital Used: $${(totalAvailableCapital - remainingCapital).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
       this.logger.log(`   Remaining Capital: $${remainingCapital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
       
       if (selectedOpportunities.length === 0) {
@@ -1843,12 +1969,26 @@ export class FundingArbitrageStrategy {
         );
       });
       
-      // Close existing positions if we're rebalancing
-      const allPositions = await this.getAllPositions(adapters);
-      if (allPositions.length > 0) {
-        this.logger.log(`\n🔄 Closing ${allPositions.length} existing position(s) before opening portfolio...`);
-        await this.closeAllPositions(allPositions, adapters, result);
+      // Only close positions that are NOT being topped up (positions we're replacing with new ones)
+      const positionsToClose: PerpPosition[] = [];
+      const symbolsBeingToppedUp = new Set(
+        selectedOpportunities
+          .filter(item => item.isExisting)
+          .map(item => item.opportunity.symbol)
+      );
+      
+      for (const position of currentPositions) {
+        if (!symbolsBeingToppedUp.has(position.symbol)) {
+          positionsToClose.push(position);
+        }
+      }
+      
+      if (positionsToClose.length > 0) {
+        this.logger.log(`\n🔄 Closing ${positionsToClose.length} existing position(s) that are not being topped up...`);
+        await this.closeAllPositions(positionsToClose, adapters, result);
         await new Promise(resolve => setTimeout(resolve, 1000));
+      } else if (selectedOpportunities.some(item => item.isExisting)) {
+        this.logger.log(`\n🔼 Topping up existing positions - no positions to close`);
       }
       
       // Execute all selected positions
@@ -2020,6 +2160,10 @@ export class FundingArbitrageStrategy {
       opportunity: ArbitrageOpportunity;
       plan: ArbitrageExecutionPlan | null;
       maxPortfolioFor35APY: number | null;
+      isExisting?: boolean;
+      currentValue?: number;
+      currentCollateral?: number;
+      additionalCollateralNeeded?: number;
     }>,
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
     exchangeBalances: Map<ExchangeType, number>,
@@ -2037,14 +2181,36 @@ export class FundingArbitrageStrategy {
 
     for (let i = 0; i < opportunities.length; i++) {
       const item = opportunities[i];
-      const allocation = item.maxPortfolioFor35APY || 0;
       
-      if (allocation <= 0 || !item.plan) {
-        this.logger.warn(`Skipping ${item.opportunity.symbol}: invalid allocation or plan`);
+      if (!item.plan) {
+        this.logger.warn(`Skipping ${item.opportunity.symbol}: invalid plan`);
         continue;
       }
 
       try {
+        let allocation: number;
+        let isTopUp = false;
+        
+        if (item.isExisting && item.additionalCollateralNeeded && item.additionalCollateralNeeded > 0) {
+          // This is a top-up - calculate additional size needed
+          // Additional collateral * leverage = additional notional size
+          allocation = item.additionalCollateralNeeded * this.leverage;
+          isTopUp = true;
+          this.logger.log(
+            `🔼 [${i + 1}/${opportunities.length}] Topping up ${item.opportunity.symbol}: ` +
+            `Adding $${allocation.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ` +
+            `($${item.additionalCollateralNeeded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} collateral) ` +
+            `to existing position of $${(item.currentValue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          );
+        } else {
+          // New position - use full allocation
+          allocation = item.maxPortfolioFor35APY || 0;
+          if (allocation <= 0) {
+            this.logger.warn(`Skipping ${item.opportunity.symbol}: invalid allocation`);
+            continue;
+          }
+        }
+
         // Create execution plan with the specific allocation amount
         const plan = await this.createExecutionPlanWithAllocation(
           item.opportunity,
@@ -2073,11 +2239,12 @@ export class FundingArbitrageStrategy {
         }
 
         // Place orders (in parallel for speed)
+        const actionType = isTopUp ? 'Topping up' : 'Opening';
         this.logger.log(
-          `📤 [${i + 1}/${opportunities.length}] Executing ${opportunity.symbol}: ` +
+          `📤 [${i + 1}/${opportunities.length}] ${actionType} ${opportunity.symbol}: ` +
           `LONG ${plan.positionSize.toFixed(4)} on ${opportunity.longExchange}, ` +
           `SHORT ${plan.positionSize.toFixed(4)} on ${opportunity.shortExchange} ` +
-          `(Allocation: $${allocation.toFixed(2)})`
+          `(${isTopUp ? 'Additional' : 'Total'} Allocation: $${allocation.toFixed(2)})`
         );
 
         const [longResponse, shortResponse] = await Promise.all([
