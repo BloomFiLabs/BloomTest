@@ -233,9 +233,108 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
     };
   }
 
+  /**
+   * Get max leverage for a symbol from exchange info
+   */
+  private async getMaxLeverage(symbol: string): Promise<number> {
+    try {
+      const response = await this.client.get('/fapi/v1/exchangeInfo');
+      if (response.data?.symbols) {
+        const symbolInfo = response.data.symbols.find((s: any) => s.symbol === symbol);
+        if (symbolInfo?.leverageBrackets && symbolInfo.leverageBrackets.length > 0) {
+          // Get the highest leverage bracket
+          const maxBracket = symbolInfo.leverageBrackets[symbolInfo.leverageBrackets.length - 1];
+          return parseFloat(maxBracket.leverage || '1');
+        }
+        // Fallback: check if there's a maxLeverage field
+        if (symbolInfo?.maxLeverage) {
+          return parseFloat(symbolInfo.maxLeverage);
+        }
+      }
+      // Default to 1x if we can't find it
+      return 1;
+    } catch (error: any) {
+      this.logger.debug(`Failed to get max leverage for ${symbol}: ${error.message}`);
+      return 1; // Default to 1x
+    }
+  }
+
+  /**
+   * Set leverage for a symbol (required before placing orders on Aster)
+   * Aster API endpoint: POST /fapi/v1/leverage
+   */
+  private async setLeverage(symbol: string, leverage: number): Promise<void> {
+    try {
+      const nonce = Math.floor(Date.now() * 1000);
+      const params: Record<string, any> = {
+        symbol,
+        leverage: Math.floor(leverage), // Leverage must be an integer
+      };
+
+      let signedParams: Record<string, any>;
+      if (this.apiKey && this.apiSecret) {
+        signedParams = this.signParamsWithApiKey(params);
+      } else if (this.wallet) {
+        signedParams = this.signParams(params, nonce);
+      } else {
+        throw new Error('Authentication required to set leverage');
+      }
+
+      const formData = new URLSearchParams();
+      for (const [key, value] of Object.entries(signedParams)) {
+        if (value !== null && value !== undefined) {
+          formData.append(key, String(value));
+        }
+      }
+
+      const headers: Record<string, string> = {};
+      if (this.apiKey) {
+        headers['X-MBX-APIKEY'] = this.apiKey;
+      }
+
+      await this.client.post('/fapi/v1/leverage', formData.toString(), {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          ...headers,
+        },
+      });
+
+      this.logger.debug(`✅ Set leverage to ${leverage}x for ${symbol}`);
+    } catch (error: any) {
+      // Log but don't throw - leverage might already be set correctly
+      this.logger.debug(
+        `Failed to set leverage for ${symbol} to ${leverage}x: ${error.message}. ` +
+        `This may be okay if leverage is already set correctly.`
+      );
+    }
+  }
+
   async placeOrder(request: PerpOrderRequest): Promise<PerpOrderResponse> {
     let formattedQuantity: string = request.size.toString(); // Store for error logging
     try {
+      // Aster requires leverage to be set before placing orders
+      // Get max leverage for the symbol and set it appropriately
+      // Use min of strategy leverage (from KEEPER_LEVERAGE env var, default 2x) and 80% of max leverage
+      const maxLeverage = await this.getMaxLeverage(request.symbol);
+      const strategyLeverage = parseFloat(
+        this.configService.get<string>('KEEPER_LEVERAGE') || '2.0',
+      );
+      // Use the smaller of: strategy leverage or 80% of max leverage (safety buffer)
+      const desiredLeverage = Math.min(
+        Math.floor(strategyLeverage),
+        Math.floor(maxLeverage * 0.8),
+      );
+      
+      if (desiredLeverage > 1 && desiredLeverage <= maxLeverage) {
+        await this.setLeverage(request.symbol, desiredLeverage);
+      } else if (desiredLeverage > maxLeverage) {
+        this.logger.warn(
+          `⚠️ Desired leverage ${desiredLeverage}x exceeds max leverage ${maxLeverage}x for ${request.symbol}. ` +
+          `Setting to max leverage ${maxLeverage}x instead.`,
+        );
+        await this.setLeverage(request.symbol, maxLeverage);
+      }
+
       // Aster uses BUY/SELL instead of LONG/SHORT
       const asterSide = request.side === OrderSide.LONG ? 'BUY' : 'SELL';
 
@@ -952,54 +1051,70 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
 
       this.logger.log(`Depositing $${amount.toFixed(2)} ${asset} to Aster...`);
 
-      // Aster external deposits typically require on-chain interaction
-      // Check if there's a deposit endpoint in the API
-      let params: Record<string, any>;
-      let headers: Record<string, string> = {};
-
-      if (this.apiKey && this.apiSecret) {
-        params = this.signParamsWithApiKey({
-          asset: asset,
-          amount: amount.toString(),
-        });
-        headers['X-MBX-APIKEY'] = this.apiKey;
-      } else {
-        throw new Error('API key and secret required for deposits. Provide ASTER_API_KEY and ASTER_API_SECRET.');
+      // Aster deposits use EIP712 signature (similar to withdrawals)
+      // Documentation: https://github.com/asterdex/api-docs/blob/master/aster-deposit-withdrawal.md
+      // Endpoint: /fapi/aster/user-deposit (uses API key + HMAC signature with PRIVATE_KEY)
+      
+      if (!this.wallet || !this.config.userAddress || !this.config.signerAddress) {
+        throw new Error(
+          'Wallet, user address, and signer address required for deposits. ' +
+          'Provide ASTER_USER, ASTER_SIGNER, and ASTER_PRIVATE_KEY.'
+        );
       }
 
-      // Try deposit endpoint (may not exist, but we'll try)
-      try {
-        const queryParams: string[] = [];
-        const signatureParam: string[] = [];
-        for (const [key, value] of Object.entries(params)) {
-          if (key === 'signature') {
-            signatureParam.push(`${key}=${value}`);
-          } else {
-            queryParams.push(`${key}=${value}`);
-          }
-        }
-        queryParams.sort();
-        const finalQueryString = queryParams.join('&') + (signatureParam.length > 0 ? `&${signatureParam[0]}` : '');
+      // Aster deposit uses EIP712 signature
+      // Chain ID: 42161 (Arbitrum), 56 (BSC), 1 (Ethereum)
+      // Default to Arbitrum (42161) as that's where most deposits come from
+      const chainId = 42161; // Arbitrum One
+      
+      // Generate nonce (microseconds timestamp as per docs)
+      const nonce = Math.floor(Date.now() * 1000);
+      
+      // Build deposit parameters
+      const depositParams = {
+        asset: asset.toUpperCase(), // USDC, USDT, etc.
+        amount: amount.toString(),
+        chainId: chainId.toString(),
+      };
 
-        const response = await this.client.post(`/fapi/v1/deposit?${finalQueryString}`, {}, { headers });
+      // Sign parameters using EIP712 (same as withdrawal)
+      const params = this.signParams(depositParams, nonce);
 
-        if (response.data && (response.data.tranId || response.data.id)) {
-          const depositId = response.data.tranId || response.data.id;
-          this.logger.log(`✅ Deposit successful - Transaction ID: ${depositId}`);
-          return depositId.toString();
+      // Build query string with signature last
+      const queryParams: string[] = [];
+      const signatureParam: string[] = [];
+      for (const [key, value] of Object.entries(params)) {
+        if (key === 'signature') {
+          signatureParam.push(`${key}=${value}`);
         } else {
-          throw new Error(`Deposit failed: ${JSON.stringify(response.data)}`);
+          queryParams.push(`${key}=${value}`);
         }
-      } catch (apiError: any) {
-        // If deposit endpoint doesn't exist, provide helpful error message
-        if (apiError.response?.status === 404 || apiError.response?.status === 405) {
-          throw new Error(
-            'External deposits to Aster must be done by transferring funds to the deposit address on-chain. ' +
-            'This adapter does not support on-chain transactions. Please use a wallet or bridge contract. ' +
-            'Check Aster documentation for deposit address and procedures.'
-          );
-        }
-        throw apiError;
+      }
+      queryParams.sort();
+      const finalQueryString = queryParams.join('&') + (signatureParam.length > 0 ? `&${signatureParam[0]}` : '');
+
+      const headers: Record<string, string> = {};
+      if (this.apiKey) {
+        headers['X-MBX-APIKEY'] = this.apiKey;
+      }
+
+      this.logger.debug(
+        `Deposit via fapi/aster/user-deposit endpoint: ${this.config.baseUrl}/fapi/aster/user-deposit?${finalQueryString.substring(0, 200)}...`
+      );
+
+      // Use /fapi/aster/user-deposit endpoint (matches Aster API documentation)
+      const response = await this.client.post(
+        `/fapi/aster/user-deposit?${finalQueryString}`,
+        {},
+        { headers }
+      );
+
+      if (response.data && (response.data.depositId || response.data.id || response.data.tranId)) {
+        const depositId = response.data.depositId || response.data.id || response.data.tranId;
+        this.logger.log(`✅ Deposit successful - Deposit ID: ${depositId}`);
+        return depositId.toString();
+      } else {
+        throw new Error(`Deposit failed: ${JSON.stringify(response.data)}`);
       }
     } catch (error: any) {
       if (error instanceof ExchangeError) {

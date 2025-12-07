@@ -5670,7 +5670,7 @@ export class FundingArbitrageStrategy {
         `💰 Found $${walletBalance.toFixed(2)} USDC in wallet, checking if deposits are needed...`,
       );
 
-      // Get current balances on exchanges
+      // Get current balances on exchanges for logging
       const exchangeBalances = new Map<ExchangeType, number>();
       for (const exchange of uniqueExchanges) {
         const adapter = adapters.get(exchange);
@@ -5687,27 +5687,29 @@ export class FundingArbitrageStrategy {
         }
       }
 
-      // Find exchanges with low balance (less than $100)
-      const minBalanceThreshold = 100;
-      const exchangesNeedingFunds: ExchangeType[] = [];
+      // Log current balances
+      this.logger.log('Current exchange balances:');
       for (const [exchange, balance] of exchangeBalances) {
-        if (balance < minBalanceThreshold) {
-          exchangesNeedingFunds.push(exchange);
-        }
+        this.logger.log(`  ${exchange}: $${balance.toFixed(2)}`);
       }
 
-      if (exchangesNeedingFunds.length === 0) {
-        this.logger.debug(
-          'All exchanges have sufficient balance, skipping wallet deposit',
-        );
+      // Distribute wallet funds equally to all exchanges (scalable approach)
+      const exchangesToDeposit = Array.from(uniqueExchanges);
+      if (exchangesToDeposit.length === 0) {
+        this.logger.debug('No exchanges available for deposit');
         return;
       }
 
-      // Distribute wallet funds to exchanges that need them
+      // Distribute wallet funds equally to all exchanges
       let remainingWalletBalance = walletBalance;
-      const amountPerExchange = walletBalance / exchangesNeedingFunds.length;
+      const amountPerExchange = walletBalance / exchangesToDeposit.length;
       
-      for (const exchange of exchangesNeedingFunds) {
+      this.logger.log(
+        `📊 Distributing $${walletBalance.toFixed(2)} equally to ${exchangesToDeposit.length} exchange(s): ` +
+        `$${amountPerExchange.toFixed(2)} per exchange`,
+      );
+      
+      for (const exchange of exchangesToDeposit) {
         if (remainingWalletBalance <= 0) {
           break;
         }
