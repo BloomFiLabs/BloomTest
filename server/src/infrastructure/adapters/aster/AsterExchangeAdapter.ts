@@ -1104,8 +1104,9 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
       const usdcContract = new ethers.Contract(USDC_CONTRACT_ADDRESS, erc20Abi, wallet);
       const treasuryContract = new ethers.Contract(ASTER_TREASURY_CONTRACT, treasuryAbi, wallet);
 
-      // Get USDC decimals
-      const decimals = await usdcContract.decimals();
+      // Get USDC decimals (convert BigInt to number)
+      const decimalsBigInt = await usdcContract.decimals();
+      const decimals = Number(decimalsBigInt);
       const amountWei = ethers.parseUnits(amount.toFixed(decimals), decimals);
 
       // Check USDC balance

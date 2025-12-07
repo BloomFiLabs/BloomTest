@@ -1036,17 +1036,22 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
         await new Promise(resolve => setTimeout(resolve, waitTime));
       }
 
-      // Use the entire available balance (after withdrawal fees)
-      // This ensures we deposit whatever actually arrived, accounting for fees
-      const depositAmount = balanceFormatted;
-      const depositAmountWei = balanceWei;
+      // Determine deposit amount:
+      // - If balance is significantly larger than requested amount (3x+), deposit only requested amount
+      //   (this indicates a wallet deposit, not a rebalance from withdrawal)
+      // - Otherwise, deposit full balance (this handles rebalancing where withdrawal fees reduce the amount)
+      const isWalletDeposit = balanceFormatted >= amount * 3;
+      const depositAmount = isWalletDeposit ? amount : balanceFormatted;
+      const depositAmountWei = isWalletDeposit 
+        ? ethers.parseUnits(depositAmount.toFixed(decimals), decimals)
+        : balanceWei;
 
       // Check current allowance
       const currentAllowance = await usdcContract.allowance(wallet.address, BRIDGE_CONTRACT_ADDRESS);
       
-      // Approve bridge contract if needed (approve the full balance)
+      // Approve bridge contract if needed
       if (currentAllowance < depositAmountWei) {
-        this.logger.log(`Approving Bridge2 contract to spend ${depositAmount.toFixed(2)} USDC (full balance)...`);
+        this.logger.log(`Approving Bridge2 contract to spend ${depositAmount.toFixed(2)} USDC...`);
         const approveTx = await usdcContract.approve(BRIDGE_CONTRACT_ADDRESS, depositAmountWei);
         this.logger.debug(`Approve transaction hash: ${approveTx.hash}`);
         const approveReceipt = await approveTx.wait();
@@ -1055,20 +1060,26 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
         this.logger.debug(`Bridge contract already has sufficient allowance`);
       }
 
-      // Transfer entire USDC balance to bridge contract
+      // Transfer USDC to bridge contract
       // Note: Bridge2 accepts direct transfers - sending USDC to the bridge contract credits the account
-      // We deposit the full balance to account for withdrawal fees reducing the amount
-      this.logger.log(
-        `Transferring ${depositAmount.toFixed(2)} USDC (full wallet balance) to Bridge2 contract... ` +
-        `(requested amount was ${amount.toFixed(2)} USDC, but depositing available balance after fees)`
-      );
+      if (isWalletDeposit) {
+        this.logger.log(
+          `Transferring ${depositAmount.toFixed(2)} USDC (requested amount) to Bridge2 contract... ` +
+          `(wallet has ${balanceFormatted.toFixed(2)} USDC total, depositing only ${depositAmount.toFixed(2)} USDC)`
+        );
+      } else {
+        this.logger.log(
+          `Transferring ${depositAmount.toFixed(2)} USDC (full wallet balance) to Bridge2 contract... ` +
+          `(requested amount was ${amount.toFixed(2)} USDC, but depositing available balance after fees)`
+        );
+      }
       const transferTx = await usdcContract.transfer(BRIDGE_CONTRACT_ADDRESS, depositAmountWei);
       this.logger.debug(`Transfer transaction hash: ${transferTx.hash}`);
       
       // Wait for confirmation
       const receipt = await transferTx.wait();
       this.logger.log(
-        `✅ Deposit confirmed! Deposited ${depositAmount.toFixed(2)} USDC (full balance). ` +
+        `✅ Deposit confirmed! Deposited ${depositAmount.toFixed(2)} USDC. ` +
         `Transaction hash: ${receipt.hash}, Block: ${receipt.blockNumber}. ` +
         `Funds should be credited to Hyperliquid account in <1 minute.`
       );
