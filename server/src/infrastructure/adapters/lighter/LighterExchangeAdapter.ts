@@ -1361,10 +1361,16 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
       let balanceWei: bigint;
       
       // Wait for funds to arrive (at least the requested amount)
+      // Note: Hyperliquid withdrawals can take 1-2 minutes to arrive on-chain
       while (true) {
         attempt++;
-        balanceWei = await usdcContract.balanceOf(wallet.address);
-        balanceFormatted = Number(ethers.formatUnits(balanceWei, decimals));
+        try {
+          balanceWei = await usdcContract.balanceOf(wallet.address);
+          balanceFormatted = Number(ethers.formatUnits(balanceWei, decimals));
+        } catch (error: any) {
+          this.logger.error(`Failed to check balance: ${error.message}`);
+          throw new Error(`Failed to check USDC balance: ${error.message}`);
+        }
         
         this.logger.debug(
           `Balance check attempt ${attempt}: ${balanceFormatted.toFixed(2)} USDC ` +
@@ -1384,7 +1390,7 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
           throw new Error(
             `Insufficient USDC balance after ${Math.floor(elapsed / 1000)}s wait. ` +
             `Required: ${amount.toFixed(2)} USDC, Available: ${balanceFormatted.toFixed(2)} USDC. ` +
-            `Funds may still be in transit from withdrawal.`
+            `Funds may still be in transit from withdrawal. Check Hyperliquid withdrawal status.`
           );
         }
 
@@ -1402,6 +1408,11 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
         await new Promise(resolve => setTimeout(resolve, waitTime));
       }
 
+      this.logger.log(
+        `✅ Funds confirmed (${balanceFormatted.toFixed(2)} USDC). ` +
+        `Proceeding with deposit to Lighter contract ${LIGHTER_DEPOSIT_CONTRACT}...`
+      );
+
       // Determine deposit amount:
       // - If balance is significantly larger than requested amount (3x+), deposit only requested amount
       //   (this indicates a wallet deposit, not a rebalance from withdrawal)
@@ -1413,17 +1424,23 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
         : balanceWei;
 
       // Check current allowance
+      this.logger.log(`Checking allowance for Lighter deposit contract ${LIGHTER_DEPOSIT_CONTRACT}...`);
       const currentAllowance = await usdcContract.allowance(wallet.address, LIGHTER_DEPOSIT_CONTRACT);
+      this.logger.debug(`Current allowance: ${ethers.formatUnits(currentAllowance, decimals)} USDC`);
       
       // Approve deposit contract if needed
       if (currentAllowance < depositAmountWei) {
         this.logger.log(`Approving Lighter deposit contract to spend ${depositAmount.toFixed(2)} USDC...`);
         const approveTx = await usdcContract.approve(LIGHTER_DEPOSIT_CONTRACT, depositAmountWei);
-        await approveTx.wait();
-        this.logger.log(`✅ Approval confirmed: ${approveTx.hash}`);
+        this.logger.log(`⏳ Approval transaction submitted: ${approveTx.hash}`);
+        const approveReceipt = await approveTx.wait();
+        this.logger.log(`✅ Approval confirmed: ${approveReceipt.hash}, Block: ${approveReceipt.blockNumber}`);
+      } else {
+        this.logger.log(`Sufficient allowance already exists (${ethers.formatUnits(currentAllowance, decimals)} USDC)`);
       }
 
       // Transfer USDC to Lighter deposit contract
+      this.logger.log(`🚀 Executing transfer to Lighter deposit contract ${LIGHTER_DEPOSIT_CONTRACT}...`);
       if (isWalletDeposit) {
         this.logger.log(
           `Transferring ${depositAmount.toFixed(2)} USDC (requested amount) to Lighter deposit contract... ` +
@@ -1436,6 +1453,7 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
         );
       }
       
+      this.logger.log(`Calling transfer(${LIGHTER_DEPOSIT_CONTRACT}, ${depositAmountWei.toString()})...`);
       const transferTx = await usdcContract.transfer(LIGHTER_DEPOSIT_CONTRACT, depositAmountWei);
       this.logger.log(`⏳ Deposit transaction submitted: ${transferTx.hash}`);
       const receipt = await transferTx.wait();
