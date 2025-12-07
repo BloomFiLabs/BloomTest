@@ -24,6 +24,7 @@ import { PositionLossTracker } from '../../infrastructure/services/PositionLossT
 import { PerpKeeperPerformanceLogger } from '../../infrastructure/logging/PerpKeeperPerformanceLogger';
 import { PortfolioRiskAnalyzer } from '../../infrastructure/services/PortfolioRiskAnalyzer';
 import { ExchangeBalanceRebalancer } from './ExchangeBalanceRebalancer';
+import { Contract, JsonRpcProvider, Wallet, formatUnits } from 'ethers';
 
 /**
  * Execution plan for an arbitrage opportunity
@@ -1562,6 +1563,9 @@ export class FundingArbitrageStrategy {
         uniqueExchanges.add(opp.longExchange);
         uniqueExchanges.add(opp.shortExchange);
       });
+
+      // Check wallet USDC balance and deposit to exchanges if available
+      await this.checkAndDepositWalletFunds(adapters, uniqueExchanges);
 
       // Fetch existing positions FIRST to account for already-deployed margin
       const existingPositions = await this.getAllPositions(adapters);
@@ -3465,6 +3469,126 @@ export class FundingArbitrageStrategy {
       requiredCollateral - finalShortAvailable,
     );
 
+    // Strategy 3: Attempt to deposit from wallet (if supported)
+    if ((finalLongDeficit > 0 || finalShortDeficit > 0) && finalLongDeficit + finalShortDeficit > 0) {
+      try {
+        const walletBalance = await this.getWalletUsdcBalance();
+        const totalDeficit = finalLongDeficit + finalShortDeficit;
+        
+        if (walletBalance > 0 && walletBalance >= Math.min(5, totalDeficit)) {
+          // Minimum deposit is usually $5, but we'll try if we have at least that or enough to cover deficit
+          this.logger.debug(
+            `Attempting wallet deposit: wallet has $${walletBalance.toFixed(2)}, ` +
+            `need $${totalDeficit.toFixed(2)} (long: $${finalLongDeficit.toFixed(2)}, short: $${finalShortDeficit.toFixed(2)})`,
+          );
+
+          // Distribute wallet funds proportionally to deficits
+          const longShare = totalDeficit > 0 ? finalLongDeficit / totalDeficit : 0;
+          const shortShare = totalDeficit > 0 ? finalShortDeficit / totalDeficit : 0;
+          
+          // Use available wallet balance, but don't exceed deficits
+          const longDepositAmount = Math.min(
+            finalLongDeficit,
+            walletBalance * longShare,
+          );
+          const shortDepositAmount = Math.min(
+            finalShortDeficit,
+            walletBalance * shortShare,
+          );
+
+          // Deposit to long exchange if needed
+          if (longDepositAmount >= 5) {
+            try {
+              this.logger.log(
+                `📥 Depositing $${longDepositAmount.toFixed(2)} from wallet to ${longExchange}...`,
+              );
+              await longAdapter.depositExternal(longDepositAmount, 'USDC');
+              this.logger.log(
+                `✅ Successfully deposited $${longDepositAmount.toFixed(2)} to ${longExchange}`,
+              );
+              await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait for deposit to settle
+            } catch (error: any) {
+              this.logger.warn(
+                `Failed to deposit $${longDepositAmount.toFixed(2)} to ${longExchange}: ${error.message}`,
+              );
+            }
+          }
+
+          // Deposit to short exchange if needed
+          if (shortDepositAmount >= 5) {
+            try {
+              this.logger.log(
+                `📥 Depositing $${shortDepositAmount.toFixed(2)} from wallet to ${shortExchange}...`,
+              );
+              await shortAdapter.depositExternal(shortDepositAmount, 'USDC');
+              this.logger.log(
+                `✅ Successfully deposited $${shortDepositAmount.toFixed(2)} to ${shortExchange}`,
+              );
+              await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait for deposit to settle
+            } catch (error: any) {
+              this.logger.warn(
+                `Failed to deposit $${shortDepositAmount.toFixed(2)} to ${shortExchange}: ${error.message}`,
+              );
+            }
+          }
+
+          // Re-check balances after wallet deposits
+          const [postDepositLongBalance, postDepositShortBalance] = await Promise.all([
+            longAdapter.getBalance(),
+            shortAdapter.getBalance(),
+          ]);
+
+          const [postDepositLongPositions, postDepositShortPositions] = await Promise.all([
+            longAdapter.getPositions(),
+            shortAdapter.getPositions(),
+          ]);
+
+          const postDepositLongMarginUsed = postDepositLongPositions.reduce((sum, pos) => {
+            const posValue = pos.getPositionValue();
+            return sum + (pos.marginUsed ?? posValue / this.leverage);
+          }, 0);
+          const postDepositShortMarginUsed = postDepositShortPositions.reduce((sum, pos) => {
+            const posValue = pos.getPositionValue();
+            return sum + (pos.marginUsed ?? posValue / this.leverage);
+          }, 0);
+
+          const postDepositLongAvailable = Math.max(
+            0,
+            postDepositLongBalance - postDepositLongMarginUsed,
+          );
+          const postDepositShortAvailable = Math.max(
+            0,
+            postDepositShortBalance - postDepositShortMarginUsed,
+          );
+
+          const postDepositLongDeficit = Math.max(
+            0,
+            requiredCollateral - postDepositLongAvailable,
+          );
+          const postDepositShortDeficit = Math.max(
+            0,
+            requiredCollateral - postDepositShortAvailable,
+          );
+
+          if (postDepositLongDeficit === 0 && postDepositShortDeficit === 0) {
+            this.logger.debug(
+              `Rebalancing successful after wallet deposit: ${longExchange}: $${postDepositLongAvailable.toFixed(2)}, ` +
+                `${shortExchange}: $${postDepositShortAvailable.toFixed(2)}`,
+            );
+            return true;
+          }
+        } else if (walletBalance > 0) {
+          this.logger.debug(
+            `Wallet has $${walletBalance.toFixed(2)} but insufficient for minimum deposit ($5) or deficit`,
+          );
+        }
+      } catch (error: any) {
+        this.logger.debug(
+          `Error attempting wallet deposit: ${error.message}`,
+        );
+      }
+    }
+
     if (finalLongDeficit === 0 && finalShortDeficit === 0) {
       this.logger.debug(
         `Rebalancing successful: ${longExchange}: $${finalLongAvailable.toFixed(2)}, ` +
@@ -5366,5 +5490,166 @@ export class FundingArbitrageStrategy {
     });
 
     this.logger.log('\n' + '='.repeat(100));
+  }
+
+  /**
+   * Get wallet USDC balance on-chain
+   * Checks the wallet's USDC balance directly from the blockchain
+   */
+  private async getWalletUsdcBalance(): Promise<number> {
+    try {
+      // Get configuration
+      const rpcUrl =
+        this.configService.get<string>('HYPERLIQUID_RPC_URL') ||
+        this.configService.get<string>('HYPEREVM_RPC_URL') ||
+        'https://rpc.hyperliquid.xyz/evm';
+      const privateKey = this.configService.get<string>('PRIVATE_KEY');
+      const walletAddress =
+        this.configService.get<string>('WALLET_ADDRESS') ||
+        this.configService.get<string>('CENTRAL_WALLET_ADDRESS');
+
+      if (!privateKey && !walletAddress) {
+        this.logger.debug(
+          'No PRIVATE_KEY or WALLET_ADDRESS configured, skipping wallet balance check',
+        );
+        return 0;
+      }
+
+      // USDC address on HyperEVM
+      const usdcAddress = '0xb88339CB7199b77E23DB6E890353E22632Ba630f';
+
+      // ERC20 ABI (minimal)
+      const erc20Abi = [
+        'function balanceOf(address owner) view returns (uint256)',
+        'function decimals() view returns (uint8)',
+      ];
+
+      // Initialize provider
+      const provider = new JsonRpcProvider(rpcUrl);
+
+      // Get wallet address
+      let address: string;
+      if (walletAddress) {
+        address = walletAddress;
+      } else if (privateKey) {
+        const normalizedKey = privateKey.startsWith('0x')
+          ? privateKey
+          : `0x${privateKey}`;
+        const wallet = new Wallet(normalizedKey);
+        address = wallet.address;
+      } else {
+        return 0;
+      }
+
+      // Check USDC balance
+      const usdcContract = new Contract(usdcAddress, erc20Abi, provider);
+      const balance = await usdcContract.balanceOf(address);
+      const decimals = await usdcContract.decimals();
+      const balanceUsd = parseFloat(formatUnits(balance, decimals));
+
+      return balanceUsd;
+    } catch (error: any) {
+      this.logger.debug(
+        `Failed to get wallet USDC balance: ${error.message}`,
+      );
+      return 0;
+    }
+  }
+
+  /**
+   * Check wallet USDC balance and deposit to exchanges if available
+   * This proactively deposits wallet funds to exchanges that need capital
+   */
+  private async checkAndDepositWalletFunds(
+    adapters: Map<ExchangeType, IPerpExchangeAdapter>,
+    uniqueExchanges: Set<ExchangeType>,
+  ): Promise<void> {
+    try {
+      const walletBalance = await this.getWalletUsdcBalance();
+      if (walletBalance <= 0) {
+        this.logger.debug('No USDC in wallet, skipping deposit');
+        return;
+      }
+
+      this.logger.log(
+        `💰 Found $${walletBalance.toFixed(2)} USDC in wallet, checking if deposits are needed...`,
+      );
+
+      // Get current balances on exchanges
+      const exchangeBalances = new Map<ExchangeType, number>();
+      for (const exchange of uniqueExchanges) {
+        const adapter = adapters.get(exchange);
+        if (adapter) {
+          try {
+            const balance = await adapter.getBalance();
+            exchangeBalances.set(exchange, balance);
+          } catch (error: any) {
+            this.logger.debug(
+              `Failed to get balance for ${exchange}: ${error.message}`,
+            );
+            exchangeBalances.set(exchange, 0);
+          }
+        }
+      }
+
+      // Find exchanges with low balance (less than $100)
+      const minBalanceThreshold = 100;
+      const exchangesNeedingFunds: ExchangeType[] = [];
+      for (const [exchange, balance] of exchangeBalances) {
+        if (balance < minBalanceThreshold) {
+          exchangesNeedingFunds.push(exchange);
+        }
+      }
+
+      if (exchangesNeedingFunds.length === 0) {
+        this.logger.debug(
+          'All exchanges have sufficient balance, skipping wallet deposit',
+        );
+        return;
+      }
+
+      // Distribute wallet funds to exchanges that need them
+      let remainingWalletBalance = walletBalance;
+      const amountPerExchange = walletBalance / exchangesNeedingFunds.length;
+      
+      for (const exchange of exchangesNeedingFunds) {
+        if (remainingWalletBalance <= 0) {
+          break;
+        }
+
+        const adapter = adapters.get(exchange);
+        if (!adapter) continue;
+
+        const depositAmount = Math.min(amountPerExchange, remainingWalletBalance);
+        if (depositAmount < 5) {
+          // Minimum deposit is usually $5
+          this.logger.debug(
+            `Skipping deposit to ${exchange}: amount too small ($${depositAmount.toFixed(2)})`,
+          );
+          continue;
+        }
+
+        try {
+          this.logger.log(
+            `📥 Depositing $${depositAmount.toFixed(2)} from wallet to ${exchange}...`,
+          );
+          await adapter.depositExternal(depositAmount, 'USDC');
+          this.logger.log(
+            `✅ Successfully deposited $${depositAmount.toFixed(2)} to ${exchange}`,
+          );
+          remainingWalletBalance -= depositAmount;
+          // Wait a bit between deposits to avoid rate limits
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        } catch (error: any) {
+          this.logger.warn(
+            `Failed to deposit $${depositAmount.toFixed(2)} to ${exchange}: ${error.message}`,
+          );
+        }
+      }
+    } catch (error: any) {
+      this.logger.debug(
+        `Error checking/depositing wallet funds: ${error.message}`,
+      );
+    }
   }
 }

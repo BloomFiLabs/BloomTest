@@ -598,6 +598,128 @@ export class PerpKeeperScheduler implements OnModuleInit {
   }
 
   /**
+   * Periodic wallet balance check - runs every 10 minutes
+   * Checks for new USDC in wallet and deposits to exchanges if needed
+   */
+  @Interval(600000) // Every 10 minutes (600000 ms)
+  async checkWalletBalancePeriodically() {
+    try {
+      this.logger.debug('🔍 Periodic wallet balance check (every 10 minutes)...');
+      await this.checkAndDepositWalletFunds();
+    } catch (error: any) {
+      this.logger.debug(`Periodic wallet balance check failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Check wallet USDC balance and deposit to exchanges if available
+   * This proactively deposits wallet funds to exchanges that need capital
+   */
+  private async checkAndDepositWalletFunds(): Promise<void> {
+    try {
+      const walletBalance = await this.getWalletUsdcBalance();
+      if (walletBalance <= 0) {
+        this.logger.debug('No USDC in wallet, skipping deposit');
+        return;
+      }
+
+      this.logger.log(
+        `💰 Found $${walletBalance.toFixed(2)} USDC in wallet, checking if deposits are needed...`,
+      );
+
+      // Get all exchange adapters
+      const adapters = this.keeperService.getExchangeAdapters();
+      if (adapters.size === 0) {
+        this.logger.debug('No exchange adapters available, skipping deposit');
+        return;
+      }
+
+      // Get current balances on all exchanges
+      const exchangeBalances = new Map<ExchangeType, number>();
+      for (const [exchange, adapter] of adapters) {
+        try {
+          const balance = await adapter.getBalance();
+          exchangeBalances.set(exchange, balance);
+        } catch (error: any) {
+          this.logger.debug(
+            `Failed to get balance for ${exchange}: ${error.message}`,
+          );
+          exchangeBalances.set(exchange, 0);
+        }
+      }
+
+      // Find exchanges with low balance (less than $100)
+      const minBalanceThreshold = 100;
+      const exchangesNeedingFunds: ExchangeType[] = [];
+      for (const [exchange, balance] of exchangeBalances) {
+        if (balance < minBalanceThreshold) {
+          exchangesNeedingFunds.push(exchange);
+          this.logger.debug(
+            `${exchange} has low balance: $${balance.toFixed(2)} (threshold: $${minBalanceThreshold})`,
+          );
+        }
+      }
+
+      if (exchangesNeedingFunds.length === 0) {
+        this.logger.debug(
+          'All exchanges have sufficient balance, skipping wallet deposit',
+        );
+        return;
+      }
+
+      // Distribute wallet funds to exchanges that need them
+      let remainingWalletBalance = walletBalance;
+      const amountPerExchange = walletBalance / exchangesNeedingFunds.length;
+
+      for (const exchange of exchangesNeedingFunds) {
+        if (remainingWalletBalance <= 0) {
+          break;
+        }
+
+        const adapter = adapters.get(exchange);
+        if (!adapter) continue;
+
+        const depositAmount = Math.min(amountPerExchange, remainingWalletBalance);
+        if (depositAmount < 5) {
+          // Minimum deposit is usually $5
+          this.logger.debug(
+            `Skipping deposit to ${exchange}: amount too small ($${depositAmount.toFixed(2)})`,
+          );
+          continue;
+        }
+
+        try {
+          this.logger.log(
+            `📥 Depositing $${depositAmount.toFixed(2)} from wallet to ${exchange}...`,
+          );
+          await adapter.depositExternal(depositAmount, 'USDC');
+          this.logger.log(
+            `✅ Successfully deposited $${depositAmount.toFixed(2)} to ${exchange}`,
+          );
+          remainingWalletBalance -= depositAmount;
+          // Wait a bit between deposits to avoid rate limits
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        } catch (error: any) {
+          this.logger.warn(
+            `Failed to deposit $${depositAmount.toFixed(2)} to ${exchange}: ${error.message}`,
+          );
+        }
+      }
+
+      if (remainingWalletBalance < walletBalance) {
+        const deposited = walletBalance - remainingWalletBalance;
+        this.logger.log(
+          `✅ Wallet deposit cycle complete: Deposited $${deposited.toFixed(2)} of $${walletBalance.toFixed(2)} total`,
+        );
+      }
+    } catch (error: any) {
+      this.logger.debug(
+        `Error checking/depositing wallet funds: ${error.message}`,
+      );
+    }
+  }
+
+  /**
    * Get wallet USDC balance on-chain
    * Checks the wallet's USDC balance directly from the blockchain
    */
