@@ -5582,11 +5582,11 @@ export class FundingArbitrageStrategy {
    */
   private async getWalletUsdcBalance(): Promise<number> {
     try {
-      // Get configuration
+      // Get Arbitrum RPC URL (USDC deposits go through Arbitrum)
       const rpcUrl =
-        this.configService.get<string>('HYPERLIQUID_RPC_URL') ||
-        this.configService.get<string>('HYPEREVM_RPC_URL') ||
-        'https://rpc.hyperliquid.xyz/evm';
+        this.configService.get<string>('ARBITRUM_RPC_URL') ||
+        this.configService.get<string>('ARB_RPC_URL') ||
+        'https://arb1.arbitrum.io/rpc'; // Public Arbitrum RPC fallback
       const privateKey = this.configService.get<string>('PRIVATE_KEY');
       const walletAddress =
         this.configService.get<string>('WALLET_ADDRESS') ||
@@ -5599,8 +5599,8 @@ export class FundingArbitrageStrategy {
         return 0;
       }
 
-      // USDC address on HyperEVM
-      const usdcAddress = '0xb88339CB7199b77E23DB6E890353E22632Ba630f';
+      // USDC address on Arbitrum (matches deposit logic)
+      const usdcAddress = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
 
       // ERC20 ABI (minimal)
       const erc20Abi = [
@@ -5615,15 +5615,22 @@ export class FundingArbitrageStrategy {
       let address: string;
       if (walletAddress) {
         address = walletAddress;
+        this.logger.debug(`Using WALLET_ADDRESS from config: ${address}`);
       } else if (privateKey) {
         const normalizedKey = privateKey.startsWith('0x')
           ? privateKey
           : `0x${privateKey}`;
         const wallet = new Wallet(normalizedKey);
         address = wallet.address;
+        this.logger.debug(`Derived address from PRIVATE_KEY: ${address}`);
       } else {
         return 0;
       }
+
+      this.logger.log(
+        `🔍 Checking USDC balance on Arbitrum for address: ${address} ` +
+        `(USDC contract: ${usdcAddress})`,
+      );
 
       // Check USDC balance
       const usdcContract = new Contract(usdcAddress, erc20Abi, provider);
@@ -5631,10 +5638,14 @@ export class FundingArbitrageStrategy {
       const decimals = await usdcContract.decimals();
       const balanceUsd = parseFloat(formatUnits(balance, decimals));
 
+      this.logger.log(
+        `💰 USDC balance on Arbitrum for ${address}: $${balanceUsd.toFixed(2)} USDC`,
+      );
+
       return balanceUsd;
     } catch (error: any) {
       this.logger.debug(
-        `Failed to get wallet USDC balance: ${error.message}`,
+        `Failed to get wallet USDC balance on Arbitrum: ${error.message}`,
       );
       return 0;
     }
