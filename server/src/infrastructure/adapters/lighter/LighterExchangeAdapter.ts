@@ -326,20 +326,32 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
             ? parseFloat(orderBook.bestAsk?.price || '0')
             : parseFloat(orderBook.bestBid?.price || '0');
           
+          // For market orders, use LIMIT with best price (Lighter requires this)
+          // Map TimeInForce: IOC = 1, GTC = 0
+          const timeInForce = request.timeInForce === TimeInForce.IOC ? 1 : 0;
+          
           orderParams = {
             marketIndex,
             clientOrderIndex: Date.now(),
             baseAmount,
             price: market.priceToUnits(price),
             isAsk,
-            orderType: LighterOrderType.MARKET,
-            orderExpiry: Date.now() + 3600000, // 1 hour expiry
+            orderType: LighterOrderType.LIMIT, // Use LIMIT even for "market" orders
+            timeInForce, // 0 = GTC, 1 = IOC
+            reduceOnly: request.reduceOnly ? 1 : 0, // Critical: must be 1 for closing orders
+            orderExpiry: 0, // Set to 0 (no expiry in OrderExpiry field)
+            expiredAt: timeInForce === 1 
+              ? Date.now() + 60000  // 1 minute for IOC orders
+              : Date.now() + 3600000, // 1 hour for GTC orders
           };
         } else {
           // Limit order
           if (!request.price) {
             throw new Error('Limit price is required for LIMIT orders');
           }
+
+          // Map TimeInForce: IOC = 1, GTC = 0
+          const timeInForce = request.timeInForce === TimeInForce.IOC ? 1 : 0;
 
           orderParams = {
             marketIndex,
@@ -348,7 +360,12 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
             price: market.priceToUnits(request.price),
             isAsk,
             orderType: LighterOrderType.LIMIT,
-            orderExpiry: Date.now() + 3600000, // 1 hour expiry
+            timeInForce, // 0 = GTC, 1 = IOC
+            reduceOnly: request.reduceOnly ? 1 : 0, // Critical: must be 1 for closing orders
+            orderExpiry: 0, // Set to 0 (no expiry in OrderExpiry field)
+            expiredAt: timeInForce === 1 
+              ? Date.now() + 60000  // 1 minute for IOC orders
+              : Date.now() + 3600000, // 1 hour for GTC orders
           };
         }
 
