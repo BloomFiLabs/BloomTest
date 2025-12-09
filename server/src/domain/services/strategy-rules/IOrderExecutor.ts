@@ -3,6 +3,8 @@ import { ArbitrageOpportunity } from '../FundingRateAggregator';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
 import { PerpOrderResponse } from '../../value-objects/PerpOrder';
+import { Result } from '../../common/Result';
+import { DomainException } from '../../exceptions/DomainException';
 
 export interface IOrderExecutor {
   waitForOrderFill(
@@ -23,7 +25,7 @@ export interface IOrderExecutor {
     },
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
     result: ArbitrageExecutionResult,
-  ): Promise<ArbitrageExecutionResult>;
+  ): Promise<Result<ArbitrageExecutionResult, DomainException>>;
 
   executeMultiplePositions(
     opportunities: Array<{
@@ -38,10 +40,9 @@ export interface IOrderExecutor {
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
     exchangeBalances: Map<ExchangeType, number>,
     result: ArbitrageExecutionResult,
-  ): Promise<{
+  ): Promise<Result<{
     successfulExecutions: number;
     totalOrders: number;
     totalExpectedReturn: number;
-  }>;
+  }, DomainException>>;
 }
-

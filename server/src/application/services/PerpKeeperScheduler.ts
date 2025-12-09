@@ -437,7 +437,14 @@ export class PerpKeeperScheduler implements OnModuleInit {
    */
   private async checkBalances(): Promise<void> {
     const minBalanceForTrading = 10; // Minimum $10 needed per exchange to cover fees
-    const exchanges = [ExchangeType.ASTER, ExchangeType.LIGHTER, ExchangeType.HYPERLIQUID];
+    // Only check exchanges that have adapters available
+    const adapters = this.keeperService.getExchangeAdapters();
+    const exchanges = Array.from(adapters.keys());
+    
+    if (exchanges.length === 0) {
+      this.logger.warn('⚠️  No exchange adapters available - cannot check balances');
+      return;
+    }
     
     this.logger.log('💰 Checking exchange balances and capital allocation...');
     

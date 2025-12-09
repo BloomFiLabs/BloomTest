@@ -1,6 +1,8 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { IOrderExecutor } from './IOrderExecutor';
-import { IPositionManager, AsymmetricFill } from './IPositionManager';
+import type { IPositionManager } from './IPositionManager';
+import type { AsymmetricFill } from './IPositionManager';
+import { PositionManager } from './PositionManager';
 import { CostCalculator } from './CostCalculator';
 import { ExecutionPlanBuilder } from './ExecutionPlanBuilder';
 import { StrategyConfig } from '../../value-objects/StrategyConfig';
@@ -17,6 +19,12 @@ import {
   OrderSide,
   TimeInForce,
 } from '../../value-objects/PerpOrder';
+import { Result } from '../../common/Result';
+import {
+  DomainException,
+  ExchangeException,
+  OrderExecutionException,
+} from '../../exceptions/DomainException';
 
 /**
  * Order executor for funding arbitrage strategy
@@ -27,7 +35,7 @@ export class OrderExecutor implements IOrderExecutor {
   private readonly logger = new Logger(OrderExecutor.name);
 
   constructor(
-    @Inject('IPositionManager')
+    @Inject(forwardRef(() => 'IPositionManager'))
     private readonly positionManager: IPositionManager,
     private readonly costCalculator: CostCalculator,
     private readonly executionPlanBuilder: ExecutionPlanBuilder,
@@ -148,7 +156,7 @@ export class OrderExecutor implements IOrderExecutor {
     },
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
     result: ArbitrageExecutionResult,
-  ): Promise<ArbitrageExecutionResult> {
+  ): Promise<Result<ArbitrageExecutionResult, DomainException>> {
     const { plan, opportunity } = bestOpportunity;
 
     this.logger.log(
@@ -163,39 +171,64 @@ export class OrderExecutor implements IOrderExecutor {
     ];
 
     if (!longAdapter || !shortAdapter) {
-      result.errors.push(`Missing adapters for ${opportunity.symbol}`);
-      return result;
+      const missingExchange = !longAdapter
+        ? opportunity.longExchange
+        : opportunity.shortExchange;
+      return Result.failure(
+        new ExchangeException(
+          `Missing adapter for ${missingExchange}`,
+          missingExchange,
+          { symbol: opportunity.symbol },
+        ),
+      );
     }
 
     // Place orders
     this.logger.log(
       `📤 Executing orders for ${opportunity.symbol}: ` +
-        `LONG ${plan.positionSize.toFixed(4)} on ${opportunity.longExchange}, ` +
-        `SHORT ${plan.positionSize.toFixed(4)} on ${opportunity.shortExchange}`,
+        `LONG ${plan.positionSize.toBaseAsset().toFixed(4)} on ${opportunity.longExchange}, ` +
+        `SHORT ${plan.positionSize.toBaseAsset().toFixed(4)} on ${opportunity.shortExchange}`,
     );
 
-    const [longResponse, shortResponse] = await Promise.all([
-      longAdapter.placeOrder(plan.longOrder),
-      shortAdapter.placeOrder(plan.shortOrder),
-    ]);
+    try {
+      const [longResponse, shortResponse] = await Promise.all([
+        longAdapter.placeOrder(plan.longOrder),
+        shortAdapter.placeOrder(plan.shortOrder),
+      ]);
 
-    if (longResponse.isSuccess() && shortResponse.isSuccess()) {
-      result.opportunitiesExecuted = 1;
-      result.ordersPlaced = 2;
-      result.totalExpectedReturn = plan.expectedNetReturn;
+      if (longResponse.isSuccess() && shortResponse.isSuccess()) {
+        result.opportunitiesExecuted = 1;
+        result.ordersPlaced = 2;
+        result.totalExpectedReturn = plan.expectedNetReturn;
 
-      this.logger.log(
-        `✅ Successfully executed arbitrage for ${opportunity.symbol}: ` +
-          `Expected return: $${plan.expectedNetReturn.toFixed(4)} per period`,
-      );
-    } else {
-      result.errors.push(
-        `Order execution failed for ${opportunity.symbol}: ` +
-          `Long: ${longResponse.error || 'unknown'}, Short: ${shortResponse.error || 'unknown'}`,
+        this.logger.log(
+          `✅ Successfully executed arbitrage for ${opportunity.symbol}: ` +
+            `Expected return: $${plan.expectedNetReturn.toFixed(4)} per period`,
+        );
+
+        return Result.success(result);
+      } else {
+        const longError = longResponse.error || 'unknown';
+        const shortError = shortResponse.error || 'unknown';
+        return Result.failure(
+          new OrderExecutionException(
+            `Order execution failed: Long: ${longError}, Short: ${shortError}`,
+            longResponse.orderId || shortResponse.orderId || 'unknown',
+            opportunity.longExchange,
+            { symbol: opportunity.symbol, longError, shortError },
+          ),
+        );
+      }
+    } catch (error: any) {
+      return Result.failure(
+        new OrderExecutionException(
+          `Failed to execute orders: ${error.message}`,
+          'unknown',
+          opportunity.longExchange,
+          { symbol: opportunity.symbol, error: error.message },
+        ),
       );
     }
-
-    return result;
   }
 
   async executeMultiplePositions(
@@ -211,36 +244,37 @@ export class OrderExecutor implements IOrderExecutor {
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
     exchangeBalances: Map<ExchangeType, number>,
     result: ArbitrageExecutionResult,
-  ): Promise<{
+  ): Promise<Result<{
     successfulExecutions: number;
     totalOrders: number;
     totalExpectedReturn: number;
-  }> {
+  }, DomainException>> {
     let successfulExecutions = 0;
     let totalOrders = 0;
     let totalExpectedReturn = 0;
 
     this.logger.log(`\n🚀 Executing ${opportunities.length} positions...`);
 
-    for (let i = 0; i < opportunities.length; i++) {
-      const item = opportunities[i];
+    try {
+      for (let i = 0; i < opportunities.length; i++) {
+        const item = opportunities[i];
 
-      if (!item.plan) {
-        this.logger.warn(`Skipping ${item.opportunity.symbol}: invalid plan`);
-        continue;
-      }
+        if (!item.plan) {
+          this.logger.warn(`Skipping ${item.opportunity.symbol}: invalid plan`);
+          continue;
+        }
 
-      // Retry loop for this opportunity
-      let executionAttempt = 0;
-      let executionSuccess = false;
+        // Retry loop for this opportunity
+        let executionAttempt = 0;
+        let executionSuccess = false;
 
-      while (
-        executionAttempt < this.config.maxExecutionRetries &&
-        !executionSuccess
-      ) {
-        executionAttempt++;
+        while (
+          executionAttempt < this.config.maxExecutionRetries &&
+          !executionSuccess
+        ) {
+          executionAttempt++;
 
-        try {
+          try {
           const { opportunity, plan } = item;
 
           // Get adapters
@@ -257,7 +291,7 @@ export class OrderExecutor implements IOrderExecutor {
           // Place orders
           this.logger.log(
             `📤 [${i + 1}/${opportunities.length}] Opening ${opportunity.symbol}: ` +
-              `${plan.positionSize.toFixed(4)} size` +
+              `${plan.positionSize.toBaseAsset().toFixed(4)} size` +
               (executionAttempt > 1
                 ? ` [Attempt ${executionAttempt}/${this.config.maxExecutionRetries}]`
                 : ''),
@@ -278,7 +312,7 @@ export class OrderExecutor implements IOrderExecutor {
               longResponse.orderId,
               opportunity.symbol,
               opportunity.longExchange,
-              plan.positionSize,
+              plan.positionSize.toBaseAsset(),
               this.config.maxOrderWaitRetries,
               this.config.orderWaitBaseInterval,
               false,
@@ -291,7 +325,7 @@ export class OrderExecutor implements IOrderExecutor {
               shortResponse.orderId,
               opportunity.symbol,
               opportunity.shortExchange,
-              plan.positionSize,
+              plan.positionSize.toBaseAsset(),
               this.config.maxOrderWaitRetries,
               this.config.orderWaitBaseInterval,
               false,
@@ -316,8 +350,9 @@ export class OrderExecutor implements IOrderExecutor {
             // Handle asymmetric fills
             const longFilled = finalLongResponse.filledSize || 0;
             const shortFilled = finalShortResponse.filledSize || 0;
-            const longFullyFilled = longFilled >= plan.positionSize - 0.0001;
-            const shortFullyFilled = shortFilled >= plan.positionSize - 0.0001;
+            const positionSizeBase = plan.positionSize.toBaseAsset();
+            const longFullyFilled = longFilled >= positionSizeBase - 0.0001;
+            const shortFullyFilled = shortFilled >= positionSizeBase - 0.0001;
             const longOnBook =
               longIsGTC &&
               finalLongResponse.status === OrderStatus.SUBMITTED &&
@@ -341,11 +376,11 @@ export class OrderExecutor implements IOrderExecutor {
                 shortOrderId: shortResponse.orderId,
                 longExchange: opportunity.longExchange,
                 shortExchange: opportunity.shortExchange,
-                positionSize: plan.positionSize,
+                positionSize: plan.positionSize.toBaseAsset(),
                 opportunity,
                 timestamp: new Date(),
               };
-              await this.positionManager.handleAsymmetricFills(adapters, [fill]);
+              await this.positionManager.handleAsymmetricFills(adapters, [fill], result);
             }
 
             successfulExecutions++;
@@ -359,8 +394,60 @@ export class OrderExecutor implements IOrderExecutor {
 
             executionSuccess = true;
           } else {
-            // One or both orders failed
-            if (executionAttempt < this.config.maxExecutionRetries) {
+            // One or both orders failed - CRITICAL: Check if one leg filled
+            const longFilled = finalLongResponse.isFilled() && finalLongResponse.isSuccess();
+            const shortFilled = finalShortResponse.isFilled() && finalShortResponse.isSuccess();
+            
+            if (longFilled || shortFilled) {
+              // CRITICAL SAFETY: One leg filled but other failed - close filled position immediately
+              // This prevents price exposure from single-leg positions
+              this.logger.error(
+                `🚨 CRITICAL: Single leg filled for ${opportunity.symbol}! ` +
+                  `Long: ${longFilled ? 'FILLED' : 'FAILED'}, ` +
+                  `Short: ${shortFilled ? 'FILLED' : 'FAILED'}. ` +
+                  `Closing filled position to prevent price exposure...`,
+              );
+              
+              if (longFilled) {
+                const closeResult = await this.positionManager.closeFilledPosition(
+                  longAdapter,
+                  opportunity.symbol,
+                  'LONG',
+                  plan.positionSize.toBaseAsset(),
+                  opportunity.longExchange,
+                  result,
+                );
+                if (closeResult.isFailure) {
+                  this.logger.error(
+                    `CRITICAL: Failed to close filled LONG position for ${opportunity.symbol}! ` +
+                      `Position remains open - MANUAL INTERVENTION REQUIRED!`,
+                  );
+                }
+              }
+              
+              if (shortFilled) {
+                const closeResult = await this.positionManager.closeFilledPosition(
+                  shortAdapter,
+                  opportunity.symbol,
+                  'SHORT',
+                  plan.positionSize.toBaseAsset(),
+                  opportunity.shortExchange,
+                  result,
+                );
+                if (closeResult.isFailure) {
+                  this.logger.error(
+                    `CRITICAL: Failed to close filled SHORT position for ${opportunity.symbol}! ` +
+                      `Position remains open - MANUAL INTERVENTION REQUIRED!`,
+                  );
+                }
+              }
+              
+              result.errors.push(
+                `Single leg execution for ${opportunity.symbol} - filled position closed`,
+              );
+              executionSuccess = true; // Don't retry - we've closed the position
+            } else if (executionAttempt < this.config.maxExecutionRetries) {
+              // Both failed - safe to retry
               const delayIndex = executionAttempt - 1;
               const retryDelay =
                 this.config.executionRetryDelays[delayIndex] ||
@@ -402,20 +489,30 @@ export class OrderExecutor implements IOrderExecutor {
             );
             executionSuccess = true; // Stop retrying
           }
+          }
         }
       }
+
+      this.logger.log(
+        `✅ Execution: ${successfulExecutions}/${opportunities.length} positions, ` +
+          `$${totalExpectedReturn.toFixed(2)}/period expected`,
+      );
+
+      return Result.success({
+        successfulExecutions,
+        totalOrders,
+        totalExpectedReturn,
+      });
+    } catch (error: any) {
+      this.logger.error(`Failed to execute multiple positions: ${error.message}`);
+      return Result.failure(
+        new DomainException(
+          `Failed to execute multiple positions: ${error.message}`,
+          'EXECUTION_ERROR',
+          { error: error.message, opportunitiesCount: opportunities.length },
+        ),
+      );
     }
-
-    this.logger.log(
-      `✅ Execution: ${successfulExecutions}/${opportunities.length} positions, ` +
-        `$${totalExpectedReturn.toFixed(2)}/period expected`,
-    );
-
-    return {
-      successfulExecutions,
-      totalOrders,
-      totalExpectedReturn,
-    };
   }
 
   /**
@@ -439,4 +536,3 @@ export class OrderExecutor implements IOrderExecutor {
     return total;
   }
 }
-

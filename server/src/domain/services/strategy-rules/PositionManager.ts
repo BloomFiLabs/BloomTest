@@ -1,10 +1,9 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { IPositionManager, AsymmetricFill } from './IPositionManager';
 import { StrategyConfig } from '../../value-objects/StrategyConfig';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
 import {
-  PerpPosition,
   PerpOrderRequest,
   PerpOrderResponse,
   OrderSide,
@@ -12,8 +11,16 @@ import {
   TimeInForce,
   OrderStatus,
 } from '../../value-objects/PerpOrder';
+import { PerpPosition } from '../../entities/PerpPosition';
 import { ArbitrageExecutionResult } from '../FundingArbitrageStrategy';
-import { IOrderExecutor } from './IOrderExecutor';
+import type { IOrderExecutor } from './IOrderExecutor';
+import { OrderExecutor } from './OrderExecutor';
+import { Result } from '../../common/Result';
+import {
+  DomainException,
+  ExchangeException,
+  PositionNotFoundException,
+} from '../../exceptions/DomainException';
 
 /**
  * Position manager for funding arbitrage strategy
@@ -25,14 +32,15 @@ export class PositionManager implements IPositionManager {
 
   constructor(
     private readonly config: StrategyConfig,
-    @Inject('IOrderExecutor')
+    @Inject(forwardRef(() => 'IOrderExecutor'))
     private readonly orderExecutor: IOrderExecutor,
   ) {}
 
   async getAllPositions(
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
-  ): Promise<PerpPosition[]> {
+  ): Promise<Result<PerpPosition[], DomainException>> {
     const allPositions: PerpPosition[] = [];
+    const errors: DomainException[] = [];
 
     for (const [exchangeType, adapter] of adapters) {
       try {
@@ -42,17 +50,37 @@ export class PositionManager implements IPositionManager {
         this.logger.warn(
           `Failed to get positions from ${exchangeType}: ${error.message}`,
         );
+        errors.push(
+          new ExchangeException(
+            `Failed to get positions: ${error.message}`,
+            exchangeType,
+            { error: error.message },
+          ),
+        );
       }
     }
 
-    return allPositions;
+    // Return success even if some exchanges failed (resilient design)
+    // Individual errors are logged but we still return positions from successful exchanges
+    // Only return failure if ALL exchanges failed AND we have no positions
+    if (allPositions.length === 0 && errors.length === adapters.size) {
+      return Result.failure(
+        new DomainException(
+          `Failed to get positions from all exchanges`,
+          'POSITION_FETCH_ERROR',
+          { errors: errors.map((e) => e.message) },
+        ),
+      );
+    }
+
+    return Result.success(allPositions);
   }
 
   async closeAllPositions(
     positions: PerpPosition[],
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
     result: ArbitrageExecutionResult,
-  ): Promise<{ closed: PerpPosition[]; stillOpen: PerpPosition[] }> {
+  ): Promise<Result<{ closed: PerpPosition[]; stillOpen: PerpPosition[] }, DomainException>> {
     const closed: PerpPosition[] = [];
     const stillOpen: PerpPosition[] = [];
 
@@ -62,6 +90,9 @@ export class PositionManager implements IPositionManager {
         if (!adapter) {
           this.logger.warn(
             `No adapter found for ${position.exchangeType}, cannot close position`,
+          );
+          result.errors.push(
+            `No adapter found for ${position.exchangeType}`,
           );
           stillOpen.push(position);
           continue;
@@ -223,14 +254,14 @@ export class PositionManager implements IPositionManager {
       }
     }
 
-    return { closed, stillOpen };
+    return Result.success({ closed, stillOpen });
   }
 
   async handleAsymmetricFills(
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
     fills: AsymmetricFill[],
     result: ArbitrageExecutionResult,
-  ): Promise<void> {
+  ): Promise<Result<void, DomainException>> {
     const now = new Date();
     const fillsToHandle: Array<{ fill: AsymmetricFill }> = [];
 
@@ -243,7 +274,7 @@ export class PositionManager implements IPositionManager {
     }
 
     if (fillsToHandle.length === 0) {
-      return;
+      return Result.success(undefined);
     }
 
     this.logger.warn(
@@ -268,8 +299,12 @@ export class PositionManager implements IPositionManager {
         const shortAdapter = adapters.get(shortExchange);
 
         if (!longAdapter || !shortAdapter) {
+          const missingExchange = !longAdapter ? longExchange : shortExchange;
           this.logger.warn(
             `Missing adapters for ${symbol}, skipping asymmetric fill handling`,
+          );
+          result.errors.push(
+            `Missing adapter for ${missingExchange} when handling asymmetric fill for ${symbol}`,
           );
           continue;
         }
@@ -336,7 +371,7 @@ export class PositionManager implements IPositionManager {
                 `Falling back to closing filled position...`,
             );
             // Fall through to Option 1
-            await this.closeFilledPosition(
+            const closeResult = await this.closeFilledPosition(
               filledAdapter,
               symbol,
               filledSide,
@@ -344,6 +379,9 @@ export class PositionManager implements IPositionManager {
               filledExchange,
               result,
             );
+            if (closeResult.isFailure) {
+              // Error already logged in closeFilledPosition
+            }
           }
         } else {
           // Option 1: Cancel unfilled order and close filled position
@@ -368,7 +406,7 @@ export class PositionManager implements IPositionManager {
           }
 
           // Close filled position
-          await this.closeFilledPosition(
+          const closeResult = await this.closeFilledPosition(
             filledAdapter,
             symbol,
             filledSide,
@@ -376,6 +414,9 @@ export class PositionManager implements IPositionManager {
             filledExchange,
             result,
           );
+          if (closeResult.isFailure) {
+            // Error already logged in closeFilledPosition
+          }
         }
       } catch (error: any) {
         this.logger.error(
@@ -386,6 +427,9 @@ export class PositionManager implements IPositionManager {
         );
       }
     }
+
+    // Return success even if some fills failed (errors are logged in result.errors)
+    return Result.success(undefined);
   }
 
   async closeFilledPosition(
@@ -395,7 +439,7 @@ export class PositionManager implements IPositionManager {
     size: number,
     exchangeType: ExchangeType,
     result: ArbitrageExecutionResult,
-  ): Promise<void> {
+  ): Promise<Result<void, DomainException>> {
     try {
       const closeOrder = new PerpOrderRequest(
         symbol,
@@ -428,9 +472,17 @@ export class PositionManager implements IPositionManager {
 
       if (closeResponse.isSuccess() && closeResponse.isFilled()) {
         this.logger.log(`✅ Successfully closed ${side} position: ${symbol}`);
+        return Result.success(undefined);
       } else {
         this.logger.warn(`⚠️ Failed to close ${side} position: ${symbol}`);
         result.errors.push(`Failed to close ${side} position ${symbol}`);
+        return Result.failure(
+          new PositionNotFoundException(
+            symbol,
+            exchangeType,
+            { side, size, error: closeResponse.error || 'order not filled' },
+          ),
+        );
       }
     } catch (error: any) {
       this.logger.error(
@@ -438,6 +490,13 @@ export class PositionManager implements IPositionManager {
       );
       result.errors.push(
         `Error closing filled position ${symbol}: ${error.message}`,
+      );
+      return Result.failure(
+        new DomainException(
+          `Error closing filled position: ${error.message}`,
+          'POSITION_CLOSE_ERROR',
+          { symbol, side, exchangeType, error: error.message },
+        ),
       );
     }
   }
@@ -477,7 +536,7 @@ export class PositionManager implements IPositionManager {
     const periodsPerDay = 24;
     const periodsPerYear = periodsPerDay * 365;
     const expectedReturnPerPeriod =
-      (opportunity.expectedReturn / periodsPerYear) * positionSizeUsd;
+      ((opportunity.expectedReturn?.toAPY() || 0) / periodsPerYear) * positionSizeUsd;
 
     if (expectedReturnPerPeriod > 0) {
       const breakEvenHours = totalCosts / expectedReturnPerPeriod;
@@ -501,4 +560,3 @@ export class PositionManager implements IPositionManager {
     };
   }
 }
-

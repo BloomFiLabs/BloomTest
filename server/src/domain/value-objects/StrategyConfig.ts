@@ -1,0 +1,158 @@
+import { ConfigService } from '@nestjs/config';
+import { ExchangeType } from './ExchangeConfig';
+import { Percentage } from './Percentage';
+
+/**
+ * Strategy configuration value object
+ * Contains all configuration constants for the funding arbitrage strategy
+ */
+export class StrategyConfig {
+  private readonly _exchangeFeeRates: Map<ExchangeType, Percentage>;
+  private readonly _takerFeeRates: Map<ExchangeType, Percentage>;
+
+  constructor(
+    public readonly defaultMinSpread: Percentage,
+    public readonly minPositionSizeUsd: number,
+    public readonly balanceUsagePercent: Percentage,
+    public readonly leverage: number,
+    public readonly maxWorstCaseBreakEvenDays: number,
+    public readonly minOpenInterestUsd: number,
+    public readonly minTotalOpenInterestUsd: number,
+    exchangeFeeRates: Map<ExchangeType, Percentage>,
+    takerFeeRates: Map<ExchangeType, Percentage>,
+    public readonly limitOrderPriceImprovement: Percentage,
+    public readonly asymmetricFillTimeoutMs: number,
+    public readonly maxExecutionRetries: number,
+    public readonly executionRetryDelays: number[],
+    public readonly maxOrderWaitRetries: number,
+    public readonly orderWaitBaseInterval: number,
+    public readonly maxBackoffDelayOpening: number,
+    public readonly maxBackoffDelayClosing: number,
+    public readonly minFillBalance: Percentage,
+  ) {
+    this._exchangeFeeRates = new Map(exchangeFeeRates);
+    this._takerFeeRates = new Map(takerFeeRates);
+    // Validation
+    if (minPositionSizeUsd <= 0) {
+      throw new Error('minPositionSizeUsd must be greater than 0');
+    }
+
+    if (balanceUsagePercent.toDecimal() <= 0 || balanceUsagePercent.toDecimal() > 1) {
+      throw new Error('balanceUsagePercent must be between 0 and 1');
+    }
+
+    if (leverage < 1) {
+      throw new Error('leverage must be at least 1');
+    }
+
+    if (maxExecutionRetries <= 0) {
+      throw new Error('maxExecutionRetries must be greater than 0');
+    }
+
+    if (maxOrderWaitRetries <= 0) {
+      throw new Error('maxOrderWaitRetries must be greater than 0');
+    }
+
+    if (orderWaitBaseInterval <= 0) {
+      throw new Error('orderWaitBaseInterval must be greater than 0');
+    }
+
+    if (executionRetryDelays.length === 0) {
+      throw new Error('executionRetryDelays must not be empty');
+    }
+
+    if (minFillBalance.toDecimal() <= 0 || minFillBalance.toDecimal() > 1) {
+      throw new Error('minFillBalance must be between 0 and 1');
+    }
+
+    if (balanceUsagePercent.toDecimal() <= 0 || balanceUsagePercent.toDecimal() > 1) {
+      throw new Error('balanceUsagePercent must be between 0 and 1');
+    }
+  }
+
+  /**
+   * Get exchange fee rate as number (for backward compatibility)
+   */
+  getExchangeFeeRate(exchange: ExchangeType): number {
+    return this._exchangeFeeRates.get(exchange)?.toDecimal() ?? 0;
+  }
+
+  /**
+   * Get taker fee rate as number (for backward compatibility)
+   */
+  getTakerFeeRate(exchange: ExchangeType): number {
+    return this._takerFeeRates.get(exchange)?.toDecimal() ?? 0;
+  }
+
+  /**
+   * Get exchange fee rates map (for backward compatibility)
+   */
+  get exchangeFeeRates(): Map<ExchangeType, number> {
+    const result = new Map<ExchangeType, number>();
+    for (const [exchange, percentage] of this._exchangeFeeRates) {
+      result.set(exchange, percentage.toDecimal());
+    }
+    return result;
+  }
+
+  /**
+   * Get taker fee rates map (for backward compatibility)
+   */
+  get takerFeeRates(): Map<ExchangeType, number> {
+    const result = new Map<ExchangeType, number>();
+    for (const [exchange, percentage] of this._takerFeeRates) {
+      result.set(exchange, percentage.toDecimal());
+    }
+    return result;
+  }
+
+  /**
+   * Create StrategyConfig from ConfigService
+   * Reads KEEPER_LEVERAGE from environment, uses defaults for other values
+   */
+  static fromConfigService(configService: ConfigService): StrategyConfig {
+    const leverage = parseFloat(
+      configService.get<string>('KEEPER_LEVERAGE') || '2.0',
+    );
+
+    return StrategyConfig.withDefaults(leverage);
+  }
+
+  /**
+   * Create StrategyConfig with default values
+   */
+  static withDefaults(leverage: number = 2.0): StrategyConfig {
+    const exchangeFeeRates = new Map<ExchangeType, Percentage>([
+      [ExchangeType.HYPERLIQUID, Percentage.fromDecimal(0.00015)], // 0.0150% maker fee (tier 0)
+      [ExchangeType.ASTER, Percentage.fromDecimal(0.00005)], // 0.0050% maker fee
+      [ExchangeType.LIGHTER, Percentage.fromDecimal(0)], // 0% fees (no trading fees)
+    ]);
+
+    const takerFeeRates = new Map<ExchangeType, Percentage>([
+      [ExchangeType.HYPERLIQUID, Percentage.fromDecimal(0.0002)], // 0.0200% taker fee (tier 0)
+      [ExchangeType.ASTER, Percentage.fromDecimal(0.0004)], // 0.0400% taker fee
+      [ExchangeType.LIGHTER, Percentage.fromDecimal(0)], // 0% fees (no trading fees)
+    ]);
+
+    return new StrategyConfig(
+      Percentage.fromDecimal(0.0001), // defaultMinSpread
+      5, // minPositionSizeUsd
+      Percentage.fromDecimal(0.9), // balanceUsagePercent
+      leverage, // leverage
+      7, // maxWorstCaseBreakEvenDays
+      10000, // minOpenInterestUsd
+      20000, // minTotalOpenInterestUsd
+      exchangeFeeRates,
+      takerFeeRates,
+      Percentage.fromDecimal(0.0001), // limitOrderPriceImprovement
+      2 * 60 * 1000, // asymmetricFillTimeoutMs (2 minutes)
+      3, // maxExecutionRetries
+      [5000, 10000], // executionRetryDelays
+      10, // maxOrderWaitRetries
+      2000, // orderWaitBaseInterval
+      8000, // maxBackoffDelayOpening
+      32000, // maxBackoffDelayClosing
+      Percentage.fromDecimal(0.95), // minFillBalance
+    );
+  }
+}

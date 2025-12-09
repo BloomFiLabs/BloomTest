@@ -7,6 +7,8 @@ import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
 import { ArbitrageOpportunity } from '../FundingRateAggregator';
 import { Contract, JsonRpcProvider, Wallet, formatUnits } from 'ethers';
+import { Result } from '../../common/Result';
+import { DomainException, ExchangeException } from '../../exceptions/DomainException';
 
 /**
  * Balance manager for funding arbitrage strategy
@@ -20,10 +22,10 @@ export class BalanceManager implements IBalanceManager {
     private readonly configService: ConfigService,
     @Optional()
     private readonly balanceRebalancer?: ExchangeBalanceRebalancer,
-    private readonly config: StrategyConfig = new StrategyConfig(),
+    private readonly config: StrategyConfig = StrategyConfig.withDefaults(),
   ) {}
 
-  async getWalletUsdcBalance(): Promise<number> {
+  async getWalletUsdcBalance(): Promise<Result<number, DomainException>> {
     try {
       // Get Arbitrum RPC URL (USDC deposits go through Arbitrum)
       const rpcUrl =
@@ -39,7 +41,7 @@ export class BalanceManager implements IBalanceManager {
         this.logger.debug(
           'No PRIVATE_KEY or WALLET_ADDRESS configured, skipping wallet balance check',
         );
-        return 0;
+        return Result.success(0);
       }
 
       // USDC address on Arbitrum (matches deposit logic)
@@ -67,7 +69,7 @@ export class BalanceManager implements IBalanceManager {
         address = wallet.address;
         this.logger.debug(`Derived address from PRIVATE_KEY: ${address}`);
       } else {
-        return 0;
+        return Result.success(0);
       }
 
       this.logger.log(
@@ -85,24 +87,37 @@ export class BalanceManager implements IBalanceManager {
         `💰 USDC balance on Arbitrum for ${address}: $${balanceUsd.toFixed(2)} USDC`,
       );
 
-      return balanceUsd;
+      return Result.success(balanceUsd);
     } catch (error: any) {
       this.logger.debug(
         `Failed to get wallet USDC balance on Arbitrum: ${error.message}`,
       );
-      return 0;
+      return Result.failure(
+        new DomainException(
+          `Failed to get wallet USDC balance: ${error.message}`,
+          'WALLET_BALANCE_ERROR',
+          { error: error.message },
+        ),
+      );
     }
   }
 
   async checkAndDepositWalletFunds(
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
     uniqueExchanges: Set<ExchangeType>,
-  ): Promise<void> {
+  ): Promise<Result<void, DomainException>> {
     try {
-      const walletBalance = await this.getWalletUsdcBalance();
+      const walletBalanceResult = await this.getWalletUsdcBalance();
+      if (walletBalanceResult.isFailure) {
+        this.logger.debug(
+          `Failed to get wallet balance: ${walletBalanceResult.error.message}`,
+        );
+        return Result.failure(walletBalanceResult.error);
+      }
+      const walletBalance = walletBalanceResult.value;
       if (walletBalance <= 0) {
         this.logger.debug('No USDC in wallet, skipping deposit');
-        return;
+        return Result.success(undefined);
       }
 
       this.logger.log(
@@ -136,7 +151,7 @@ export class BalanceManager implements IBalanceManager {
       const exchangesToDeposit = Array.from(uniqueExchanges);
       if (exchangesToDeposit.length === 0) {
         this.logger.debug('No exchanges available for deposit');
-        return;
+        return Result.success(undefined);
       }
 
       // Distribute wallet funds equally to all exchanges
@@ -200,7 +215,17 @@ export class BalanceManager implements IBalanceManager {
       this.logger.debug(
         `Error checking/depositing wallet funds: ${error.message}`,
       );
+      return Result.failure(
+        new DomainException(
+          `Error checking/depositing wallet funds: ${error.message}`,
+          'WALLET_DEPOSIT_ERROR',
+          { error: error.message },
+        ),
+      );
     }
+
+    // Return success even if some deposits failed (errors are logged)
+    return Result.success(undefined);
   }
 
   async attemptRebalanceForOpportunity(
@@ -209,12 +234,17 @@ export class BalanceManager implements IBalanceManager {
     requiredCollateral: number,
     longBalance: number,
     shortBalance: number,
-  ): Promise<boolean> {
+  ): Promise<Result<boolean, DomainException>> {
     if (!this.balanceRebalancer) {
       this.logger.warn(
         'ExchangeBalanceRebalancer not available, cannot rebalance',
       );
-      return false;
+      return Result.failure(
+        new DomainException(
+          'ExchangeBalanceRebalancer not available',
+          'REBALANCE_UNAVAILABLE',
+        ),
+      );
     }
 
     const longExchange = opportunity.longExchange;
@@ -223,7 +253,13 @@ export class BalanceManager implements IBalanceManager {
     const shortAdapter = adapters.get(shortExchange);
 
     if (!longAdapter || !shortAdapter) {
-      return false;
+      const missingAdapter = !longAdapter ? longExchange : shortExchange;
+      return Result.failure(
+        new ExchangeException(
+          `Adapter not found for ${missingAdapter}`,
+          missingAdapter,
+        ),
+      );
     }
 
     this.logger.debug(
@@ -257,8 +293,12 @@ export class BalanceManager implements IBalanceManager {
       this.logger.debug(
         'No rebalancing needed - both exchanges have sufficient balance',
       );
-      return true;
+      return Result.success(true);
     }
+
+    // Track remaining needs for Strategy 3 (wallet deposit fallback)
+    let remainingLongNeeded = longDeficit;
+    let remainingShortNeeded = shortDeficit;
 
     // Strategy 1: Withdraw from unused exchanges and distribute to needed exchanges
     let totalAvailableFromUnused = 0;
@@ -286,8 +326,9 @@ export class BalanceManager implements IBalanceManager {
       );
 
       // Transfer from unused exchanges to needed exchanges
-      let remainingLongNeeded = longNeeded;
-      let remainingShortNeeded = shortNeeded;
+      // Update remaining needs (already declared above)
+      remainingLongNeeded = longNeeded;
+      remainingShortNeeded = shortNeeded;
 
       for (const unusedExchange of unusedExchanges) {
         if (remainingLongNeeded <= 0 && remainingShortNeeded <= 0) break;
@@ -305,12 +346,14 @@ export class BalanceManager implements IBalanceManager {
             this.logger.debug(
               `Transferring $${transferAmount.toFixed(2)} from ${unusedExchange} to ${longExchange}`,
             );
-            const success = await this.balanceRebalancer.transferBetweenExchanges(
+            const txHash = await this.balanceRebalancer.transferBetweenExchanges(
               unusedExchange,
               longExchange,
               transferAmount,
-              adapters,
+              adapters.get(unusedExchange)!,
+              adapters.get(longExchange)!,
             );
+            const success = !!txHash;
             if (success) {
               remainingLongNeeded -= transferAmount;
               unusedBalance -= transferAmount;
@@ -329,12 +372,14 @@ export class BalanceManager implements IBalanceManager {
             this.logger.debug(
               `Transferring $${transferAmount.toFixed(2)} from ${unusedExchange} to ${shortExchange}`,
             );
-            const success = await this.balanceRebalancer.transferBetweenExchanges(
+            const txHash = await this.balanceRebalancer.transferBetweenExchanges(
               unusedExchange,
               shortExchange,
               transferAmount,
-              adapters,
+              adapters.get(unusedExchange)!,
+              adapters.get(shortExchange)!,
             );
+            const success = !!txHash;
             if (success) {
               remainingShortNeeded -= transferAmount;
             }
@@ -349,7 +394,7 @@ export class BalanceManager implements IBalanceManager {
       // Check if we've met the requirements after rebalancing
       if (remainingLongNeeded <= 0 && remainingShortNeeded <= 0) {
         this.logger.debug('Rebalancing successful via unused exchanges');
-        return true;
+        return Result.success(true);
       }
     }
 
@@ -363,15 +408,17 @@ export class BalanceManager implements IBalanceManager {
         this.logger.debug(
           `Transferring $${transferAmount.toFixed(2)} from ${longExchange} to ${shortExchange}`,
         );
-        const success = await this.balanceRebalancer.transferBetweenExchanges(
+        const txHash = await this.balanceRebalancer.transferBetweenExchanges(
           longExchange,
           shortExchange,
           transferAmount,
-          adapters,
+          adapters.get(longExchange)!,
+          adapters.get(shortExchange)!,
         );
+        const success = !!txHash;
         if (success) {
           this.logger.debug('Rebalancing successful via exchange-to-exchange transfer');
-          return true;
+          return Result.success(true);
         }
       } catch (error: any) {
         this.logger.debug(
@@ -386,15 +433,17 @@ export class BalanceManager implements IBalanceManager {
         this.logger.debug(
           `Transferring $${transferAmount.toFixed(2)} from ${shortExchange} to ${longExchange}`,
         );
-        const success = await this.balanceRebalancer.transferBetweenExchanges(
+        const txHash = await this.balanceRebalancer.transferBetweenExchanges(
           shortExchange,
           longExchange,
           transferAmount,
-          adapters,
+          adapters.get(shortExchange)!,
+          adapters.get(longExchange)!,
         );
+        const success = !!txHash;
         if (success) {
           this.logger.debug('Rebalancing successful via exchange-to-exchange transfer');
-          return true;
+          return Result.success(true);
         }
       } catch (error: any) {
         this.logger.debug(
@@ -405,22 +454,29 @@ export class BalanceManager implements IBalanceManager {
 
     // Strategy 3: Check wallet and deposit if needed (fallback)
     try {
-      const walletBalance = await this.getWalletUsdcBalance();
-      if (walletBalance > 0) {
-        const totalRemainingDeficit = Math.max(remainingLongNeeded, remainingShortNeeded);
-        if (totalRemainingDeficit > 0 && walletBalance >= totalRemainingDeficit) {
-          this.logger.debug(
-            `Depositing $${totalRemainingDeficit.toFixed(2)} from wallet to cover remaining deficit`,
-          );
-          
-          if (remainingLongNeeded > 0) {
-            await longAdapter.depositExternal(remainingLongNeeded, 'USDC');
+      const walletBalanceResult = await this.getWalletUsdcBalance();
+      if (walletBalanceResult.isFailure) {
+        this.logger.debug(
+          `Failed to get wallet balance: ${walletBalanceResult.error.message}`,
+        );
+      } else {
+        const walletBalance = walletBalanceResult.value;
+        if (walletBalance > 0) {
+          const totalRemainingDeficit = Math.max(remainingLongNeeded, remainingShortNeeded);
+          if (totalRemainingDeficit > 0 && walletBalance >= totalRemainingDeficit) {
+            this.logger.debug(
+              `Depositing $${totalRemainingDeficit.toFixed(2)} from wallet to cover remaining deficit`,
+            );
+            
+            if (remainingLongNeeded > 0) {
+              await longAdapter.depositExternal(remainingLongNeeded, 'USDC');
+            }
+            if (remainingShortNeeded > 0) {
+              await shortAdapter.depositExternal(remainingShortNeeded, 'USDC');
+            }
+            
+            return Result.success(true);
           }
-          if (remainingShortNeeded > 0) {
-            await shortAdapter.depositExternal(remainingShortNeeded, 'USDC');
-          }
-          
-          return true;
         }
       }
     } catch (error: any) {
@@ -431,7 +487,12 @@ export class BalanceManager implements IBalanceManager {
       `Rebalancing failed for ${opportunity.symbol}: ` +
         `Long deficit: $${longDeficit.toFixed(2)}, Short deficit: $${shortDeficit.toFixed(2)}`,
     );
-    return false;
+    return Result.failure(
+      new DomainException(
+        `Rebalancing failed - insufficient funds. Long deficit: $${longDeficit.toFixed(2)}, Short deficit: $${shortDeficit.toFixed(2)}`,
+        'REBALANCE_FAILED',
+        { longDeficit, shortDeficit, requiredCollateral },
+      ),
+    );
   }
 }
-

@@ -1,11 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { IOpportunityEvaluator } from './IOpportunityEvaluator';
-import {
-  HistoricalFundingRateService,
-  HistoricalMetrics,
-} from '../../../infrastructure/services/HistoricalFundingRateService';
+import type { IHistoricalFundingRateService } from '../../ports/IHistoricalFundingRateService';
+import { HistoricalMetrics } from '../../ports/IHistoricalFundingRateService';
 import { FundingRateAggregator } from '../FundingRateAggregator';
-import { PositionLossTracker } from '../../../infrastructure/services/PositionLossTracker';
+import type { IPositionLossTracker } from '../../ports/IPositionLossTracker';
 import { CostCalculator } from './CostCalculator';
 import { StrategyConfig } from '../../value-objects/StrategyConfig';
 import { ArbitrageOpportunity } from '../FundingRateAggregator';
@@ -13,6 +11,9 @@ import { ArbitrageExecutionPlan } from '../FundingArbitrageStrategy';
 import { PerpPosition } from '../../entities/PerpPosition';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
+import { Result } from '../../common/Result';
+import { DomainException } from '../../exceptions/DomainException';
+import { OrderSide } from '../../value-objects/PerpOrder';
 
 /**
  * Opportunity evaluator for funding arbitrage strategy
@@ -23,9 +24,9 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
   private readonly logger = new Logger(OpportunityEvaluator.name);
 
   constructor(
-    private readonly historicalService: HistoricalFundingRateService,
+    private readonly historicalService: IHistoricalFundingRateService,
     private readonly aggregator: FundingRateAggregator,
-    private readonly lossTracker: PositionLossTracker,
+    private readonly lossTracker: IPositionLossTracker,
     private readonly costCalculator: CostCalculator,
     private readonly config: StrategyConfig,
   ) {}
@@ -33,7 +34,7 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
   evaluateOpportunityWithHistory(
     opportunity: ArbitrageOpportunity,
     plan: ArbitrageExecutionPlan | null,
-  ): {
+  ): Result<{
     breakEvenHours: number | null;
     historicalMetrics: {
       long: HistoricalMetrics | null;
@@ -41,7 +42,7 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
     };
     worstCaseBreakEvenHours: number | null;
     consistencyScore: number;
-  } {
+  }, DomainException> {
     const longMetrics = this.historicalService.getHistoricalMetrics(
       opportunity.symbol,
       opportunity.longExchange,
@@ -70,7 +71,7 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
         opportunity.longMarkPrice && opportunity.shortMarkPrice
           ? (opportunity.longMarkPrice + opportunity.shortMarkPrice) / 2
           : opportunity.longMarkPrice || opportunity.shortMarkPrice || 0;
-      const positionSizeUsd = plan.positionSize * avgMarkPrice;
+      const positionSizeUsd = plan.positionSize.toUSD(avgMarkPrice);
       const worstCaseHourlyReturn =
         (worstCaseAPY / periodsPerYear) * positionSizeUsd;
 
@@ -80,7 +81,7 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
       }
     }
 
-    return {
+    return Result.success({
       breakEvenHours: plan ? null : (opportunity as any).breakEvenHours || null,
       historicalMetrics: {
         long: longMetrics,
@@ -88,7 +89,7 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
       },
       worstCaseBreakEvenHours,
       consistencyScore,
-    };
+    });
   }
 
   async selectWorstCaseOpportunity(
@@ -102,13 +103,13 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
     maxPositionSizeUsd: number | undefined,
     exchangeBalances: Map<ExchangeType, number>,
-  ): Promise<{
+  ): Promise<Result<{
     opportunity: ArbitrageOpportunity;
     plan: ArbitrageExecutionPlan;
     reason: string;
-  } | null> {
+  } | null, DomainException>> {
     if (allOpportunities.length === 0) {
-      return null;
+      return Result.success(null);
     }
 
     // Evaluate all opportunities with historical metrics
@@ -122,10 +123,17 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
     for (const item of allOpportunities) {
       if (!item.plan) continue; // Skip if no plan
 
-      const historical = this.evaluateOpportunityWithHistory(
+      const historicalResult = this.evaluateOpportunityWithHistory(
         item.opportunity,
         item.plan,
       );
+      if (historicalResult.isFailure) {
+        this.logger.warn(
+          `Failed to evaluate opportunity ${item.opportunity.symbol}: ${historicalResult.error.message}`,
+        );
+        continue;
+      }
+      const historical = historicalResult.value;
 
       // Calculate score: (consistencyScore * avgHistoricalRate * liquidity) / worstCaseBreakEvenHours
       // Higher score = better worst-case opportunity
@@ -164,7 +172,7 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
     }
 
     if (evaluated.length === 0) {
-      return null;
+      return Result.success(null);
     }
 
     // Sort by score (highest first)
@@ -180,7 +188,7 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
       this.logger.warn(
         `Worst-case opportunity has break-even > ${this.config.maxWorstCaseBreakEvenDays} days, skipping`,
       );
-      return null;
+      return Result.success(null);
     }
 
     const reason =
@@ -193,11 +201,11 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
       `🎯 Selected WORST-CASE opportunity: ${best.opportunity.symbol} - ${reason}`,
     );
 
-    return {
+    return Result.success({
       opportunity: best.opportunity,
       plan: best.plan!,
       reason,
-    };
+    });
   }
 
   async shouldRebalance(
@@ -206,12 +214,12 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
     newPlan: ArbitrageExecutionPlan,
     cumulativeLoss: number,
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
-  ): Promise<{
+  ): Promise<Result<{
     shouldRebalance: boolean;
     reason: string;
     currentBreakEvenHours: number | null;
     newBreakEvenHours: number | null;
-  }> {
+  }, DomainException>> {
     // Get current position's funding rate
     let currentFundingRate = 0;
     try {
@@ -261,9 +269,9 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
 
     // Calculate new position's hourly return
     const periodsPerYear = 24 * 365;
-    const newPositionSizeUsd = newPlan.positionSize * avgMarkPrice;
+    const newPositionSizeUsd = newPlan.positionSize.toUSD(avgMarkPrice);
     const newHourlyReturn =
-      (newOpportunity.expectedReturn / periodsPerYear) * newPositionSizeUsd;
+      (newOpportunity.expectedReturn.toDecimal() / periodsPerYear) * newPositionSizeUsd;
 
     // Calculate P2 costs (entry fees + exit fees + slippage)
     const p2EntryFees = newPlan.estimatedCosts.fees / 2; // Entry is half of total fees
@@ -274,14 +282,8 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
     const totalCostsP2 =
       p1FeesOutstanding + p2EntryFees + p2ExitFees + p2Slippage;
 
-    // Get switching costs breakdown for logging
-    this.lossTracker.getSwitchingCosts(
-      currentPosition,
-      currentFundingRate,
-      p2EntryFees,
-      p2ExitFees,
-      positionValueUsd,
-    );
+    // Note: Switching costs are calculated above (totalCostsP2)
+    // This includes P1 fees outstanding + P2 entry/exit fees + P2 slippage
 
     // Calculate P2 time-to-break-even with all costs
     let p2TimeToBreakEven: number;
@@ -297,13 +299,13 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
         `✅ Rebalancing approved: New opportunity is instantly profitable ` +
           `(net return: $${newPlan.expectedNetReturn.toFixed(4)}/period)`,
       );
-      return {
+      return Result.success({
         shouldRebalance: true,
         reason: 'New opportunity is instantly profitable',
         currentBreakEvenHours:
           currentBreakEvenHours === Infinity ? null : currentBreakEvenHours,
         newBreakEvenHours: null, // Not applicable for profitable positions
-      };
+      });
     }
 
     // Edge case 2: Current position already profitable
@@ -312,14 +314,14 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
         `⏸️  Skipping rebalance: Current position already profitable ` +
           `(fees earned: $${currentBreakEvenData.feesEarnedSoFar.toFixed(4)} > costs: $${(currentBreakEvenData.remainingCost + currentBreakEvenData.feesEarnedSoFar).toFixed(4)})`,
       );
-      return {
+      return Result.success({
         shouldRebalance: false,
         reason:
           'Current position already profitable, new position not instantly profitable',
         currentBreakEvenHours: 0,
         newBreakEvenHours:
           p2TimeToBreakEven === Infinity ? null : p2TimeToBreakEven,
-      };
+      });
     }
 
     // Edge case 3: Current position never breaks even
@@ -330,24 +332,24 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
           `✅ Rebalancing approved: Current position never breaks even, ` +
             `new position has finite TTBE (${p2TimeToBreakEven.toFixed(2)}h)`,
         );
-        return {
+        return Result.success({
           shouldRebalance: true,
           reason:
             'Current position never breaks even, new position has finite break-even time',
           currentBreakEvenHours: null,
           newBreakEvenHours: p2TimeToBreakEven,
-        };
+        });
       }
       // Both never break even - avoid churn
       this.logger.log(
         `⏸️  Skipping rebalance: Both positions never break even (avoiding churn)`,
       );
-      return {
+      return Result.success({
         shouldRebalance: false,
         reason: 'Both positions never break even',
         currentBreakEvenHours: null,
         newBreakEvenHours: null,
-      };
+      });
     }
 
     // Edge case 4: New position never breaks even
@@ -356,12 +358,12 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
         `⏸️  Skipping rebalance: New position never breaks even ` +
           `(P1 remaining TTBE: ${currentBreakEvenHours.toFixed(2)}h)`,
       );
-      return {
+      return Result.success({
         shouldRebalance: false,
         reason: 'New position never breaks even',
         currentBreakEvenHours,
         newBreakEvenHours: null,
-      };
+      });
     }
 
     // Main comparison: Compare P2 TTBE (with all costs) vs P1 remaining TTBE
@@ -375,12 +377,12 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
         `✅ Rebalancing approved: P2 TTBE (${p2TimeToBreakEven.toFixed(2)}h) < P1 remaining TTBE (${currentBreakEvenHours.toFixed(2)}h) ` +
           `→ saves ${hoursSaved.toFixed(2)}h (${improvementPercent.toFixed(1)}% faster)`,
       );
-      return {
+      return Result.success({
         shouldRebalance: true,
         reason: `P2 TTBE (${p2TimeToBreakEven.toFixed(2)}h) < P1 remaining TTBE (${currentBreakEvenHours.toFixed(2)}h) - saves ${hoursSaved.toFixed(2)}h`,
         currentBreakEvenHours,
         newBreakEvenHours: p2TimeToBreakEven,
-      };
+      });
     }
 
     // Not worth switching - P1 will break even faster
@@ -389,12 +391,11 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
       `⏸️  Skipping rebalance: P1 remaining TTBE (${currentBreakEvenHours.toFixed(2)}h) < P2 TTBE (${p2TimeToBreakEven.toFixed(2)}h) ` +
         `→ would lose ${hoursLost.toFixed(2)}h`,
     );
-    return {
+    return Result.success({
       shouldRebalance: false,
       reason: `P1 remaining TTBE (${currentBreakEvenHours.toFixed(2)}h) < P2 TTBE (${p2TimeToBreakEven.toFixed(2)}h)`,
       currentBreakEvenHours,
       newBreakEvenHours: p2TimeToBreakEven,
-    };
+    });
   }
 }
-

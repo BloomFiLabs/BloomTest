@@ -9,6 +9,7 @@ import {
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
 import { OrderSide, OrderType, TimeInForce } from '../../value-objects/PerpOrder';
+import { Percentage } from '../../value-objects/Percentage';
 
 describe('ExecutionPlanBuilder', () => {
   let builder: ExecutionPlanBuilder;
@@ -18,7 +19,7 @@ describe('ExecutionPlanBuilder', () => {
   let config: StrategyConfig;
 
   beforeEach(async () => {
-    config = new StrategyConfig();
+    config = StrategyConfig.withDefaults();
 
     mockCostCalculator = {
       calculateSlippageCost: jest.fn(),
@@ -37,24 +38,19 @@ describe('ExecutionPlanBuilder', () => {
     mockAdapters = new Map();
     const asterAdapter = {
       getMarkPrice: jest.fn().mockResolvedValue(3000),
-    } as any;
-    // Add getBestBidAsk method if adapter supports it
-    if ('getBestBidAsk' in asterAdapter) {
-      asterAdapter.getBestBidAsk = jest.fn().mockResolvedValue({
+      getBestBidAsk: jest.fn().mockResolvedValue({
         bestBid: 2999,
         bestAsk: 3001,
-      });
-    }
+      }),
+    } as any;
 
     const lighterAdapter = {
       getMarkPrice: jest.fn().mockResolvedValue(3001),
-    } as any;
-    if ('getBestBidAsk' in lighterAdapter) {
-      lighterAdapter.getBestBidAsk = jest.fn().mockResolvedValue({
+      getBestBidAsk: jest.fn().mockResolvedValue({
         bestBid: 3000,
         bestAsk: 3002,
-      });
-    }
+      }),
+    } as any;
 
     mockAdapters.set(ExchangeType.ASTER, asterAdapter);
     mockAdapters.set(ExchangeType.LIGHTER, lighterAdapter);
@@ -76,10 +72,10 @@ describe('ExecutionPlanBuilder', () => {
       symbol: 'ETHUSDT',
       longExchange: ExchangeType.LIGHTER,
       shortExchange: ExchangeType.ASTER,
-      longRate: 0.0003,
-      shortRate: 0.0001,
-      spread: 0.0002,
-      expectedReturn: 2.19, // 219% APY (very high to ensure profitability)
+      longRate: Percentage.fromDecimal(0.0003),
+      shortRate: Percentage.fromDecimal(0.0001),
+      spread: Percentage.fromDecimal(0.0002),
+      expectedReturn: Percentage.fromDecimal(2.19), // 219% APY (very high to ensure profitability)
       longMarkPrice: 3001,
       shortMarkPrice: 3000,
       longOpenInterest: 100000,
@@ -112,77 +108,92 @@ describe('ExecutionPlanBuilder', () => {
       const longBalance = 10000;
       const shortBalance = 10000;
 
-      const plan = await builder.buildPlan(
+      const result = await builder.buildPlan(
         opportunity,
         mockAdapters,
         { longBalance, shortBalance },
         config,
       );
 
-      expect(plan).not.toBeNull();
-      expect(plan?.longOrder.side).toBe(OrderSide.LONG);
-      expect(plan?.shortOrder.side).toBe(OrderSide.SHORT);
-      expect(plan?.positionSize).toBeGreaterThan(0);
-      expect(plan?.expectedNetReturn).toBeGreaterThan(0);
+      expect(result.isSuccess).toBe(true);
+      if (result.isSuccess) {
+        const plan = result.value;
+        expect(plan.longOrder.side).toBe(OrderSide.LONG);
+        expect(plan.shortOrder.side).toBe(OrderSide.SHORT);
+        expect(plan.positionSize.toBaseAsset()).toBeGreaterThan(0);
+        expect(plan.expectedNetReturn).toBeGreaterThan(0);
+      }
     });
 
-    it('should return null if adapters are missing', async () => {
+    it('should return failure if adapters are missing', async () => {
       const opportunity = createMockOpportunity();
       const emptyAdapters = new Map<ExchangeType, IPerpExchangeAdapter>();
 
-      const plan = await builder.buildPlan(
+      const result = await builder.buildPlan(
         opportunity,
         emptyAdapters,
         { longBalance: 10000, shortBalance: 10000 },
         config,
       );
 
-      expect(plan).toBeNull();
+      expect(result.isFailure).toBe(true);
+      if (result.isFailure) {
+        expect(result.error.code).toBe('EXCHANGE_ERROR');
+      }
     });
 
-    it('should return null if balance is insufficient', async () => {
+    it('should return failure if balance is insufficient', async () => {
       const opportunity = createMockOpportunity();
       const longBalance = 1; // Very low balance
       const shortBalance = 1;
 
-      const plan = await builder.buildPlan(
+      const result = await builder.buildPlan(
         opportunity,
         mockAdapters,
         { longBalance, shortBalance },
         config,
       );
 
-      expect(plan).toBeNull();
+      expect(result.isFailure).toBe(true);
+      if (result.isFailure) {
+        expect(result.error.code).toBe('INSUFFICIENT_BALANCE');
+      }
     });
 
-    it('should return null if open interest is insufficient', async () => {
+    it('should return failure if open interest is insufficient', async () => {
       const opportunity = createMockOpportunity();
       opportunity.longOpenInterest = 1000; // Below minimum
       opportunity.shortOpenInterest = 1000;
 
-      const plan = await builder.buildPlan(
+      const result = await builder.buildPlan(
         opportunity,
         mockAdapters,
         { longBalance: 10000, shortBalance: 10000 },
         config,
       );
 
-      expect(plan).toBeNull();
+      expect(result.isFailure).toBe(true);
+      if (result.isFailure) {
+        expect(result.error.code).toBe('VALIDATION_ERROR');
+      }
     });
 
-    it('should return null if open interest is missing', async () => {
+    it('should return failure if open interest is missing', async () => {
       const opportunity = createMockOpportunity();
       opportunity.longOpenInterest = undefined;
       opportunity.shortOpenInterest = undefined;
 
-      const plan = await builder.buildPlan(
+      const result = await builder.buildPlan(
         opportunity,
         mockAdapters,
         { longBalance: 10000, shortBalance: 10000 },
         config,
       );
 
-      expect(plan).toBeNull();
+      expect(result.isFailure).toBe(true);
+      if (result.isFailure) {
+        expect(result.error.code).toBe('VALIDATION_ERROR');
+      }
     });
 
     it('should adjust position size based on OI constraints', async () => {
@@ -190,17 +201,20 @@ describe('ExecutionPlanBuilder', () => {
       opportunity.longOpenInterest = 20000; // OI large enough to support position
       opportunity.shortOpenInterest = 20000;
 
-      const plan = await builder.buildPlan(
+      const result = await builder.buildPlan(
         opportunity,
         mockAdapters,
         { longBalance: 100000, shortBalance: 100000 }, // Large balance
         config,
       );
 
-      expect(plan).not.toBeNull();
-      // Position size should be limited to 5% of OI = $1000, but also by balance
-      const positionValueUsd = plan!.positionSize * 3000;
-      expect(positionValueUsd).toBeLessThanOrEqual(1000 * 1.1); // Allow 10% margin
+      expect(result.isSuccess).toBe(true);
+      if (result.isSuccess) {
+        const plan = result.value;
+        // Position size should be limited to 5% of OI = $1000, but also by balance
+        const positionValueUsd = plan.positionSize.toUSD(3000);
+        expect(positionValueUsd).toBeLessThanOrEqual(1000 * 1.1); // Allow 10% margin
+      }
     });
 
     it('should use provided mark prices when available', async () => {
@@ -218,7 +232,7 @@ describe('ExecutionPlanBuilder', () => {
         bestAsk: 3002,
       });
 
-      const plan = await builder.buildPlan(
+      const result = await builder.buildPlan(
         opportunity,
         mockAdapters,
         { longBalance: 10000, shortBalance: 10000 },
@@ -230,7 +244,7 @@ describe('ExecutionPlanBuilder', () => {
       // Should not call getMarkPrice if prices are provided (getBestBidAsk is mocked)
       expect(lighterAdapter.getMarkPrice).not.toHaveBeenCalled();
       expect(asterAdapter.getMarkPrice).not.toHaveBeenCalled();
-      expect(plan).not.toBeNull();
+      expect(result.isSuccess).toBe(true);
     });
 
     it('should fetch mark prices when not provided', async () => {
@@ -238,7 +252,7 @@ describe('ExecutionPlanBuilder', () => {
       const asterAdapter = mockAdapters.get(ExchangeType.ASTER)!;
       const lighterAdapter = mockAdapters.get(ExchangeType.LIGHTER)!;
 
-      const plan = await builder.buildPlan(
+      const result = await builder.buildPlan(
         opportunity,
         mockAdapters,
         { longBalance: 10000, shortBalance: 10000 },
@@ -249,15 +263,15 @@ describe('ExecutionPlanBuilder', () => {
 
       expect(lighterAdapter.getMarkPrice).toHaveBeenCalledWith('ETHUSDT');
       expect(asterAdapter.getMarkPrice).toHaveBeenCalledWith('ETHUSDT');
-      expect(plan).not.toBeNull();
+      expect(result.isSuccess).toBe(true);
     });
 
-    it('should return null if mark price fetch fails', async () => {
+    it('should return failure if mark price fetch fails', async () => {
       const opportunity = createMockOpportunity();
       const asterAdapter = mockAdapters.get(ExchangeType.ASTER)!;
       asterAdapter.getMarkPrice.mockRejectedValue(new Error('API error'));
 
-      const plan = await builder.buildPlan(
+      const result = await builder.buildPlan(
         opportunity,
         mockAdapters,
         { longBalance: 10000, shortBalance: 10000 },
@@ -266,7 +280,10 @@ describe('ExecutionPlanBuilder', () => {
         undefined,
       );
 
-      expect(plan).toBeNull();
+      expect(result.isFailure).toBe(true);
+      if (result.isFailure) {
+        expect(result.error.code).toBe('EXCHANGE_ERROR');
+      }
     });
 
     it('should calculate costs using CostCalculator', async () => {
@@ -275,36 +292,50 @@ describe('ExecutionPlanBuilder', () => {
       // Mock to return 0.5 for each slippage calculation (long and short = 1.0 total)
       mockCostCalculator.calculateSlippageCost.mockReturnValue(0.5);
       mockCostCalculator.calculateFees.mockReturnValue(0.5);
+      mockCostCalculator.predictFundingRateImpact.mockReturnValue(0);
+      mockCostCalculator.calculateBreakEvenHours.mockReturnValue({
+        breakEvenHours: 1,
+        feesEarnedSoFar: 0,
+        remainingCost: 0,
+        hoursHeld: 0,
+      });
 
-      const plan = await builder.buildPlan(
+      const result = await builder.buildPlan(
         opportunity,
         mockAdapters,
         { longBalance: 10000, shortBalance: 10000 },
         config,
       );
 
-      expect(plan).not.toBeNull();
+      expect(result.isSuccess).toBe(true);
       expect(mockCostCalculator.calculateSlippageCost).toHaveBeenCalled();
       expect(mockCostCalculator.calculateFees).toHaveBeenCalled();
-      // Long slippage (0.5) + short slippage (0.5) = 1.0
-      expect(plan?.estimatedCosts.slippage).toBe(1.0);
-      expect(plan?.estimatedCosts.fees).toBeGreaterThan(0);
+      if (result.isSuccess) {
+        const plan = result.value;
+        // Long slippage (0.5) + short slippage (0.5) = 1.0
+        expect(plan.estimatedCosts.slippage).toBe(1.0);
+        expect(plan.estimatedCosts.fees).toBeGreaterThan(0);
+      }
     });
 
-    it('should return null if net return is negative', async () => {
+    it('should return failure if net return is negative', async () => {
       const opportunity = createMockOpportunity();
-      opportunity.expectedReturn = 0.001; // Very small return
+      opportunity.expectedReturn = Percentage.fromDecimal(0.001); // Very small return
       mockCostCalculator.calculateSlippageCost.mockReturnValue(1000.0); // High costs
       mockCostCalculator.calculateFees.mockReturnValue(500.0);
 
-      const plan = await builder.buildPlan(
+      const result = await builder.buildPlan(
         opportunity,
         mockAdapters,
         { longBalance: 10000, shortBalance: 10000 },
         config,
       );
 
-      expect(plan).toBeNull();
+      expect(result.isFailure).toBe(true);
+      if (result.isFailure) {
+        // Could be VALIDATION_ERROR (unprofitable) or EXECUTION_PLAN_ERROR (caught exception)
+        expect(['VALIDATION_ERROR', 'EXECUTION_PLAN_ERROR']).toContain(result.error.code);
+      }
     });
 
     it('should create limit orders with price improvement', async () => {
@@ -336,30 +367,33 @@ describe('ExecutionPlanBuilder', () => {
         });
       }
 
-      const plan = await builder.buildPlan(
+      const result = await builder.buildPlan(
         opportunity,
         mockAdapters,
         { longBalance: 10000, shortBalance: 10000 },
         config,
       );
 
-      expect(plan).not.toBeNull();
-      expect(plan?.longOrder.type).toBe(OrderType.LIMIT);
-      expect(plan?.shortOrder.type).toBe(OrderType.LIMIT);
-      expect(plan?.longOrder.timeInForce).toBe(TimeInForce.GTC);
-      expect(plan?.shortOrder.timeInForce).toBe(TimeInForce.GTC);
+      expect(result.isSuccess).toBe(true);
+      if (result.isSuccess) {
+        const plan = result.value;
+        expect(plan.longOrder.type).toBe(OrderType.LIMIT);
+        expect(plan.shortOrder.type).toBe(OrderType.LIMIT);
+        expect(plan.longOrder.timeInForce).toBe(TimeInForce.GTC);
+        expect(plan.shortOrder.timeInForce).toBe(TimeInForce.GTC);
 
-      // Long order should be at best bid + improvement (fallback uses mark price)
-      expect(plan?.longOrder.price).toBeGreaterThan(0);
-      // Short order should be at best ask - improvement
-      expect(plan?.shortOrder.price).toBeGreaterThan(0);
+        // Long order should be at best bid + improvement (fallback uses mark price)
+        expect(plan.longOrder.price).toBeGreaterThan(0);
+        // Short order should be at best ask - improvement
+        expect(plan.shortOrder.price).toBeGreaterThan(0);
+      }
     });
 
     it('should use maxPositionSizeUsd when provided', async () => {
       const opportunity = createMockOpportunity();
       const maxPositionSizeUsd = 5000;
 
-      const plan = await builder.buildPlan(
+      const result = await builder.buildPlan(
         opportunity,
         mockAdapters,
         { longBalance: 100000, shortBalance: 100000 }, // Large balance
@@ -369,10 +403,13 @@ describe('ExecutionPlanBuilder', () => {
         maxPositionSizeUsd,
       );
 
-      expect(plan).not.toBeNull();
-      // Position size should respect maxPositionSizeUsd
-      const positionValueUsd = plan!.positionSize * 3000;
-      expect(positionValueUsd).toBeLessThanOrEqual(maxPositionSizeUsd * 1.1); // Allow small margin
+      expect(result.isSuccess).toBe(true);
+      if (result.isSuccess) {
+        const plan = result.value;
+        // Position size should respect maxPositionSizeUsd
+        const positionValueUsd = plan.positionSize.toUSD(3000);
+        expect(positionValueUsd).toBeLessThanOrEqual(maxPositionSizeUsd * 1.1); // Allow small margin
+      }
     });
   });
 
@@ -381,10 +418,10 @@ describe('ExecutionPlanBuilder', () => {
       symbol: 'ETHUSDT',
       longExchange: ExchangeType.LIGHTER,
       shortExchange: ExchangeType.ASTER,
-      longRate: 0.0003,
-      shortRate: 0.0001,
-      spread: 0.0002,
-      expectedReturn: 0.219,
+      longRate: Percentage.fromDecimal(0.0003),
+      shortRate: Percentage.fromDecimal(0.0001),
+      spread: Percentage.fromDecimal(0.0002),
+      expectedReturn: Percentage.fromDecimal(0.219),
       longMarkPrice: 3001,
       shortMarkPrice: 3000,
       longOpenInterest: 100000,
@@ -404,7 +441,7 @@ describe('ExecutionPlanBuilder', () => {
       opportunity.shortOpenInterest = 500000;
       const allocationUsd = 10000;
 
-      const plan = await builder.buildPlanWithAllocation(
+      const result = await builder.buildPlanWithAllocation(
         opportunity,
         mockAdapters,
         allocationUsd,
@@ -412,11 +449,14 @@ describe('ExecutionPlanBuilder', () => {
         config,
       );
 
-      expect(plan).not.toBeNull();
-      const positionValueUsd = plan!.positionSize * 3000;
-      // Allocation should be respected (within OI constraints of 5%)
-      expect(positionValueUsd).toBeLessThanOrEqual(allocationUsd * 1.1); // Allow 10% margin
-      expect(positionValueUsd).toBeGreaterThan(allocationUsd * 0.9);
+      expect(result.isSuccess).toBe(true);
+      if (result.isSuccess) {
+        const plan = result.value;
+        const positionValueUsd = plan.positionSize.toUSD(3000);
+        // Allocation should be respected (within OI constraints of 5%)
+        expect(positionValueUsd).toBeLessThanOrEqual(allocationUsd * 1.1); // Allow 10% margin
+        expect(positionValueUsd).toBeGreaterThan(allocationUsd * 0.9);
+      }
     });
 
     it('should reduce position size when allocation exceeds available balance', async () => {
@@ -428,7 +468,7 @@ describe('ExecutionPlanBuilder', () => {
       const longBalance = 1000; // Small balance - insufficient for full allocation
       const shortBalance = 1000;
 
-      const plan = await builder.buildPlanWithAllocation(
+      const result = await builder.buildPlanWithAllocation(
         opportunity,
         mockAdapters,
         allocationUsd,
@@ -438,12 +478,14 @@ describe('ExecutionPlanBuilder', () => {
 
       // Should create a plan with reduced position size based on available balance
       // Available capital = $1000 * 0.9 = $900, leveraged = $1800
-      expect(plan).not.toBeNull();
-      const positionValueUsd = plan!.positionSize * 3000;
-      // Should be limited by available balance (not the full allocation)
-      expect(positionValueUsd).toBeLessThan(allocationUsd);
-      expect(positionValueUsd).toBeLessThanOrEqual(1800 * 1.1); // Allow margin
+      expect(result.isSuccess).toBe(true);
+      if (result.isSuccess) {
+        const plan = result.value;
+        const positionValueUsd = plan.positionSize.toUSD(3000);
+        // Should be limited by available balance (not the full allocation)
+        expect(positionValueUsd).toBeLessThan(allocationUsd);
+        expect(positionValueUsd).toBeLessThanOrEqual(1800 * 1.1); // Allow margin
+      }
     });
   });
 });
-

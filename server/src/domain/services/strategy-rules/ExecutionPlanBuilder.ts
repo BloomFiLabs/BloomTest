@@ -6,6 +6,14 @@ import { ArbitrageExecutionPlan } from '../FundingArbitrageStrategy';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
 import { StrategyConfig } from '../../value-objects/StrategyConfig';
+import { PositionSize } from '../../value-objects/PositionSize';
+import { Result } from '../../common/Result';
+import {
+  DomainException,
+  ExchangeException,
+  ValidationException,
+  InsufficientBalanceException,
+} from '../../exceptions/DomainException';
 import {
   PerpOrderRequest,
   OrderSide,
@@ -34,7 +42,7 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
     longMarkPrice?: number,
     shortMarkPrice?: number,
     maxPositionSizeUsd?: number,
-  ): Promise<ArbitrageExecutionPlan | null> {
+  ): Promise<Result<ArbitrageExecutionPlan, DomainException>> {
     return this.createExecutionPlanWithBalances(
       opportunity,
       adapters,
@@ -55,7 +63,7 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
     config: StrategyConfig,
     longMarkPrice?: number,
     shortMarkPrice?: number,
-  ): Promise<ArbitrageExecutionPlan | null> {
+  ): Promise<Result<ArbitrageExecutionPlan, DomainException>> {
     // For allocation mode, use allocation as max position size
     return this.createExecutionPlanWithBalances(
       opportunity,
@@ -78,16 +86,22 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
     longBalance: number,
     shortBalance: number,
     config: StrategyConfig,
-  ): Promise<ArbitrageExecutionPlan | null> {
+  ): Promise<Result<ArbitrageExecutionPlan, DomainException>> {
     try {
       const longAdapter = adapters.get(opportunity.longExchange);
       const shortAdapter = adapters.get(opportunity.shortExchange);
 
       if (!longAdapter || !shortAdapter) {
-        this.logger.warn(
-          `Missing adapters for opportunity: ${opportunity.symbol}`,
+        const missingExchange = !longAdapter
+          ? opportunity.longExchange
+          : opportunity.shortExchange;
+        return Result.failure(
+          new ExchangeException(
+            `Missing adapter for ${missingExchange}`,
+            missingExchange,
+            { symbol: opportunity.symbol },
+          ),
         );
-        return null;
       }
 
       // Use provided mark prices if available, otherwise fetch
@@ -103,7 +117,13 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
           this.logger.debug(
             `Failed to get mark price for ${opportunity.symbol} on ${opportunity.longExchange}: ${error.message}`,
           );
-          return null;
+          return Result.failure(
+            new ExchangeException(
+              `Failed to get mark price: ${error.message}`,
+              opportunity.longExchange,
+              { symbol: opportunity.symbol, error: error.message },
+            ),
+          );
         }
       }
 
@@ -116,13 +136,19 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
           this.logger.debug(
             `Failed to get mark price for ${opportunity.symbol} on ${opportunity.shortExchange}: ${error.message}`,
           );
-          return null;
+          return Result.failure(
+            new ExchangeException(
+              `Failed to get mark price: ${error.message}`,
+              opportunity.shortExchange,
+              { symbol: opportunity.symbol, error: error.message },
+            ),
+          );
         }
       }
 
       // Determine position size based on actual available capital
       const minBalance = Math.min(longBalance, shortBalance);
-      const availableCapital = minBalance * config.balanceUsagePercent;
+      const availableCapital = minBalance * config.balanceUsagePercent.toDecimal();
       const leveragedCapital = availableCapital * config.leverage;
       const maxSize = maxPositionSizeUsd || Infinity;
 
@@ -153,12 +179,19 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
               `Need $${config.minPositionSizeUsd}, have $${positionSizeUsd.toFixed(2)}`,
           );
         }
-        return null;
+        return Result.failure(
+          new InsufficientBalanceException(
+            config.minPositionSizeUsd,
+            positionSizeUsd,
+            'USDC',
+            { symbol: opportunity.symbol },
+          ),
+        );
       }
 
       // Convert to base asset size
       const avgMarkPrice = (finalLongMarkPrice + finalShortMarkPrice) / 2;
-      let positionSize = positionSizeUsd / avgMarkPrice;
+      let positionSizeBaseAsset = positionSizeUsd / avgMarkPrice;
 
       // Check liquidity (open interest)
       const longOI = opportunity.longOpenInterest || 0;
@@ -169,7 +202,13 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
         opportunity.longOpenInterest === null ||
         longOI === 0
       ) {
-        return null;
+        return Result.failure(
+          new ValidationException(
+            `Missing or zero open interest for long exchange: ${opportunity.longExchange}`,
+            'MISSING_OPEN_INTEREST',
+            { symbol: opportunity.symbol, exchange: opportunity.longExchange },
+          ),
+        );
       }
 
       if (
@@ -177,11 +216,28 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
         opportunity.shortOpenInterest === null ||
         shortOI === 0
       ) {
-        return null;
+        return Result.failure(
+          new ValidationException(
+            `Missing or zero open interest for short exchange: ${opportunity.shortExchange}`,
+            'MISSING_OPEN_INTEREST',
+            { symbol: opportunity.symbol, exchange: opportunity.shortExchange },
+          ),
+        );
       }
 
       if (longOI < config.minOpenInterestUsd || shortOI < config.minOpenInterestUsd) {
-        return null;
+        return Result.failure(
+          new ValidationException(
+            `Insufficient open interest: long=${longOI}, short=${shortOI}, minimum=${config.minOpenInterestUsd}`,
+            'INSUFFICIENT_OPEN_INTEREST',
+            {
+              symbol: opportunity.symbol,
+              longOI,
+              shortOI,
+              minimum: config.minOpenInterestUsd,
+            },
+          ),
+        );
       }
 
       // Adjust position size based on available liquidity
@@ -191,11 +247,21 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
 
         if (positionSizeUsd > maxPositionSizeFromOI) {
           positionSizeUsd = maxPositionSizeFromOI;
-          positionSize = positionSizeUsd / avgMarkPrice;
+          positionSizeBaseAsset = positionSizeUsd / avgMarkPrice;
         }
 
         if (positionSizeUsd < config.minPositionSizeUsd) {
-          return null;
+          return Result.failure(
+            new InsufficientBalanceException(
+              config.minPositionSizeUsd,
+              positionSizeUsd,
+              'USDC',
+              {
+                symbol: opportunity.symbol,
+                reason: 'Position size too small after OI adjustment',
+              },
+            ),
+          );
         }
       }
 
@@ -276,23 +342,17 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
       const longFundingImpact = this.costCalculator.predictFundingRateImpact(
         positionSizeUsd,
         opportunity.longOpenInterest || 0,
-        opportunity.longRate || 0,
+        opportunity.longRate?.toDecimal() || 0,
       );
       const shortFundingImpact = this.costCalculator.predictFundingRateImpact(
         positionSizeUsd,
         opportunity.shortOpenInterest || 0,
-        opportunity.shortRate || 0,
+        opportunity.shortRate?.toDecimal() || 0,
       );
 
       // Adjusted funding rates
-      const longRate =
-        opportunity.longRate !== undefined && !isNaN(opportunity.longRate)
-          ? opportunity.longRate
-          : 0;
-      const shortRate =
-        opportunity.shortRate !== undefined && !isNaN(opportunity.shortRate)
-          ? opportunity.shortRate
-          : 0;
+      const longRate = opportunity.longRate?.toDecimal() || 0;
+      const shortRate = opportunity.shortRate?.toDecimal() || 0;
 
       const adjustedLongRate = longRate + longFundingImpact;
       const adjustedShortRate = shortRate - shortFundingImpact;
@@ -301,16 +361,13 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
 
       const useAdjusted =
         Math.abs(longFundingImpact + shortFundingImpact) >
-        opportunity.spread * 0.01;
+        (opportunity.spread?.toDecimal() || 0) * 0.01;
       const effectiveExpectedReturn =
         useAdjusted &&
         !isNaN(adjustedExpectedReturn) &&
         isFinite(adjustedExpectedReturn)
           ? adjustedExpectedReturn
-          : opportunity.expectedReturn !== undefined &&
-              !isNaN(opportunity.expectedReturn)
-            ? opportunity.expectedReturn
-            : 0;
+          : opportunity.expectedReturn?.toAPY() || 0;
 
       const expectedReturnPerPeriod =
         (effectiveExpectedReturn / periodsPerYear) * positionSizeUsd;
@@ -360,21 +417,32 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
             `Amortized costs/hour: $${amortizedCosts.toFixed(4)}, ` +
             `Net return/hour: $${expectedNetReturn.toFixed(4)}`,
         );
-        return null;
+        return Result.failure(
+          new ValidationException(
+            `Opportunity not profitable: net return ${expectedNetReturn.toFixed(4)}`,
+            'UNPROFITABLE_OPPORTUNITY',
+            {
+              symbol: opportunity.symbol,
+              expectedNetReturn,
+              breakEvenHours,
+              totalCosts: totalCostsWithExit,
+            },
+          ),
+        );
       }
 
       this.logger.log(
         `✅ Execution plan created for ${opportunity.symbol}: ` +
           `Position size: $${positionSizeUsd.toFixed(2)}, ` +
           `Expected net return per period: $${expectedNetReturn.toFixed(4)}, ` +
-          `Spread: ${(opportunity.spread * 100).toFixed(4)}%`,
+          `Spread: ${(opportunity.spread?.toPercent() || 0).toFixed(4)}%`,
       );
 
       // Calculate limit prices with price improvement
       const longLimitPrice =
-        longBidAsk.bestBid * (1 + config.limitOrderPriceImprovement);
+        longBidAsk.bestBid * (1 + config.limitOrderPriceImprovement.toDecimal());
       const shortLimitPrice =
-        shortBidAsk.bestAsk * (1 - config.limitOrderPriceImprovement);
+        shortBidAsk.bestAsk * (1 - config.limitOrderPriceImprovement.toDecimal());
 
       this.logger.debug(
         `Limit order prices for ${opportunity.symbol}: ` +
@@ -383,12 +451,18 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
           `Slippage cost: $${totalSlippageCost.toFixed(2)}`,
       );
 
+      // Create PositionSize value object
+      const positionSize = PositionSize.fromBaseAsset(
+        positionSizeBaseAsset,
+        config.leverage,
+      );
+
       // Create LIMIT order requests
       const longOrder = new PerpOrderRequest(
         longSymbol,
         OrderSide.LONG,
         OrderType.LIMIT,
-        positionSize,
+        positionSize.toBaseAsset(),
         longLimitPrice,
         TimeInForce.GTC,
       );
@@ -397,12 +471,12 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
         shortSymbol,
         OrderSide.SHORT,
         OrderType.LIMIT,
-        positionSize,
+        positionSize.toBaseAsset(),
         shortLimitPrice,
         TimeInForce.GTC,
       );
 
-      return {
+      return Result.success({
         opportunity,
         longOrder,
         shortOrder,
@@ -414,10 +488,16 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
         },
         expectedNetReturn,
         timestamp: new Date(),
-      };
+      });
     } catch (error: any) {
       this.logger.error(`Failed to create execution plan: ${error.message}`);
-      return null;
+      return Result.failure(
+        new DomainException(
+          `Failed to create execution plan: ${error.message}`,
+          'EXECUTION_PLAN_ERROR',
+          { symbol: opportunity.symbol, error: error.message },
+        ),
+      );
     }
   }
 
@@ -496,4 +576,3 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
     }
   }
 }
-

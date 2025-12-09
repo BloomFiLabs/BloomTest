@@ -3,6 +3,7 @@ import { ExchangeType } from '../../domain/value-objects/ExchangeConfig';
 import { PerpPosition } from '../../domain/entities/PerpPosition';
 import { FundingRateComparison, ArbitrageOpportunity } from '../../domain/services/FundingRateAggregator';
 import { ArbitrageExecutionResult } from '../../domain/services/FundingArbitrageStrategy';
+import { IPerpKeeperPerformanceLogger } from '../../domain/ports/IPerpKeeperPerformanceLogger';
 
 /**
  * Performance metrics for a single exchange
@@ -84,7 +85,7 @@ interface FundingRateSnapshot {
  * PerpKeeperPerformanceLogger - Tracks and logs performance metrics for the perp keeper
  */
 @Injectable()
-export class PerpKeeperPerformanceLogger {
+export class PerpKeeperPerformanceLogger implements IPerpKeeperPerformanceLogger {
   private readonly logger = new Logger(PerpKeeperPerformanceLogger.name);
   
   // Performance tracking
@@ -605,4 +606,3 @@ export class PerpKeeperPerformanceLogger {
     }
   }
 }
-

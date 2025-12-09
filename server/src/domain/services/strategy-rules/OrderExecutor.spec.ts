@@ -4,6 +4,7 @@ import { IPositionManager } from './IPositionManager';
 import { CostCalculator } from './CostCalculator';
 import { ExecutionPlanBuilder } from './ExecutionPlanBuilder';
 import { StrategyConfig } from '../../value-objects/StrategyConfig';
+import { PositionSize } from '../../value-objects/PositionSize';
 import {
   ArbitrageExecutionPlan,
   ArbitrageExecutionResult,
@@ -31,7 +32,7 @@ describe('OrderExecutor', () => {
   let config: StrategyConfig;
 
   beforeEach(async () => {
-    config = new StrategyConfig();
+    config = StrategyConfig.withDefaults();
 
     mockPositionManager = {
       handleAsymmetricFills: jest.fn().mockResolvedValue(undefined),
@@ -273,7 +274,7 @@ describe('OrderExecutor', () => {
         3001,
         TimeInForce.GTC,
       ),
-      positionSize: 1.0,
+      positionSize: PositionSize.fromBaseAsset(1.0, 2.0),
       estimatedCosts: {
         fees: 10,
         slippage: 5,
@@ -305,7 +306,7 @@ describe('OrderExecutor', () => {
         timestamp: new Date(),
       };
 
-      await executor.executeSinglePosition(
+      const executionResult = await executor.executeSinglePosition(
         { plan, opportunity: plan.opportunity },
         mockAdapters,
         result,
@@ -313,8 +314,11 @@ describe('OrderExecutor', () => {
 
       expect(lighterAdapter.placeOrder).toHaveBeenCalledWith(plan.longOrder);
       expect(asterAdapter.placeOrder).toHaveBeenCalledWith(plan.shortOrder);
-      expect(result.opportunitiesExecuted).toBe(1);
-      expect(result.ordersPlaced).toBe(2);
+      expect(executionResult.isSuccess).toBe(true);
+      if (executionResult.isSuccess) {
+        expect(executionResult.value.opportunitiesExecuted).toBe(1);
+        expect(executionResult.value.ordersPlaced).toBe(2);
+      }
     });
 
     it('should handle order failures', async () => {
@@ -339,14 +343,17 @@ describe('OrderExecutor', () => {
         timestamp: new Date(),
       };
 
-      await executor.executeSinglePosition(
+      const executionResult = await executor.executeSinglePosition(
         { plan, opportunity: plan.opportunity },
         mockAdapters,
         result,
       );
 
-      expect(result.errors.length).toBeGreaterThan(0);
-      expect(result.errors[0]).toContain('Order execution failed');
+      expect(executionResult.isFailure).toBe(true);
+      if (executionResult.isFailure) {
+        expect(executionResult.error.code).toBe('ORDER_EXECUTION_ERROR');
+        expect(executionResult.error.message).toContain('Order execution failed');
+      }
     });
 
     it('should handle missing adapters', async () => {
@@ -363,14 +370,17 @@ describe('OrderExecutor', () => {
         timestamp: new Date(),
       };
 
-      await executor.executeSinglePosition(
+      const executionResult = await executor.executeSinglePosition(
         { plan, opportunity: plan.opportunity },
         emptyAdapters,
         result,
       );
 
-      expect(result.errors.length).toBeGreaterThan(0);
-      expect(result.errors[0]).toContain('Missing adapters');
+      expect(executionResult.isFailure).toBe(true);
+      if (executionResult.isFailure) {
+        expect(executionResult.error.code).toBe('EXCHANGE_ERROR');
+        expect(executionResult.error.message).toContain('Missing adapter');
+      }
     });
   });
 
@@ -394,7 +404,7 @@ describe('OrderExecutor', () => {
         opportunity: {} as ArbitrageOpportunity,
         longOrder: new PerpOrderRequest('ETHUSDT', OrderSide.LONG, OrderType.LIMIT, 1.0, 3000, TimeInForce.GTC),
         shortOrder: new PerpOrderRequest('ETHUSDT', OrderSide.SHORT, OrderType.LIMIT, 1.0, 3001, TimeInForce.GTC),
-        positionSize: 1.0,
+        positionSize: PositionSize.fromBaseAsset(1.0, 2.0),
         estimatedCosts: { fees: 10, slippage: 5, total: 15 },
         expectedNetReturn: 0.5,
         timestamp: new Date(),
@@ -418,10 +428,19 @@ describe('OrderExecutor', () => {
       const lighterAdapter = mockAdapters.get(ExchangeType.LIGHTER)!;
       const asterAdapter = mockAdapters.get(ExchangeType.ASTER)!;
 
+      // Mock placeOrder to return immediately filled orders
       lighterAdapter.placeOrder.mockResolvedValue(
         new PerpOrderResponse('order-1', OrderStatus.FILLED, 'ETHUSDT', OrderSide.LONG, 1.0, 1.0, 3000),
       );
       asterAdapter.placeOrder.mockResolvedValue(
+        new PerpOrderResponse('order-2', OrderStatus.FILLED, 'ETHUSDT', OrderSide.SHORT, 1.0, 1.0, 3001),
+      );
+      
+      // Mock getOrderStatus for waitForOrderFill (shouldn't be called since orders are filled)
+      lighterAdapter.getOrderStatus.mockResolvedValue(
+        new PerpOrderResponse('order-1', OrderStatus.FILLED, 'ETHUSDT', OrderSide.LONG, 1.0, 1.0, 3000),
+      );
+      asterAdapter.getOrderStatus.mockResolvedValue(
         new PerpOrderResponse('order-2', OrderStatus.FILLED, 'ETHUSDT', OrderSide.SHORT, 1.0, 1.0, 3001),
       );
 
@@ -442,8 +461,11 @@ describe('OrderExecutor', () => {
         result,
       );
 
-      expect(executionResult.successfulExecutions).toBeGreaterThan(0);
-      expect(executionResult.totalOrders).toBeGreaterThan(0);
+      expect(executionResult.isSuccess).toBe(true);
+      if (executionResult.isSuccess) {
+        expect(executionResult.value.successfulExecutions).toBeGreaterThan(0);
+        expect(executionResult.value.totalOrders).toBeGreaterThan(0);
+      }
     });
 
     it('should skip opportunities without plans', async () => {
@@ -458,10 +480,19 @@ describe('OrderExecutor', () => {
       const lighterAdapter = mockAdapters.get(ExchangeType.LIGHTER)!;
       const asterAdapter = mockAdapters.get(ExchangeType.ASTER)!;
 
+      // Mock placeOrder to return immediately filled orders
       lighterAdapter.placeOrder.mockResolvedValue(
         new PerpOrderResponse('order-1', OrderStatus.FILLED, 'ETHUSDT', OrderSide.LONG, 1.0, 1.0, 3000),
       );
       asterAdapter.placeOrder.mockResolvedValue(
+        new PerpOrderResponse('order-2', OrderStatus.FILLED, 'ETHUSDT', OrderSide.SHORT, 1.0, 1.0, 3001),
+      );
+      
+      // Mock getOrderStatus for waitForOrderFill (shouldn't be called since orders are filled)
+      lighterAdapter.getOrderStatus.mockResolvedValue(
+        new PerpOrderResponse('order-1', OrderStatus.FILLED, 'ETHUSDT', OrderSide.LONG, 1.0, 1.0, 3000),
+      );
+      asterAdapter.getOrderStatus.mockResolvedValue(
         new PerpOrderResponse('order-2', OrderStatus.FILLED, 'ETHUSDT', OrderSide.SHORT, 1.0, 1.0, 3001),
       );
 
@@ -483,8 +514,11 @@ describe('OrderExecutor', () => {
       );
 
       // Should only execute the one with a plan
-      expect(executionResult.successfulExecutions).toBeGreaterThanOrEqual(0);
-    }, 10000);
+      expect(executionResult.isSuccess).toBe(true);
+      if (executionResult.isSuccess) {
+        expect(executionResult.value.successfulExecutions).toBeGreaterThanOrEqual(0);
+      }
+    });
 
     it('should retry failed executions', async () => {
       const opportunity = createMockOpportunity();
@@ -505,9 +539,17 @@ describe('OrderExecutor', () => {
       asterAdapter.placeOrder.mockResolvedValue(
         new PerpOrderResponse('order-2', OrderStatus.FILLED, 'ETHUSDT', OrderSide.SHORT, 1.0, 1.0, 3001),
       );
+      
+      // Mock getOrderStatus for waitForOrderFill
+      lighterAdapter.getOrderStatus.mockResolvedValue(
+        new PerpOrderResponse('order-1', OrderStatus.FILLED, 'ETHUSDT', OrderSide.LONG, 1.0, 1.0, 3000),
+      );
+      asterAdapter.getOrderStatus.mockResolvedValue(
+        new PerpOrderResponse('order-2', OrderStatus.FILLED, 'ETHUSDT', OrderSide.SHORT, 1.0, 1.0, 3001),
+      );
 
       // Override config to use faster retries for test
-      const fastConfig = new StrategyConfig();
+      const fastConfig = StrategyConfig.withDefaults();
       (fastConfig as any).executionRetryDelays = [10, 20]; // Very fast retries
       (fastConfig as any).maxExecutionRetries = 2; // Only 2 retries
 
@@ -538,7 +580,7 @@ describe('OrderExecutor', () => {
 
       // Should retry and eventually succeed
       expect(lighterAdapter.placeOrder).toHaveBeenCalledTimes(2);
+      expect(executionResult.isSuccess).toBe(true);
     }, 15000);
   });
 });
-

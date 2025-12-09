@@ -7,6 +7,8 @@ import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
 import { ArbitrageOpportunity } from '../FundingRateAggregator';
 import { Contract, JsonRpcProvider, Wallet } from 'ethers';
+import { Result } from '../../common/Result';
+import { Percentage } from '../../value-objects/Percentage';
 
 // Mock ethers
 jest.mock('ethers', () => {
@@ -39,7 +41,7 @@ describe('BalanceManager', () => {
   let config: StrategyConfig;
 
   beforeEach(async () => {
-    config = new StrategyConfig();
+    config = StrategyConfig.withDefaults();
 
     mockConfigService = {
       get: jest.fn(),
@@ -97,9 +99,12 @@ describe('BalanceManager', () => {
       };
       (Contract as jest.Mock).mockImplementation(() => mockContract);
 
-      const balance = await manager.getWalletUsdcBalance();
+      const balanceResult = await manager.getWalletUsdcBalance();
 
-      expect(balance).toBe(1000);
+      expect(balanceResult.isSuccess).toBe(true);
+      if (balanceResult.isSuccess) {
+        expect(balanceResult.value).toBe(1000);
+      }
       expect(mockContract.balanceOf).toHaveBeenCalled();
     });
 
@@ -116,20 +121,26 @@ describe('BalanceManager', () => {
       };
       (Contract as jest.Mock).mockImplementation(() => mockContract);
 
-      const balance = await manager.getWalletUsdcBalance();
+      const balanceResult = await manager.getWalletUsdcBalance();
 
-      expect(balance).toBe(500);
+      expect(balanceResult.isSuccess).toBe(true);
+      if (balanceResult.isSuccess) {
+        expect(balanceResult.value).toBe(500);
+      }
     });
 
     it('should return 0 if no wallet address or private key configured', async () => {
       mockConfigService.get.mockReturnValue(undefined);
 
-      const balance = await manager.getWalletUsdcBalance();
+      const balanceResult = await manager.getWalletUsdcBalance();
 
-      expect(balance).toBe(0);
+      expect(balanceResult.isSuccess).toBe(true);
+      if (balanceResult.isSuccess) {
+        expect(balanceResult.value).toBe(0);
+      }
     });
 
-    it('should return 0 on error', async () => {
+    it('should return failure on error', async () => {
       mockConfigService.get.mockImplementation((key: string) => {
         if (key === 'ARBITRUM_RPC_URL') return 'https://arb1.arbitrum.io/rpc';
         if (key === 'WALLET_ADDRESS') return '0x1234567890123456789012345678901234567890';
@@ -142,15 +153,20 @@ describe('BalanceManager', () => {
       };
       (Contract as jest.Mock).mockImplementation(() => mockContract);
 
-      const balance = await manager.getWalletUsdcBalance();
+      const balanceResult = await manager.getWalletUsdcBalance();
 
-      expect(balance).toBe(0);
+      expect(balanceResult.isFailure).toBe(true);
+      if (balanceResult.isFailure) {
+        expect(balanceResult.error.code).toBe('WALLET_BALANCE_ERROR');
+      }
     });
   });
 
   describe('checkAndDepositWalletFunds', () => {
     beforeEach(() => {
-      jest.spyOn(manager, 'getWalletUsdcBalance').mockResolvedValue(1000);
+      jest.spyOn(manager, 'getWalletUsdcBalance').mockResolvedValue(
+        Result.success(1000),
+      );
     });
 
     it('should distribute funds equally to all exchanges', async () => {
@@ -198,7 +214,9 @@ describe('BalanceManager', () => {
     }, 20000);
 
     it('should skip deposits if wallet balance is zero', async () => {
-      jest.spyOn(manager, 'getWalletUsdcBalance').mockResolvedValue(0);
+      jest.spyOn(manager, 'getWalletUsdcBalance').mockResolvedValue(
+        Result.success(0),
+      );
 
       await manager.checkAndDepositWalletFunds(
         mockAdapters,
@@ -210,7 +228,9 @@ describe('BalanceManager', () => {
     });
 
     it('should skip deposits if amount is too small (< $5)', async () => {
-      jest.spyOn(manager, 'getWalletUsdcBalance').mockResolvedValue(10); // $10 total
+      jest.spyOn(manager, 'getWalletUsdcBalance').mockResolvedValue(
+        Result.success(10), // $10 total
+      );
 
       const asterAdapter = mockAdapters.get(ExchangeType.ASTER)!;
       asterAdapter.getBalance.mockResolvedValue(0);
@@ -260,10 +280,10 @@ describe('BalanceManager', () => {
       symbol: 'ETHUSDT',
       longExchange: ExchangeType.LIGHTER,
       shortExchange: ExchangeType.ASTER,
-      longRate: 0.0003,
-      shortRate: 0.0001,
-      spread: 0.0002,
-      expectedReturn: 0.219,
+      longRate: Percentage.fromDecimal(0.0003),
+      shortRate: Percentage.fromDecimal(0.0001),
+      spread: Percentage.fromDecimal(0.0002),
+      expectedReturn: Percentage.fromDecimal(0.219),
       longMarkPrice: 3001,
       shortMarkPrice: 3000,
       longOpenInterest: 1000000,
@@ -288,7 +308,10 @@ describe('BalanceManager', () => {
         1000, // Short balance
       );
 
-      expect(result).toBe(true);
+      expect(result.isSuccess).toBe(true);
+      if (result.isSuccess) {
+        expect(result.value).toBe(true);
+      }
     });
 
     it('should rebalance from unused exchanges', async () => {
@@ -300,7 +323,7 @@ describe('BalanceManager', () => {
           [ExchangeType.HYPERLIQUID, 1000], // Unused, has funds
         ]),
       );
-      mockBalanceRebalancer.transferBetweenExchanges.mockResolvedValue(true);
+      mockBalanceRebalancer.transferBetweenExchanges.mockResolvedValue('tx-hash-1');
 
       const result = await manager.attemptRebalanceForOpportunity(
         opportunity,
@@ -310,7 +333,10 @@ describe('BalanceManager', () => {
         100, // Short balance (deficit: 400)
       );
 
-      expect(result).toBe(true);
+      expect(result.isSuccess).toBe(true);
+      if (result.isSuccess) {
+        expect(result.value).toBe(true);
+      }
       expect(mockBalanceRebalancer.transferBetweenExchanges).toHaveBeenCalled();
     });
 
@@ -330,7 +356,10 @@ describe('BalanceManager', () => {
         100,
       );
 
-      expect(result).toBe(false);
+      expect(result.isFailure).toBe(true);
+      if (result.isFailure) {
+        expect(result.error.code).toBe('REBALANCE_UNAVAILABLE');
+      }
     });
 
     it('should return false if adapters missing', async () => {
@@ -345,8 +374,10 @@ describe('BalanceManager', () => {
         100,
       );
 
-      expect(result).toBe(false);
+      expect(result.isFailure).toBe(true);
+      if (result.isFailure) {
+        expect(result.error.code).toBe('EXCHANGE_ERROR');
+      }
     });
   });
 });
-

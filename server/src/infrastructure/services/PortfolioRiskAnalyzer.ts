@@ -1,96 +1,33 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { ExchangeType } from '../../domain/value-objects/ExchangeConfig';
 import { ArbitrageOpportunity } from '../../domain/services/FundingRateAggregator';
-import { HistoricalFundingRateService } from './HistoricalFundingRateService';
+import type { IHistoricalFundingRateService } from '../../domain/ports/IHistoricalFundingRateService';
+import {
+  IPortfolioRiskAnalyzer,
+  PortfolioRiskInput,
+  PortfolioRiskMetrics,
+  DataQualityAssessment,
+} from '../../domain/ports/IPortfolioRiskAnalyzer';
 
-/**
- * Input for portfolio risk analysis
- */
-export interface PortfolioRiskInput {
-  allocations: Map<string, number>; // symbol -> allocation amount
-  opportunities: Array<{
-    opportunity: ArbitrageOpportunity;
-    maxPortfolioFor35APY: number | null;
-    volatilityMetrics: {
-      averageSpread: number;
-      stdDevSpread: number;
-      minSpread: number;
-      maxSpread: number;
-      spreadDropsToZero: number;
-      spreadReversals: number;
-      maxHourlySpreadChange: number;
-      stabilityScore: number;
-    } | null;
-  }>;
-  aggregateAPY: number;
-  totalPortfolio: number;
-}
-
-/**
- * Comprehensive risk metrics for investor reporting
- */
-export interface PortfolioRiskMetrics {
-  // Expected returns
-  expectedAPY: number;
-  expectedAPYConfidenceInterval: { lower: number; upper: number; confidence: number };
-  
-  // Risk metrics
-  worstCaseAPY: number; // If all spreads reverse
-  valueAtRisk95: number; // 95% VaR in USD (worst month)
-  maximumDrawdown: number; // Maximum drawdown in USD
-  sharpeRatio: number;
-  
-  // Historical validation
-  historicalBacktest: {
-    last30Days: { apy: number; realized: boolean };
-    last90Days: { apy: number; realized: boolean };
-    worstMonth: { apy: number; month: string };
-    bestMonth: { apy: number; month: string };
-  };
-  
-  // Stress tests
-  stressTests: Array<{
-    scenario: string;
-    description: string;
-    apy: number;
-    timeToRecover: string;
-    riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  }>;
-  
-  // Correlation & concentration
-  correlationRisk: {
-    averageCorrelation: number;
-    maxCorrelation: number;
-    correlatedPairs: Array<{ pair1: string; pair2: string; correlation: number }>;
-  };
-  concentrationRisk: {
-    maxAllocationPercent: number;
-    top3AllocationPercent: number;
-    herfindahlIndex: number; // Concentration index (0-1, higher = more concentrated)
-    riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
-  };
-  
-  // Volatility breakdown
-  volatilityBreakdown: Array<{
-    symbol: string;
-    allocation: number;
-    allocationPercent: number;
-    stabilityScore: number;
-    riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
-  }>;
-}
+// Re-export types for backward compatibility
+export type {
+  PortfolioRiskInput,
+  PortfolioRiskMetrics,
+  DataQualityAssessment,
+} from '../../domain/ports/IPortfolioRiskAnalyzer';
 
 /**
  * PortfolioRiskAnalyzer - Calculates comprehensive risk metrics for investor reporting
  */
 @Injectable()
-export class PortfolioRiskAnalyzer {
+export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
   private readonly logger = new Logger(PortfolioRiskAnalyzer.name);
   private readonly periodsPerYear = 24 * 365; // Hourly funding periods per year
   private readonly riskFreeRate = 0.05; // 5% typical stablecoin yield
 
   constructor(
-    private readonly historicalService: HistoricalFundingRateService,
+    @Inject('IHistoricalFundingRateService')
+    private readonly historicalService: IHistoricalFundingRateService,
   ) {}
 
   /**
@@ -216,7 +153,7 @@ export class PortfolioRiskAnalyzer {
   /**
    * Main entry point: Calculate all portfolio risk metrics
    */
-  async calculatePortfolioRiskMetrics(input: PortfolioRiskInput): Promise<PortfolioRiskMetrics & { dataQuality: ReturnType<typeof this.assessDataQuality> }> {
+  async calculatePortfolioRiskMetrics(input: PortfolioRiskInput): Promise<PortfolioRiskMetrics & { dataQuality: DataQualityAssessment }> {
     const dataQuality = this.assessDataQuality(input);
     const {
       allocations,
@@ -299,7 +236,7 @@ export class PortfolioRiskAnalyzer {
         worstCaseSpread = Math.min(volatilityMetrics.minSpread, -Math.abs(volatilityMetrics.averageSpread));
       } else {
         // No historical data: assume spread reverses (becomes negative of current spread)
-        worstCaseSpread = -Math.abs(opportunity.spread);
+        worstCaseSpread = -Math.abs(opportunity.spread.toDecimal());
       }
 
       // Calculate worst-case APY: worst spread * periods - costs
@@ -686,7 +623,7 @@ export class PortfolioRiskAnalyzer {
     for (const item of opportunities) {
       const allocation = allocations.get(item.opportunity.symbol) || 0;
       if (allocation <= 0) continue;
-      const reducedSpread = item.opportunity.spread * 0.5;
+      const reducedSpread = item.opportunity.spread.toDecimal() * 0.5;
       scenario1APY += (reducedSpread * this.periodsPerYear * allocation) / totalPortfolio;
     }
     scenarios.push({

@@ -1,5 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ExchangeType } from '../value-objects/ExchangeConfig';
+import { Percentage } from '../value-objects/Percentage';
 import { AsterFundingDataProvider } from '../../infrastructure/adapters/aster/AsterFundingDataProvider';
 import { LighterFundingDataProvider } from '../../infrastructure/adapters/lighter/LighterFundingDataProvider';
 import { HyperLiquidDataProvider } from '../../infrastructure/adapters/hyperliquid/HyperLiquidDataProvider';
@@ -38,10 +39,10 @@ export interface ArbitrageOpportunity {
   symbol: string;
   longExchange: ExchangeType; // Exchange to go long on (receives funding)
   shortExchange: ExchangeType; // Exchange to go short on (receives funding)
-  longRate: number;
-  shortRate: number;
-  spread: number; // Absolute difference
-  expectedReturn: number; // Annualized return estimate
+  longRate: Percentage;
+  shortRate: Percentage;
+  spread: Percentage; // Absolute difference
+  expectedReturn: Percentage; // Annualized return estimate
   longMarkPrice?: number; // Mark price for long exchange (from funding rate data)
   shortMarkPrice?: number; // Mark price for short exchange (from funding rate data)
   longOpenInterest?: number; // Open interest for long exchange (USD)
@@ -466,22 +467,24 @@ export class FundingRateAggregator {
 
             // If we have both long and short opportunities, create arbitrage
             if (bestLong && bestShort && bestLong.exchange !== bestShort.exchange) {
-              const spread = bestLong.currentRate - bestShort.currentRate;
+              const longRate = Percentage.fromDecimal(bestLong.currentRate);
+              const shortRate = Percentage.fromDecimal(bestShort.currentRate);
+              const spread = longRate.subtract(shortRate);
               
-              if (Math.abs(spread) >= minSpread) {
+              if (Math.abs(spread.toDecimal()) >= minSpread) {
                 // Calculate expected annualized return
                 // Funding rates are typically hourly (e.g., 0.0013% per hour ≈ 10% annualized)
                 const periodsPerDay = 24; // Hourly funding periods
                 const periodsPerYear = periodsPerDay * 365;
-                const expectedReturn = Math.abs(spread) * periodsPerYear;
+                const expectedReturn = Percentage.fromDecimal(Math.abs(spread.toDecimal()) * periodsPerYear);
 
                 symbolOpportunities.push({
                   symbol,
                   longExchange: bestLong.exchange,
                   shortExchange: bestShort.exchange,
-                  longRate: bestLong.currentRate,
-                  shortRate: bestShort.currentRate,
-                  spread: Math.abs(spread),
+                  longRate,
+                  shortRate,
+                  spread: Percentage.fromDecimal(Math.abs(spread.toDecimal())),
                   expectedReturn,
                   longMarkPrice: bestLong.markPrice > 0 ? bestLong.markPrice : undefined,
                   shortMarkPrice: bestShort.markPrice > 0 ? bestShort.markPrice : undefined,
@@ -495,13 +498,15 @@ export class FundingRateAggregator {
             // Also check for simple spread arbitrage (long on highest, short on lowest)
             if (comparison.highestRate && comparison.lowestRate && 
                 comparison.highestRate.exchange !== comparison.lowestRate.exchange) {
-              const spread = comparison.highestRate.currentRate - comparison.lowestRate.currentRate;
+              const longRate = Percentage.fromDecimal(comparison.highestRate.currentRate);
+              const shortRate = Percentage.fromDecimal(comparison.lowestRate.currentRate);
+              const spread = longRate.subtract(shortRate);
               
-              if (spread >= minSpread) {
+              if (spread.toDecimal() >= minSpread) {
                 // Funding rates are typically hourly
                 const periodsPerDay = 24; // Hourly funding periods
                 const periodsPerYear = periodsPerDay * 365;
-                const expectedReturn = spread * periodsPerYear;
+                const expectedReturn = Percentage.fromDecimal(spread.toDecimal() * periodsPerYear);
 
                 const highestRate = comparison.highestRate;
                 const lowestRate = comparison.lowestRate;
@@ -512,9 +517,9 @@ export class FundingRateAggregator {
                   symbol,
                   longExchange: highestRate.exchange,
                   shortExchange: lowestRate.exchange,
-                  longRate: highestRate.currentRate,
-                  shortRate: lowestRate.currentRate,
-                  spread,
+                  longRate,
+                  shortRate,
+                  spread: Percentage.fromDecimal(Math.abs(spread.toDecimal())),
                   expectedReturn,
                   longMarkPrice: highestMarkPrice,
                   shortMarkPrice: lowestMarkPrice,
@@ -562,7 +567,8 @@ export class FundingRateAggregator {
     }
 
     // Sort by expected return (highest first)
-    return opportunities.sort((a, b) => b.expectedReturn - a.expectedReturn);
+    return opportunities.sort((a, b) => 
+      b.expectedReturn.toAPY() - a.expectedReturn.toAPY()
+    );
   }
 }
-

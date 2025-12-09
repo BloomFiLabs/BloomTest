@@ -1,6 +1,8 @@
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
 import { ArbitrageOpportunity } from '../FundingRateAggregator';
+import { Result } from '../../common/Result';
+import { DomainException } from '../../exceptions/DomainException';
 
 export interface AsymmetricFill {
   symbol: string;
@@ -15,25 +17,25 @@ export interface AsymmetricFill {
   timestamp: Date;
 }
 
-import { PerpPosition } from '../../value-objects/PerpOrder';
+import { PerpPosition } from '../../entities/PerpPosition';
 import { ArbitrageExecutionResult } from '../FundingArbitrageStrategy';
 
 export interface IPositionManager {
   getAllPositions(
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
-  ): Promise<PerpPosition[]>;
+  ): Promise<Result<PerpPosition[], DomainException>>;
 
   closeAllPositions(
     positions: PerpPosition[],
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
     result: ArbitrageExecutionResult,
-  ): Promise<{ closed: PerpPosition[]; stillOpen: PerpPosition[] }>;
+  ): Promise<Result<{ closed: PerpPosition[]; stillOpen: PerpPosition[] }, DomainException>>;
 
   handleAsymmetricFills(
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
     fills: AsymmetricFill[],
     result: ArbitrageExecutionResult,
-  ): Promise<void>;
+  ): Promise<Result<void, DomainException>>;
 
   closeFilledPosition(
     adapter: IPerpExchangeAdapter,
@@ -42,6 +44,5 @@ export interface IPositionManager {
     size: number,
     exchangeType: ExchangeType,
     result: ArbitrageExecutionResult,
-  ): Promise<void>;
+  ): Promise<Result<void, DomainException>>;
 }
-

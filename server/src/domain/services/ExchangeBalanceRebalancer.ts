@@ -438,13 +438,30 @@ export class ExchangeBalanceRebalancer {
    * 
    * If external APIs are not available, manual intervention may be required
    */
-  private async transferBetweenExchanges(
+  async transferBetweenExchanges(
     fromExchange: ExchangeType,
     toExchange: ExchangeType,
     amount: number,
-    fromAdapter: IPerpExchangeAdapter,
-    toAdapter: IPerpExchangeAdapter
+    fromAdapterOrMap: IPerpExchangeAdapter | Map<ExchangeType, IPerpExchangeAdapter>,
+    toAdapter?: IPerpExchangeAdapter
   ): Promise<string> {
+    // Handle both Map and individual adapters for backward compatibility
+    let fromAdapter: IPerpExchangeAdapter;
+    let toAdapterResolved: IPerpExchangeAdapter;
+    
+    if (fromAdapterOrMap instanceof Map) {
+      fromAdapter = fromAdapterOrMap.get(fromExchange)!;
+      toAdapterResolved = fromAdapterOrMap.get(toExchange)!;
+      if (!fromAdapter || !toAdapterResolved) {
+        throw new Error(`Adapters not found for ${fromExchange} or ${toExchange}`);
+      }
+    } else {
+      fromAdapter = fromAdapterOrMap;
+      toAdapterResolved = toAdapter!;
+      if (!toAdapterResolved) {
+        throw new Error('toAdapter is required when fromAdapterOrMap is not a Map');
+      }
+    }
     if (!this.CENTRAL_WALLET_ADDRESS) {
       throw new Error(
         'CENTRAL_WALLET_ADDRESS not configured. Cannot execute external transfers. ' +
@@ -478,7 +495,7 @@ export class ExchangeBalanceRebalancer {
     // Note: External deposits may not be supported via API for all exchanges
     this.logger.log(`📥 Step 2: Depositing $${amount.toFixed(2)} from central wallet to ${toExchange}...`);
     try {
-      const depositTxHash = await toAdapter.depositExternal(
+      const depositTxHash = await toAdapterResolved.depositExternal(
         amount,
         'USDC', // Use USDC for deposits
         this.CENTRAL_WALLET_ADDRESS
@@ -565,4 +582,3 @@ export class ExchangeBalanceRebalancer {
     }
   }
 }
-

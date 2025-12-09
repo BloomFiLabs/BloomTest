@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { IPortfolioOptimizer, PortfolioOptimizationInput } from './IPortfolioOptimizer';
 import { CostCalculator } from './CostCalculator';
-import { HistoricalFundingRateService } from '../../../infrastructure/services/HistoricalFundingRateService';
+import type { IHistoricalFundingRateService } from '../../ports/IHistoricalFundingRateService';
 import { StrategyConfig } from '../../value-objects/StrategyConfig';
 import { ArbitrageOpportunity } from '../FundingRateAggregator';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
@@ -17,7 +17,7 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
 
   constructor(
     private readonly costCalculator: CostCalculator,
-    private readonly historicalService: HistoricalFundingRateService,
+    private readonly historicalService: IHistoricalFundingRateService,
     private readonly config: StrategyConfig,
   ) {}
 
@@ -31,12 +31,12 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
 
     // Get historical weighted average rates (more robust than current snapshot)
     const currentLongRate =
-      opportunity.longRate !== undefined && !isNaN(opportunity.longRate)
-        ? opportunity.longRate
+      opportunity.longRate !== undefined
+        ? opportunity.longRate.toDecimal()
         : 0;
     const currentShortRate =
-      opportunity.shortRate !== undefined && !isNaN(opportunity.shortRate)
-        ? opportunity.shortRate
+      opportunity.shortRate !== undefined
+        ? opportunity.shortRate.toDecimal()
         : 0;
 
     const historicalLongRate = this.historicalService.getWeightedAverageRate(
@@ -285,14 +285,12 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
 
       // Validate historical data quality
       const currentLongRate =
-        item.opportunity.longRate !== undefined &&
-        !isNaN(item.opportunity.longRate)
-          ? item.opportunity.longRate
+        item.opportunity.longRate !== undefined
+          ? item.opportunity.longRate.toDecimal()
           : 0;
       const currentShortRate =
-        item.opportunity.shortRate !== undefined &&
-        !isNaN(item.opportunity.shortRate)
-          ? item.opportunity.shortRate
+        item.opportunity.shortRate !== undefined
+          ? item.opportunity.shortRate.toDecimal()
           : 0;
 
       const historicalSpread = this.historicalService.getAverageSpread(
@@ -412,14 +410,12 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
           );
           if (item && item.maxPortfolioFor35APY) {
             const currentLongRate =
-              item.opportunity.longRate !== undefined &&
-              !isNaN(item.opportunity.longRate)
-                ? item.opportunity.longRate
+              item.opportunity.longRate !== undefined
+                ? item.opportunity.longRate.toDecimal()
                 : 0;
             const currentShortRate =
-              item.opportunity.shortRate !== undefined &&
-              !isNaN(item.opportunity.shortRate)
-                ? item.opportunity.shortRate
+              item.opportunity.shortRate !== undefined
+                ? item.opportunity.shortRate.toDecimal()
                 : 0;
 
             const historicalSpread = this.historicalService.getAverageSpread(
@@ -474,13 +470,13 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
               this.historicalService.getWeightedAverageRate(
                 item.opportunity.symbol,
                 item.opportunity.longExchange,
-                item.opportunity.longRate || 0,
+                item.opportunity.longRate?.toDecimal() || 0,
               );
             const historicalShortRate =
               this.historicalService.getWeightedAverageRate(
                 item.opportunity.symbol,
                 item.opportunity.shortExchange,
-                item.opportunity.shortRate || 0,
+                item.opportunity.shortRate?.toDecimal() || 0,
               );
 
             const longFundingImpact = this.costCalculator.predictFundingRateImpact(
@@ -634,7 +630,7 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
 
     // Check if we have matched data points
     const currentSpread = Math.abs(
-      opportunity.longRate - opportunity.shortRate,
+      opportunity.longRate.toDecimal() - opportunity.shortRate.toDecimal(),
     );
     if (Math.abs(historicalSpread - currentSpread) < 0.0000001) {
       return {

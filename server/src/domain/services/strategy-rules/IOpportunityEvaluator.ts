@@ -1,22 +1,25 @@
+import { ExchangeType } from '../../value-objects/ExchangeConfig';
+import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
 import { ArbitrageOpportunity } from '../FundingRateAggregator';
 import { ArbitrageExecutionPlan } from '../FundingArbitrageStrategy';
 import { PerpPosition } from '../../entities/PerpPosition';
-import { ExchangeType } from '../../value-objects/ExchangeConfig';
-import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
+import { Result } from '../../common/Result';
+import { DomainException } from '../../exceptions/DomainException';
+import { HistoricalMetrics } from '../../ports/IHistoricalFundingRateService';
 
 export interface IOpportunityEvaluator {
   evaluateOpportunityWithHistory(
     opportunity: ArbitrageOpportunity,
     plan: ArbitrageExecutionPlan | null,
-  ): {
+  ): Result<{
     breakEvenHours: number | null;
     historicalMetrics: {
-      long: any | null;
-      short: any | null;
+      long: HistoricalMetrics | null;
+      short: HistoricalMetrics | null;
     };
     worstCaseBreakEvenHours: number | null;
     consistencyScore: number;
-  };
+  }, DomainException>;
 
   selectWorstCaseOpportunity(
     allOpportunities: Array<{
@@ -29,11 +32,11 @@ export interface IOpportunityEvaluator {
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
     maxPositionSizeUsd: number | undefined,
     exchangeBalances: Map<ExchangeType, number>,
-  ): Promise<{
+  ): Promise<Result<{
     opportunity: ArbitrageOpportunity;
     plan: ArbitrageExecutionPlan;
     reason: string;
-  } | null>;
+  } | null, DomainException>>;
 
   shouldRebalance(
     currentPosition: PerpPosition,
@@ -41,11 +44,10 @@ export interface IOpportunityEvaluator {
     newPlan: ArbitrageExecutionPlan,
     cumulativeLoss: number,
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
-  ): Promise<{
+  ): Promise<Result<{
     shouldRebalance: boolean;
     reason: string;
     currentBreakEvenHours: number | null;
     newBreakEvenHours: number | null;
-  }>;
+  }, DomainException>>;
 }
-

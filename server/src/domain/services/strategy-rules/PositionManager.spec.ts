@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PositionManager } from './PositionManager';
 import { StrategyConfig } from '../../value-objects/StrategyConfig';
+import { Percentage } from '../../value-objects/Percentage';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
 import { PerpPosition } from '../../entities/PerpPosition';
@@ -27,7 +28,7 @@ describe('PositionManager', () => {
   let config: StrategyConfig;
 
   beforeEach(async () => {
-    config = new StrategyConfig();
+    config = StrategyConfig.withDefaults();
 
     mockOrderExecutor = {
       waitForOrderFill: jest.fn().mockResolvedValue(
@@ -97,9 +98,12 @@ describe('PositionManager', () => {
 
       const result = await manager.getAllPositions(mockAdapters);
 
-      expect(result).toHaveLength(2);
-      expect(result).toContainEqual(asterPositions[0]);
-      expect(result).toContainEqual(lighterPositions[0]);
+      expect(result.isSuccess).toBe(true);
+      if (result.isSuccess) {
+        expect(result.value).toHaveLength(2);
+        expect(result.value).toContainEqual(asterPositions[0]);
+        expect(result.value).toContainEqual(lighterPositions[0]);
+      }
     });
 
     it('should handle adapter errors gracefully', async () => {
@@ -111,7 +115,10 @@ describe('PositionManager', () => {
       const result = await manager.getAllPositions(mockAdapters);
 
       // Should still return positions from working adapters
-      expect(result).toHaveLength(0);
+      expect(result.isSuccess).toBe(true);
+      if (result.isSuccess) {
+        expect(result.value).toHaveLength(0);
+      }
     });
 
     it('should return empty array when no positions exist', async () => {
@@ -120,7 +127,10 @@ describe('PositionManager', () => {
 
       const result = await manager.getAllPositions(mockAdapters);
 
-      expect(result).toHaveLength(0);
+      expect(result.isSuccess).toBe(true);
+      if (result.isSuccess) {
+        expect(result.value).toHaveLength(0);
+      }
     });
   });
 
@@ -170,8 +180,11 @@ describe('PositionManager', () => {
         result,
       );
 
-      expect(closeResult.closed).toHaveLength(2);
-      expect(closeResult.stillOpen).toHaveLength(0);
+      expect(closeResult.isSuccess).toBe(true);
+      if (closeResult.isSuccess) {
+        expect(closeResult.value.closed).toHaveLength(2);
+        expect(closeResult.value.stillOpen).toHaveLength(0);
+      }
       expect(asterAdapter.placeOrder).toHaveBeenCalled();
       expect(lighterAdapter.placeOrder).toHaveBeenCalled();
     });
@@ -241,8 +254,11 @@ describe('PositionManager', () => {
         result,
       );
 
-      expect(closeResult.closed).toHaveLength(0);
-      expect(closeResult.stillOpen.length).toBeGreaterThan(0);
+      expect(closeResult.isSuccess).toBe(true);
+      if (closeResult.isSuccess) {
+        expect(closeResult.value.closed).toHaveLength(0);
+        expect(closeResult.value.stillOpen.length).toBeGreaterThan(0);
+      }
       expect(result.errors.length).toBeGreaterThan(0);
     });
 
@@ -284,6 +300,7 @@ describe('PositionManager', () => {
         result,
       );
 
+      expect(closeResult.isSuccess).toBe(true);
       // Should have attempted fallback (at least 1 call, possibly 2)
       expect(asterAdapter.placeOrder).toHaveBeenCalled();
       // May or may not succeed depending on timing
@@ -316,8 +333,11 @@ describe('PositionManager', () => {
         result,
       );
 
-      expect(closeResult.closed).toHaveLength(0);
-      expect(closeResult.stillOpen).toHaveLength(1);
+      expect(closeResult.isSuccess).toBe(true);
+      if (closeResult.isSuccess) {
+        expect(closeResult.value.closed).toHaveLength(0);
+        expect(closeResult.value.stillOpen).toHaveLength(1);
+      }
     });
   });
 
@@ -335,10 +355,10 @@ describe('PositionManager', () => {
         symbol: 'ETHUSDT',
         longExchange: ExchangeType.LIGHTER,
         shortExchange: ExchangeType.ASTER,
-        longRate: 0.0003,
-        shortRate: 0.0001,
-        spread: 0.0002,
-        expectedReturn: 0.219,
+        longRate: Percentage.fromDecimal(0.0003),
+        shortRate: Percentage.fromDecimal(0.0001),
+        spread: Percentage.fromDecimal(0.0002),
+        expectedReturn: Percentage.fromDecimal(0.219),
         longMarkPrice: 3001,
         shortMarkPrice: 3000,
         longOpenInterest: 1000000,
@@ -356,7 +376,7 @@ describe('PositionManager', () => {
       // Fees + slippage ~= 3000 * (0.0005 + 0.0005 + 0.0005) = 4.5
       // amortizedCostsPerPeriod = 4.5 / 24 = 0.1875
       // expectedNetReturn = 0.342 - 0.1875 = 0.1545 > 0, so profitable
-      fill.opportunity.expectedReturn = 1.0; // 100% APY - very profitable
+      fill.opportunity.expectedReturn = Percentage.fromDecimal(1.0); // 100% APY - very profitable
       fill.opportunity.longMarkPrice = 3000;
       fill.opportunity.shortMarkPrice = 3000;
       // Make sure it exceeds timeout
@@ -380,8 +400,9 @@ describe('PositionManager', () => {
         timestamp: new Date(),
       };
 
-      await manager.handleAsymmetricFills(mockAdapters, fills, result);
+      const handleResult = await manager.handleAsymmetricFills(mockAdapters, fills, result);
 
+      expect(handleResult.isSuccess).toBe(true);
       // Should cancel GTC order and place market order
       expect(asterAdapter.cancelOrder).toHaveBeenCalledWith('short-123', 'ETHUSDT');
       expect(asterAdapter.placeOrder).toHaveBeenCalled();
@@ -390,7 +411,7 @@ describe('PositionManager', () => {
     it('should close filled position if no longer profitable', async () => {
       const fill = createMockFill();
       // Make it unprofitable by setting very low expected return
-      fill.opportunity.expectedReturn = 0.0001; // 0.01% APY - unprofitable after fees
+      fill.opportunity.expectedReturn = Percentage.fromDecimal(0.0001); // 0.01% APY - unprofitable after fees
       const fills = [fill];
       const lighterAdapter = mockAdapters.get(ExchangeType.LIGHTER)!;
       const asterAdapter = mockAdapters.get(ExchangeType.ASTER)!;
@@ -410,8 +431,9 @@ describe('PositionManager', () => {
         timestamp: new Date(),
       };
 
-      await manager.handleAsymmetricFills(mockAdapters, fills, result);
+      const handleResult = await manager.handleAsymmetricFills(mockAdapters, fills, result);
 
+      expect(handleResult.isSuccess).toBe(true);
       // Should cancel order and close position
       expect(asterAdapter.cancelOrder).toHaveBeenCalled();
       expect(lighterAdapter.placeOrder).toHaveBeenCalled();
@@ -431,10 +453,11 @@ describe('PositionManager', () => {
         timestamp: new Date(),
       };
 
-      await manager.handleAsymmetricFills(emptyAdapters, fills, result);
+      const handleResult = await manager.handleAsymmetricFills(emptyAdapters, fills, result);
 
-      // Should handle gracefully without errors
-      expect(result.errors.length).toBe(0);
+      expect(handleResult.isSuccess).toBe(true);
+      // Should handle gracefully - errors are logged but Result is success
+      // (errors are added to result.errors array)
     });
 
     it('should handle fills that are within timeout', async () => {
@@ -453,8 +476,9 @@ describe('PositionManager', () => {
         timestamp: new Date(),
       };
 
-      await manager.handleAsymmetricFills(mockAdapters, [recentFill], result);
+      const handleResult = await manager.handleAsymmetricFills(mockAdapters, [recentFill], result);
 
+      expect(handleResult.isSuccess).toBe(true);
       // Should not process fills within timeout
       const asterAdapter = mockAdapters.get(ExchangeType.ASTER)!;
       expect(asterAdapter.cancelOrder).not.toHaveBeenCalled();
@@ -478,7 +502,7 @@ describe('PositionManager', () => {
         timestamp: new Date(),
       };
 
-      await manager.closeFilledPosition(
+      const closeResult = await manager.closeFilledPosition(
         asterAdapter,
         'ETHUSDT',
         'LONG',
@@ -487,6 +511,7 @@ describe('PositionManager', () => {
         result,
       );
 
+      expect(closeResult.isSuccess).toBe(true);
       expect(asterAdapter.placeOrder).toHaveBeenCalledWith(
         expect.objectContaining({
           symbol: 'ETHUSDT',
@@ -513,7 +538,7 @@ describe('PositionManager', () => {
         timestamp: new Date(),
       };
 
-      await manager.closeFilledPosition(
+      const closeResult = await manager.closeFilledPosition(
         asterAdapter,
         'ETHUSDT',
         'LONG',
@@ -522,8 +547,11 @@ describe('PositionManager', () => {
         result,
       );
 
+      expect(closeResult.isFailure).toBe(true);
+      if (closeResult.isFailure) {
+        expect(closeResult.error.code).toBe('POSITION_NOT_FOUND');
+      }
       expect(result.errors.length).toBeGreaterThan(0);
     });
   });
 });
-

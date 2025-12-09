@@ -3,6 +3,8 @@ import { ArbitrageExecutionPlan } from '../FundingArbitrageStrategy';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
 import { StrategyConfig } from '../../value-objects/StrategyConfig';
+import { Result } from '../../common/Result';
+import { DomainException } from '../../exceptions/DomainException';
 
 export interface ExecutionPlanContext {
   longBalance: number;
@@ -18,7 +20,7 @@ export interface IExecutionPlanBuilder {
     longMarkPrice?: number,
     shortMarkPrice?: number,
     maxPositionSizeUsd?: number,
-  ): Promise<ArbitrageExecutionPlan | null>;
+  ): Promise<Result<ArbitrageExecutionPlan, DomainException>>;
 
   buildPlanWithAllocation(
     opportunity: ArbitrageOpportunity,
@@ -28,6 +30,5 @@ export interface IExecutionPlanBuilder {
     config: StrategyConfig,
     longMarkPrice?: number,
     shortMarkPrice?: number,
-  ): Promise<ArbitrageExecutionPlan | null>;
+  ): Promise<Result<ArbitrageExecutionPlan, DomainException>>;
 }
-

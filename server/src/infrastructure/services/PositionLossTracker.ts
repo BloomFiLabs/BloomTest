@@ -2,6 +2,7 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ExchangeType } from '../../domain/value-objects/ExchangeConfig';
 import { PerpPosition } from '../../domain/entities/PerpPosition';
+import { IPositionLossTracker } from '../../domain/ports/IPositionLossTracker';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -42,7 +43,7 @@ interface CurrentPosition {
  * Persists data to file to survive restarts.
  */
 @Injectable()
-export class PositionLossTracker {
+export class PositionLossTracker implements IPositionLossTracker {
   private readonly logger = new Logger(PositionLossTracker.name);
   
   // In-memory storage
@@ -204,6 +205,10 @@ export class PositionLossTracker {
     positionValueUsd?: number, // Optional, will use position.getPositionValue() if not provided
   ): {
     remainingBreakEvenHours: number;
+    requiredFundingRate: number;
+    currentRate: number;
+    entryCost: number;
+    positionValueUsd: number;
     feesEarnedSoFar: number;
     hoursHeld: number;
     remainingCost: number;
@@ -215,6 +220,10 @@ export class PositionLossTracker {
     if (!currentPos) {
       return {
         remainingBreakEvenHours: Infinity,
+        requiredFundingRate: 0,
+        currentRate: currentFundingRate,
+        entryCost: 0,
+        positionValueUsd: valueUsd,
         feesEarnedSoFar: 0,
         hoursHeld: 0,
         remainingCost: Infinity,
@@ -239,6 +248,10 @@ export class PositionLossTracker {
     if (hourlyReturn <= 0) {
       return {
         remainingBreakEvenHours: Infinity,
+        requiredFundingRate: Infinity,
+        currentRate: currentFundingRate,
+        entryCost: currentPos.entry.entryCost,
+        positionValueUsd: valueUsd,
         feesEarnedSoFar: 0,
         hoursHeld,
         remainingCost: Infinity,
@@ -258,6 +271,10 @@ export class PositionLossTracker {
     if (remainingCost <= 0) {
       return {
         remainingBreakEvenHours: 0, // Already profitable
+        requiredFundingRate: 0,
+        currentRate: currentFundingRate,
+        entryCost: currentPos.entry.entryCost,
+        positionValueUsd: valueUsd,
         feesEarnedSoFar,
         hoursHeld,
         remainingCost: 0,
@@ -265,9 +282,15 @@ export class PositionLossTracker {
     }
 
     const remainingBreakEvenHours = remainingCost / hourlyReturn;
+    // Calculate required funding rate to break even
+    const requiredFundingRate = remainingCost / (valueUsd * hoursHeld);
 
     return {
       remainingBreakEvenHours,
+      requiredFundingRate,
+      currentRate: currentFundingRate,
+      entryCost: currentPos.entry.entryCost,
+      positionValueUsd: valueUsd,
       feesEarnedSoFar,
       hoursHeld,
       remainingCost,
@@ -461,4 +484,3 @@ export class PositionLossTracker {
     }
   }
 }
-

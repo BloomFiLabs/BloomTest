@@ -1,14 +1,16 @@
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
 import { ArbitrageOpportunity } from '../FundingRateAggregator';
+import { Result } from '../../common/Result';
+import { DomainException } from '../../exceptions/DomainException';
 
 export interface IBalanceManager {
-  getWalletUsdcBalance(): Promise<number>;
+  getWalletUsdcBalance(): Promise<Result<number, DomainException>>;
 
   checkAndDepositWalletFunds(
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
     uniqueExchanges: Set<ExchangeType>,
-  ): Promise<void>;
+  ): Promise<Result<void, DomainException>>;
 
   attemptRebalanceForOpportunity(
     opportunity: ArbitrageOpportunity,
@@ -16,6 +18,5 @@ export interface IBalanceManager {
     requiredCollateral: number,
     longBalance: number,
     shortBalance: number,
-  ): Promise<boolean>;
+  ): Promise<Result<boolean, DomainException>>;
 }
-

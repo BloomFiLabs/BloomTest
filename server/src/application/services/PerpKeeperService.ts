@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ExchangeType } from '../../domain/value-objects/ExchangeConfig';
 import { PerpOrderRequest, PerpOrderResponse } from '../../domain/value-objects/PerpOrder';
@@ -28,9 +28,9 @@ export class PerpKeeperService implements IPerpKeeperService {
   private readonly adapters: Map<ExchangeType, IPerpExchangeAdapter> = new Map();
 
   constructor(
-    private readonly asterAdapter: AsterExchangeAdapter,
-    private readonly lighterAdapter: LighterExchangeAdapter,
-    private readonly hyperliquidAdapter: HyperliquidExchangeAdapter,
+    @Optional() @Inject(AsterExchangeAdapter) private readonly asterAdapter: AsterExchangeAdapter | null,
+    @Optional() @Inject(LighterExchangeAdapter) private readonly lighterAdapter: LighterExchangeAdapter | null,
+    @Optional() @Inject(HyperliquidExchangeAdapter) private readonly hyperliquidAdapter: HyperliquidExchangeAdapter | null,
     private readonly performanceLogger: PerpKeeperPerformanceLogger,
     private readonly balanceRebalancer: ExchangeBalanceRebalancer,
     private readonly configService: ConfigService,
@@ -46,23 +46,41 @@ export class PerpKeeperService implements IPerpKeeperService {
       this.logger.log(`🧪 TEST MODE ENABLED - Using mock adapters with $${mockCapital.toFixed(2)} capital`);
       this.logger.log(`   Mock adapters use REAL market data (prices, order books) but track FAKE positions/balances`);
       
+      // Create real adapters if they're null (for market data)
+      // Mock adapters need real adapters to get market data
+      const aster = asterAdapter || new AsterExchangeAdapter(this.configService);
+      const lighter = lighterAdapter || new LighterExchangeAdapter(this.configService);
+      const hyperliquid = hyperliquidAdapter || new HyperliquidExchangeAdapter(this.configService, null as any);
+      
       this.adapters.set(
         ExchangeType.ASTER, 
-        new MockExchangeAdapter(this.configService, ExchangeType.ASTER, asterAdapter, lighterAdapter, hyperliquidAdapter)
+        new MockExchangeAdapter(this.configService, ExchangeType.ASTER, aster, lighter, hyperliquid)
       );
       this.adapters.set(
         ExchangeType.LIGHTER, 
-        new MockExchangeAdapter(this.configService, ExchangeType.LIGHTER, asterAdapter, lighterAdapter, hyperliquidAdapter)
+        new MockExchangeAdapter(this.configService, ExchangeType.LIGHTER, aster, lighter, hyperliquid)
       );
       this.adapters.set(
         ExchangeType.HYPERLIQUID, 
-        new MockExchangeAdapter(this.configService, ExchangeType.HYPERLIQUID, asterAdapter, lighterAdapter, hyperliquidAdapter)
+        new MockExchangeAdapter(this.configService, ExchangeType.HYPERLIQUID, aster, lighter, hyperliquid)
       );
     } else {
-      // Use real adapters
-      this.adapters.set(ExchangeType.ASTER, asterAdapter);
-      this.adapters.set(ExchangeType.LIGHTER, lighterAdapter);
-      this.adapters.set(ExchangeType.HYPERLIQUID, hyperliquidAdapter);
+      // Use real adapters, but only if they were successfully created
+      if (asterAdapter) {
+        this.adapters.set(ExchangeType.ASTER, asterAdapter);
+      } else {
+        this.logger.warn('Aster adapter not available - will be created lazily if needed');
+      }
+      if (lighterAdapter) {
+        this.adapters.set(ExchangeType.LIGHTER, lighterAdapter);
+      } else {
+        this.logger.warn('Lighter adapter not available - will be created lazily if needed');
+      }
+      if (hyperliquidAdapter) {
+        this.adapters.set(ExchangeType.HYPERLIQUID, hyperliquidAdapter);
+      } else {
+        this.logger.warn('Hyperliquid adapter not available - will be created lazily if needed');
+      }
     }
 
     this.logger.log(`PerpKeeperService initialized with ${this.adapters.size} exchange adapters`);
@@ -215,7 +233,11 @@ export class PerpKeeperService implements IPerpKeeperService {
   }
 
   async getBalance(exchangeType: ExchangeType): Promise<number> {
-    const adapter = this.getExchangeAdapter(exchangeType);
+    const adapter = this.adapters.get(exchangeType);
+    if (!adapter) {
+      this.logger.debug(`Adapter not found for ${exchangeType}, returning 0 balance`);
+      return 0;
+    }
     
     // Clear cache before fetching balance to ensure fresh data
     // Hyperliquid adapter has a clearBalanceCache method
@@ -227,7 +249,11 @@ export class PerpKeeperService implements IPerpKeeperService {
   }
 
   async getEquity(exchangeType: ExchangeType): Promise<number> {
-    const adapter = this.getExchangeAdapter(exchangeType);
+    const adapter = this.adapters.get(exchangeType);
+    if (!adapter) {
+      this.logger.debug(`Adapter not found for ${exchangeType}, returning 0 equity`);
+      return 0;
+    }
     return await adapter.getEquity();
   }
 

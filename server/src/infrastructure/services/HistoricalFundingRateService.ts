@@ -4,30 +4,16 @@ import { HyperLiquidDataProvider } from '../adapters/hyperliquid/HyperLiquidData
 import { AsterFundingDataProvider } from '../adapters/aster/AsterFundingDataProvider';
 import { LighterFundingDataProvider } from '../adapters/lighter/LighterFundingDataProvider';
 import { FundingRateAggregator } from '../../domain/services/FundingRateAggregator';
+import {
+  IHistoricalFundingRateService,
+  HistoricalFundingRate,
+  HistoricalMetrics,
+  SpreadVolatilityMetrics,
+} from '../../domain/ports/IHistoricalFundingRateService';
 import axios from 'axios';
 
-/**
- * Historical funding rate data point
- */
-export interface HistoricalFundingRate {
-  symbol: string;
-  exchange: ExchangeType;
-  rate: number;
-  timestamp: Date;
-}
-
-/**
- * Historical metrics for a symbol/exchange pair
- */
-export interface HistoricalMetrics {
-  averageRate: number;
-  stdDev: number;
-  minRate: number;
-  maxRate: number;
-  positiveDays: number;
-  consistencyScore: number; // 0-1, higher = more consistent
-  dataPoints: number; // Number of historical data points used
-}
+// Re-export types for backward compatibility
+export type { HistoricalFundingRate, HistoricalMetrics } from '../../domain/ports/IHistoricalFundingRateService';
 
 /**
  * HistoricalFundingRateService - Tracks and analyzes historical funding rates
@@ -38,7 +24,7 @@ export interface HistoricalMetrics {
  * - Lighter: Uses collected data (no native historical API available)
  */
 @Injectable()
-export class HistoricalFundingRateService implements OnModuleInit {
+export class HistoricalFundingRateService implements IHistoricalFundingRateService, OnModuleInit {
   private readonly logger = new Logger(HistoricalFundingRateService.name);
   
   // In-memory cache: key = `${symbol}_${exchange}`, value = array of HistoricalFundingRate
@@ -814,16 +800,7 @@ export class HistoricalFundingRateService implements OnModuleInit {
     shortSymbol: string,
     shortExchange: ExchangeType,
     days: number = 30,
-  ): {
-    averageSpread: number;
-    stdDevSpread: number;
-    minSpread: number;
-    maxSpread: number;
-    spreadDropsToZero: number;
-    spreadReversals: number;
-    maxHourlySpreadChange: number;
-    stabilityScore: number; // 0-1, higher = more stable
-  } | null {
+  ): SpreadVolatilityMetrics | null {
     const longData = this.getHistoricalData(longSymbol, longExchange);
     const shortData = this.getHistoricalData(shortSymbol, shortExchange);
 
