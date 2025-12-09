@@ -98,60 +98,164 @@ export class PositionManager implements IPositionManager {
           continue;
         }
 
-        // Close position by placing opposite order
-        // Use MARKET order with IOC (Immediate or Cancel) and reduceOnly for aggressive closing
-        const closeOrder = new PerpOrderRequest(
-          position.symbol,
-          position.side === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG,
-          OrderType.MARKET,
-          Math.abs(position.size), // Use absolute size
-          0, // No limit price for market orders
-          TimeInForce.IOC, // Immediate or cancel - ensures aggressive fill
-          true, // Reduce only - ensures we're closing, not opening
-        );
+        // Close position with progressive price improvement (especially for Lighter)
+        // Try progressively worse prices to ensure fill
+        const closeSide = position.side === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG;
+        const positionSize = Math.abs(position.size);
+        
+        // Progressive price improvement: start with market, then try worse prices
+        const priceImprovements = [0, 0.001, 0.005, 0.01, 0.02, 0.05]; // 0%, 0.1%, 0.5%, 1%, 2%, 5% worse
+        
+        let finalResponse: PerpOrderResponse | null = null;
+        let positionClosed = false;
+        
+        for (let attempt = 0; attempt < priceImprovements.length; attempt++) {
+          const priceImprovement = priceImprovements[attempt];
+          
+          try {
+            // Get current market price for limit orders (if not first attempt)
+            let limitPrice: number | undefined = undefined;
+            if (attempt > 0 && position.exchangeType === ExchangeType.LIGHTER) {
+              // For Lighter, get order book price and apply price improvement
+              try {
+                const markPrice = await adapter.getMarkPrice(position.symbol);
+                if (markPrice > 0) {
+                  // For closing LONG: we SELL, so use bid price (worse = lower)
+                  // For closing SHORT: we BUY, so use ask price (worse = higher)
+                  if (position.side === OrderSide.LONG) {
+                    // Closing LONG = SELL = use bid price, make it worse (lower)
+                    limitPrice = markPrice * (1 - priceImprovement);
+                  } else {
+                    // Closing SHORT = BUY = use ask price, make it worse (higher)
+                    limitPrice = markPrice * (1 + priceImprovement);
+                  }
+                  this.logger.debug(
+                    `Attempt ${attempt + 1}/${priceImprovements.length}: Using limit price ${limitPrice.toFixed(6)} ` +
+                    `(${(priceImprovement * 100).toFixed(2)}% ${position.side === OrderSide.LONG ? 'worse' : 'worse'} than market)`,
+                  );
+                }
+              } catch (priceError: any) {
+                this.logger.debug(`Failed to get market price for progressive close: ${priceError.message}`);
+                // Fall back to market order
+              }
+            }
+            
+            const closeOrder = new PerpOrderRequest(
+              position.symbol,
+              closeSide,
+              limitPrice ? OrderType.LIMIT : OrderType.MARKET,
+              positionSize,
+              limitPrice,
+              limitPrice ? TimeInForce.IOC : TimeInForce.IOC, // IOC for both market and limit
+              true, // Reduce only - ensures we're closing, not opening
+            );
 
-        this.logger.log(
-          `📤 Closing position: ${position.symbol} ${position.side} ${position.size.toFixed(4)} on ${position.exchangeType}`,
-        );
+            if (attempt === 0) {
+              this.logger.log(
+                `📤 Closing position: ${position.symbol} ${position.side} ${positionSize.toFixed(4)} on ${position.exchangeType}`,
+              );
+            } else {
+              this.logger.warn(
+                `🔄 Retry ${attempt}/${priceImprovements.length - 1}: Closing ${position.symbol} with ` +
+                `${(priceImprovement * 100).toFixed(2)}% worse price (${limitPrice?.toFixed(6)})`,
+              );
+            }
 
-        const closeResponse = await adapter.placeOrder(closeOrder);
+            const closeResponse = await adapter.placeOrder(closeOrder);
 
-        // Wait and retry if order didn't fill immediately
-        let finalResponse = closeResponse;
-        if (!closeResponse.isFilled() && closeResponse.orderId) {
-          finalResponse = await this.orderExecutor.waitForOrderFill(
-            adapter,
-            closeResponse.orderId,
-            position.symbol,
-            position.exchangeType,
-            position.size,
-            this.config.maxOrderWaitRetries,
-            this.config.orderWaitBaseInterval,
-            true, // isClosingPosition = true (enables longer backoff)
-          );
+            // Wait and retry if order didn't fill immediately
+            let response = closeResponse;
+            if (!closeResponse.isFilled() && closeResponse.orderId) {
+              response = await this.orderExecutor.waitForOrderFill(
+                adapter,
+                closeResponse.orderId,
+                position.symbol,
+                position.exchangeType,
+                positionSize,
+                this.config.maxOrderWaitRetries,
+                this.config.orderWaitBaseInterval,
+                true, // isClosingPosition = true (enables longer backoff)
+              );
+            }
+            
+            finalResponse = response;
+            
+            // Check if position is actually closed
+            await new Promise((resolve) => setTimeout(resolve, 500)); // Small delay for position to update
+            const currentPositions = await adapter.getPositions();
+            const positionStillExists = currentPositions.some(
+              (p) =>
+                p.symbol === position.symbol &&
+                p.exchangeType === position.exchangeType &&
+                Math.abs(p.size) > 0.0001,
+            );
+            
+            if (response.isFilled() && !positionStillExists) {
+              positionClosed = true;
+              if (attempt > 0) {
+                this.logger.log(
+                  `✅ Successfully closed position ${position.symbol} on attempt ${attempt + 1} ` +
+                  `with ${(priceImprovement * 100).toFixed(2)}% worse price`,
+                );
+              }
+              break; // Position closed successfully
+            }
+            
+            if (attempt < priceImprovements.length - 1) {
+              this.logger.warn(
+                `⚠️ Close order for ${position.symbol} didn't fill on attempt ${attempt + 1}, ` +
+                `trying with worse price...`,
+              );
+              await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait before next attempt
+            }
+          } catch (error: any) {
+            this.logger.warn(
+              `Error on close attempt ${attempt + 1} for ${position.symbol}: ${error.message}`,
+            );
+            if (attempt === priceImprovements.length - 1) {
+              // Last attempt failed, break and try fallback
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait before retry
+          }
         }
 
-        // Verify position is actually closed by checking positions again
-        await new Promise((resolve) => setTimeout(resolve, 500)); // Small delay for position to update
-        const currentPositions = await adapter.getPositions();
-        const positionStillExists = currentPositions.some(
-          (p) =>
-            p.symbol === position.symbol &&
-            p.exchangeType === position.exchangeType &&
-            Math.abs(p.size) > 0.0001, // Position still exists if size > 0
-        );
-
-        if (
-          finalResponse.isSuccess() &&
-          finalResponse.isFilled() &&
-          !positionStillExists
-        ) {
-          this.logger.log(
-            `✅ Successfully closed position: ${position.symbol} on ${position.exchangeType}`,
+        // Verify position is actually closed
+        if (!positionClosed && finalResponse) {
+          await new Promise((resolve) => setTimeout(resolve, 500)); // Small delay for position to update
+          const currentPositions = await adapter.getPositions();
+          const positionStillExists = currentPositions.some(
+            (p) =>
+              p.symbol === position.symbol &&
+              p.exchangeType === position.exchangeType &&
+              Math.abs(p.size) > 0.0001, // Position still exists if size > 0
           );
-          closed.push(position);
+          positionClosed = !positionStillExists && finalResponse.isFilled();
+        }
+
+        if (positionClosed) {
+          if (!finalResponse || finalResponse.isSuccess()) {
+            this.logger.log(
+              `✅ Successfully closed position: ${position.symbol} on ${position.exchangeType}`,
+            );
+            closed.push(position);
+          } else {
+            // Position closed but response indicates failure - still count as closed
+            this.logger.warn(
+              `⚠️ Position ${position.symbol} appears closed but order response indicates failure`,
+            );
+            closed.push(position);
+          }
         } else {
           // Final fallback: if position still exists after all retries, try one more market order
+          const currentPositions = await adapter.getPositions();
+          const positionStillExists = currentPositions.some(
+            (p) =>
+              p.symbol === position.symbol &&
+              p.exchangeType === position.exchangeType &&
+              Math.abs(p.size) > 0.0001,
+          );
+          
           if (positionStillExists) {
             this.logger.warn(
               `⚠️ Position ${position.symbol} on ${position.exchangeType} still exists after close attempt. ` +
@@ -232,7 +336,7 @@ export class PositionManager implements IPositionManager {
             }
           } else {
             this.logger.warn(
-              `⚠️ Failed to close position ${position.symbol} on ${position.exchangeType}: ${finalResponse.error || 'order not filled'}`,
+              `⚠️ Failed to close position ${position.symbol} on ${position.exchangeType}: ${finalResponse?.error || 'order not filled'}`,
             );
             result.errors.push(
               `Failed to close position ${position.symbol} on ${position.exchangeType}`,

@@ -272,27 +272,132 @@ export class PerpKeeperScheduler implements OnModuleInit {
                 `${singleLegPositions.map((p) => `${p.symbol} (${p.side}) on ${p.exchangeType}`).join(', ')}. ` +
                 `Closing these FIRST to prevent losses...`,
             );
-            // Close single-leg positions first
+            // Close single-leg positions first with progressive price improvement
             for (const position of singleLegPositions) {
               try {
                 const adapter = this.keeperService.getExchangeAdapter(position.exchangeType);
-                const closeOrder = new PerpOrderRequest(
-                  position.symbol,
-                  position.side === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG,
-                  OrderType.MARKET,
-                  position.size,
-                  0,
-                  TimeInForce.IOC,
-                  true, // Reduce only
-                );
+                const closeSide = position.side === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG;
                 
-                this.logger.error(`   🚨 CRITICAL: Closing single-leg position ${position.symbol} (${position.side}) on ${position.exchangeType}...`);
-                const closeResponse = await adapter.placeOrder(closeOrder);
+                // Progressive price improvement: start with market, then try worse prices
+                const priceImprovements = [0, 0.001, 0.005, 0.01, 0.02, 0.05]; // 0%, 0.1%, 0.5%, 1%, 2%, 5% worse
+                let positionClosed = false;
                 
-                if (closeResponse.isFilled()) {
-                  this.logger.log(`   ✅ Successfully closed single-leg position: ${position.symbol} on ${position.exchangeType}`);
-                } else {
-                  this.logger.error(`   ❌ CRITICAL: Failed to close single-leg position ${position.symbol} on ${position.exchangeType}: ${closeResponse.error || 'order not filled'}`);
+                for (let attempt = 0; attempt < priceImprovements.length; attempt++) {
+                  const priceImprovement = priceImprovements[attempt];
+                  
+                  try {
+                    // Get current market price for limit orders (if not first attempt)
+                    let limitPrice: number | undefined = undefined;
+                    if (attempt > 0 && position.exchangeType === ExchangeType.LIGHTER) {
+                      // For Lighter, get order book price and apply price improvement
+                      try {
+                        const markPrice = await adapter.getMarkPrice(position.symbol);
+                        if (markPrice > 0) {
+                          // For closing LONG: we SELL, so use bid price (worse = lower)
+                          // For closing SHORT: we BUY, so use ask price (worse = higher)
+                          if (position.side === OrderSide.LONG) {
+                            limitPrice = markPrice * (1 - priceImprovement);
+                          } else {
+                            limitPrice = markPrice * (1 + priceImprovement);
+                          }
+                        }
+                      } catch (priceError: any) {
+                        // Fall back to market order
+                      }
+                    }
+                    
+                    const closeOrder = new PerpOrderRequest(
+                      position.symbol,
+                      closeSide,
+                      limitPrice ? OrderType.LIMIT : OrderType.MARKET,
+                      position.size,
+                      limitPrice,
+                      TimeInForce.IOC,
+                      true, // Reduce only
+                    );
+                    
+                    if (attempt === 0) {
+                      this.logger.error(`   🚨 CRITICAL: Closing single-leg position ${position.symbol} (${position.side}) on ${position.exchangeType}...`);
+                    } else {
+                      this.logger.warn(
+                        `   🔄 Retry ${attempt}/${priceImprovements.length - 1}: Closing ${position.symbol} with ` +
+                        `${(priceImprovement * 100).toFixed(2)}% worse price`,
+                      );
+                    }
+                    
+                    const closeResponse = await adapter.placeOrder(closeOrder);
+                    
+                    // Wait and check if order filled
+                    if (!closeResponse.isFilled() && closeResponse.orderId) {
+                      const maxRetries = 5;
+                      const pollIntervalMs = 2000;
+                      
+                      for (let pollAttempt = 0; pollAttempt < maxRetries; pollAttempt++) {
+                        if (pollAttempt > 0) {
+                          await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+                        }
+                        
+                        try {
+                          const statusResponse = await adapter.getOrderStatus(closeResponse.orderId, position.symbol);
+                          if (statusResponse.isFilled()) {
+                            break;
+                          }
+                          if (statusResponse.status === OrderStatus.CANCELLED || statusResponse.error) {
+                            break;
+                          }
+                        } catch (pollError: any) {
+                          // Continue polling
+                        }
+                      }
+                    }
+                    
+                    // Check if position is actually closed
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    const currentPositions = await adapter.getPositions();
+                    const positionStillExists = currentPositions.some(
+                      (p) =>
+                        p.symbol === position.symbol &&
+                        p.exchangeType === position.exchangeType &&
+                        Math.abs(p.size) > 0.0001,
+                    );
+                    
+                    if (closeResponse.isFilled() && !positionStillExists) {
+                      positionClosed = true;
+                      if (attempt > 0) {
+                        this.logger.log(
+                          `   ✅ Successfully closed single-leg position ${position.symbol} on attempt ${attempt + 1} ` +
+                          `with ${(priceImprovement * 100).toFixed(2)}% worse price`,
+                        );
+                      } else {
+                        this.logger.log(`   ✅ Successfully closed single-leg position: ${position.symbol} on ${position.exchangeType}`);
+                      }
+                      break; // Position closed successfully
+                    }
+                    
+                    if (attempt < priceImprovements.length - 1) {
+                      this.logger.warn(
+                        `   ⚠️ Close order for ${position.symbol} didn't fill on attempt ${attempt + 1}, ` +
+                        `trying with worse price...`,
+                      );
+                      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait before next attempt
+                    }
+                  } catch (attemptError: any) {
+                    this.logger.warn(
+                      `   Error on close attempt ${attempt + 1} for ${position.symbol}: ${attemptError.message}`,
+                    );
+                    if (attempt === priceImprovements.length - 1) {
+                      // Last attempt failed
+                      break;
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                  }
+                }
+                
+                if (!positionClosed) {
+                  this.logger.error(
+                    `   ❌ CRITICAL: Failed to close single-leg position ${position.symbol} on ${position.exchangeType} ` +
+                    `after ${priceImprovements.length} attempts with progressive price improvement`,
+                  );
                 }
                 
                 await new Promise(resolve => setTimeout(resolve, 500));
