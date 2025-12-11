@@ -8,6 +8,7 @@ import { ExchangeType } from '../../domain/value-objects/ExchangeConfig';
 import { PerpOrderRequest, OrderSide, OrderType, TimeInForce, OrderStatus } from '../../domain/value-objects/PerpOrder';
 import { PerpPosition } from '../../domain/entities/PerpPosition';
 import { Contract, JsonRpcProvider, Wallet, formatUnits } from 'ethers';
+import { ArbitrageOpportunity } from '../../domain/services/FundingRateAggregator';
 import * as cliProgress from 'cli-progress';
 
 /**
@@ -665,6 +666,7 @@ export class PerpKeeperScheduler implements OnModuleInit {
   /**
    * Check for single-leg positions and try to open missing side
    * Called periodically to handle single-leg positions detected outside of execution cycle
+   * Closes positions immediately if retries fail (instead of waiting for next execution cycle)
    */
   private async checkAndRetrySingleLegPositions(): Promise<void> {
     try {
@@ -686,11 +688,27 @@ export class PerpKeeperScheduler implements OnModuleInit {
           const retrySuccess = await this.tryOpenMissingSide(position);
           
           if (!retrySuccess) {
-            // Retries failed - log but don't close here (let execution cycle handle it)
+            // Retries failed - close the position immediately (don't wait for next execution cycle)
             this.logger.error(
               `🚨 Single-leg position ${position.symbol} (${position.side}) on ${position.exchangeType} ` +
-              `still missing after retry attempts. Will be handled in next execution cycle.`,
+              `still missing after retry attempts. Closing immediately to eliminate price exposure.`,
             );
+            await this.closeSingleLegPosition(position);
+          }
+        }
+        
+        // Refresh positions after retry attempts to check if any still exist
+        const updatedPositionsResult = await this.orchestrator.getAllPositionsWithMetrics();
+        const updatedPositions = updatedPositionsResult.positions;
+        const stillSingleLeg = this.detectSingleLegPositions(updatedPositions);
+        
+        if (stillSingleLeg.length > 0) {
+          this.logger.error(
+            `🚨 Still have ${stillSingleLeg.length} single-leg position(s) after retries. Closing them immediately...`,
+          );
+          // Close remaining single-leg positions with progressive price improvement
+          for (const position of stillSingleLeg) {
+            await this.closeSingleLegPosition(position);
           }
         }
       }
@@ -1245,7 +1263,109 @@ export class PerpKeeperScheduler implements OnModuleInit {
   }
 
   /**
+   * Find and execute the best available arbitrage opportunity
+   * Excludes the closed symbol, the specific failed opportunity, and filtered opportunities
+   */
+  private async findAndExecuteBestOpportunity(
+    excludeSymbol?: string,
+    excludeOpportunityKey?: string,
+  ): Promise<boolean> {
+    try {
+      // Get all available symbols
+      const symbols = await this.discoverAssetsIfNeeded();
+      if (symbols.length === 0) {
+        this.logger.debug('No symbols available for opportunity search');
+        return false;
+      }
+
+      // Filter out blacklisted symbols and the excluded symbol
+      const filteredSymbols = symbols.filter(s => {
+        if (this.isBlacklisted(s)) return false;
+        if (excludeSymbol && s === excludeSymbol) return false;
+        return true;
+      });
+
+      if (filteredSymbols.length === 0) {
+        this.logger.debug('No symbols available after filtering');
+        return false;
+      }
+
+      // Find opportunities
+      const excludeInfo = excludeOpportunityKey 
+        ? `opportunity ${excludeOpportunityKey}` 
+        : excludeSymbol 
+          ? `symbol ${excludeSymbol}` 
+          : 'none';
+      this.logger.log(`🔍 Searching for best opportunity after closing position (excluding ${excludeInfo})...`);
+      const opportunities = await this.orchestrator.findArbitrageOpportunities(
+        filteredSymbols,
+        this.minSpread,
+        false, // Don't show progress bar for single opportunity search
+      );
+
+      if (opportunities.length === 0) {
+        this.logger.debug('No opportunities found');
+        return false;
+      }
+
+      // Filter out blacklisted, excluded, and filtered opportunities
+      const availableOpportunities = opportunities.filter(opp => {
+        if (this.isBlacklisted(opp.symbol)) return false;
+        if (excludeSymbol && opp.symbol === excludeSymbol) return false;
+        
+        // Check if this opportunity is in the filtered set
+        const retryKey = this.getRetryKey(opp.symbol, opp.longExchange, opp.shortExchange);
+        if (this.filteredOpportunities.has(retryKey)) return false;
+        
+        // Exclude the specific opportunity that just failed
+        if (excludeOpportunityKey && retryKey === excludeOpportunityKey) return false;
+        
+        return true;
+      });
+
+      if (availableOpportunities.length === 0) {
+        this.logger.debug('No available opportunities after filtering');
+        return false;
+      }
+
+      // Sort by net spread (most profitable first)
+      const sortedOpportunities = [...availableOpportunities].sort((a, b) => b.netSpread - a.netSpread);
+      const bestOpportunity = sortedOpportunities[0];
+
+      this.logger.log(
+        `💰 Found best opportunity: ${bestOpportunity.symbol} ` +
+        `(${bestOpportunity.longExchange}/${bestOpportunity.shortExchange}) ` +
+        `with ${(bestOpportunity.netSpread * 100).toFixed(4)}% net spread. Executing...`
+      );
+
+      // Execute the best opportunity
+      const result = await this.orchestrator.executeArbitrageStrategy(
+        [bestOpportunity.symbol],
+        this.minSpread,
+        this.maxPositionSizeUsd,
+      );
+
+      if (result.opportunitiesExecuted > 0) {
+        this.logger.log(
+          `✅ Successfully opened positions for ${bestOpportunity.symbol} ` +
+          `(Expected return: $${result.totalExpectedReturn.toFixed(2)})`
+        );
+        return true;
+      } else {
+        this.logger.warn(
+          `⚠️ Failed to execute opportunity for ${bestOpportunity.symbol}: ${result.errors.join(', ')}`
+        );
+        return false;
+      }
+    } catch (error: any) {
+      this.logger.warn(`Error finding/executing best opportunity: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
    * Close a single-leg position with progressive price improvement
+   * After closing, attempts to open positions in the next most profitable opportunity
    */
   private async closeSingleLegPosition(position: PerpPosition): Promise<void> {
     try {
@@ -1377,6 +1497,38 @@ export class PerpKeeperScheduler implements OnModuleInit {
           `   ❌ CRITICAL: Failed to close single-leg position ${position.symbol} on ${position.exchangeType} ` +
           `after ${priceImprovements.length} attempts with progressive price improvement`,
         );
+        return; // Don't try to open new position if we couldn't close the old one
+      }
+
+      // Wait a bit for position to fully settle and margin to be freed
+      this.logger.log(`   ⏳ Waiting 2 seconds for position to settle and margin to be freed...`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Determine which opportunity this position was part of (so we don't try the same one again)
+      let failedOpportunityKey: string | undefined;
+      try {
+        const comparison = await this.orchestrator.compareFundingRates(position.symbol);
+        if (comparison && comparison.rates.length >= 2) {
+          const sortedRates = [...comparison.rates].sort((a, b) => a.currentRate - b.currentRate);
+          const expectedLongExchange = sortedRates[0].exchange;
+          const expectedShortExchange = sortedRates[sortedRates.length - 1].exchange;
+          failedOpportunityKey = this.getRetryKey(position.symbol, expectedLongExchange, expectedShortExchange);
+        }
+      } catch (error: any) {
+        // If we can't determine the opportunity, just exclude the symbol
+        this.logger.debug(`Could not determine failed opportunity key for ${position.symbol}: ${error.message}`);
+      }
+
+      // After successfully closing, find and execute the best available opportunity
+      // Exclude both the symbol and the specific failed opportunity
+      this.logger.log(`   🔄 Capital freed from closing ${position.symbol}. Searching for best opportunity to redeploy...`);
+      const opportunityExecuted = await this.findAndExecuteBestOpportunity(
+        position.symbol,
+        failedOpportunityKey,
+      );
+      
+      if (!opportunityExecuted) {
+        this.logger.debug(`   ℹ️ No suitable opportunity found to redeploy capital from ${position.symbol}`);
       }
     } catch (error: any) {
       this.logger.error(`   ❌ CRITICAL: Error closing single-leg position ${position.symbol} on ${position.exchangeType}: ${error.message}`);
