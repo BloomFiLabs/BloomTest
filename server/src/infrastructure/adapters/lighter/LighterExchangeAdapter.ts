@@ -392,6 +392,8 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
                            errorMsg.includes('429') ||
                            errorMsg.includes('rate limit') ||
                            errorMsg.includes('market config');
+        const isMarginModeError = errorMsg.includes('invalid margin mode') || 
+                                 errorMsg.includes('margin mode');
         
         if (isRateLimit && attempt < maxRetries - 1) {
           this.logger.warn(
@@ -399,6 +401,21 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
             `(attempt ${attempt + 1}/${maxRetries}): ${errorMsg}. Will retry.`
           );
           continue;
+        }
+        
+        // Margin mode errors are not retryable - account configuration issue
+        if (isMarginModeError) {
+          this.logger.error(
+            `❌ Lighter margin mode error for ${request.symbol}: ${errorMsg}. ` +
+            `This indicates the account may need margin mode configured. ` +
+            `Please check your Lighter account settings or contact support.`
+          );
+          throw new ExchangeError(
+            `Invalid margin mode: Account may need margin mode configured. ${errorMsg}`,
+            ExchangeType.LIGHTER,
+            undefined,
+            error,
+          );
         }
         
         // Not retryable or max retries reached

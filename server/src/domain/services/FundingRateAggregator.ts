@@ -467,6 +467,28 @@ export class FundingRateAggregator {
 
             // If we have both long and short opportunities, create arbitrage
             if (bestLong && bestShort && bestLong.exchange !== bestShort.exchange) {
+              // Validate that both exchanges actually support this symbol for trading
+              const mapping = this.getSymbolMapping(symbol);
+              const longSymbolSupported = mapping && (
+                (bestLong.exchange === ExchangeType.ASTER && mapping.asterSymbol) ||
+                (bestLong.exchange === ExchangeType.LIGHTER && mapping.lighterMarketIndex !== undefined) ||
+                (bestLong.exchange === ExchangeType.HYPERLIQUID && mapping.hyperliquidSymbol)
+              );
+              const shortSymbolSupported = mapping && (
+                (bestShort.exchange === ExchangeType.ASTER && mapping.asterSymbol) ||
+                (bestShort.exchange === ExchangeType.LIGHTER && mapping.lighterMarketIndex !== undefined) ||
+                (bestShort.exchange === ExchangeType.HYPERLIQUID && mapping.hyperliquidSymbol)
+              );
+
+              if (!longSymbolSupported || !shortSymbolSupported) {
+                // Skip this opportunity - one or both exchanges don't support trading this symbol
+                // (even though they may have funding rate data)
+                this.logger.debug(
+                  `Skipping ${symbol} opportunity: ${bestLong.exchange} supported=${!!longSymbolSupported}, ${bestShort.exchange} supported=${!!shortSymbolSupported}`
+                );
+                return [];
+              }
+
               const longRate = Percentage.fromDecimal(bestLong.currentRate);
               const shortRate = Percentage.fromDecimal(bestShort.currentRate);
               const spread = longRate.subtract(shortRate);
@@ -498,6 +520,27 @@ export class FundingRateAggregator {
             // Also check for simple spread arbitrage (long on highest, short on lowest)
             if (comparison.highestRate && comparison.lowestRate && 
                 comparison.highestRate.exchange !== comparison.lowestRate.exchange) {
+              // Validate that both exchanges actually support this symbol for trading
+              const mapping = this.getSymbolMapping(symbol);
+              const highestSymbolSupported = mapping && (
+                (comparison.highestRate.exchange === ExchangeType.ASTER && mapping.asterSymbol) ||
+                (comparison.highestRate.exchange === ExchangeType.LIGHTER && mapping.lighterMarketIndex !== undefined) ||
+                (comparison.highestRate.exchange === ExchangeType.HYPERLIQUID && mapping.hyperliquidSymbol)
+              );
+              const lowestSymbolSupported = mapping && (
+                (comparison.lowestRate.exchange === ExchangeType.ASTER && mapping.asterSymbol) ||
+                (comparison.lowestRate.exchange === ExchangeType.LIGHTER && mapping.lighterMarketIndex !== undefined) ||
+                (comparison.lowestRate.exchange === ExchangeType.HYPERLIQUID && mapping.hyperliquidSymbol)
+              );
+
+              if (!highestSymbolSupported || !lowestSymbolSupported) {
+                // Skip this opportunity - one or both exchanges don't support trading this symbol
+                this.logger.debug(
+                  `Skipping ${symbol} spread opportunity: ${comparison.highestRate.exchange} supported=${!!highestSymbolSupported}, ${comparison.lowestRate.exchange} supported=${!!lowestSymbolSupported}`
+                );
+                return [];
+              }
+
               const longRate = Percentage.fromDecimal(comparison.highestRate.currentRate);
               const shortRate = Percentage.fromDecimal(comparison.lowestRate.currentRate);
               const spread = longRate.subtract(shortRate);

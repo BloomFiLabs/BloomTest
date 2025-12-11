@@ -310,6 +310,8 @@ export class PerpKeeperScheduler implements OnModuleInit {
         `Orders placed: ${result.ordersPlaced}`,
       );
 
+        const positionsResult = await this.orchestrator.getAllPositionsWithMetrics();
+
       if (result.errors.length > 0) {
         this.logger.warn(`Execution had ${result.errors.length} errors:`, result.errors);
       }
