@@ -20,6 +20,7 @@ import * as cliProgress from 'cli-progress';
 export class PerpKeeperScheduler implements OnModuleInit {
   private readonly logger = new Logger(PerpKeeperScheduler.name);
   private symbols: string[] = []; // Will be populated by auto-discovery or configuration
+  private readonly blacklistedSymbols: Set<string>; // Symbols to exclude from trading
   private readonly minSpread: number;
   private readonly maxPositionSizeUsd: number;
   private isRunning = false;
@@ -51,17 +52,88 @@ export class PerpKeeperScheduler implements OnModuleInit {
     this.orchestrator.initialize(adapters);
     this.logger.log(`Orchestrator initialized with ${adapters.size} exchange adapters`);
 
+    // Load blacklisted symbols from environment variable
+    // Normalize symbols (remove USDT/USDC suffixes) to match how symbols are normalized elsewhere
+    const normalizeSymbol = (symbol: string): string => {
+      return symbol
+        .trim()
+        .toUpperCase()
+        .replace('USDT', '')
+        .replace('USDC', '')
+        .replace('-PERP', '')
+        .replace('PERP', '');
+    };
+
+    const blacklistEnv = this.configService.get<string>('KEEPER_BLACKLISTED_SYMBOLS');
+    if (blacklistEnv) {
+      // Split by comma and filter out empty strings, then normalize
+      const blacklistArray = blacklistEnv
+        .split(',')
+        .map(s => s.trim())
+        .filter(s => s.length > 0)
+        .map(s => normalizeSymbol(s));
+      
+      this.blacklistedSymbols = new Set(blacklistArray);
+      this.logger.log(
+        `✅ Blacklisted symbols loaded: ${Array.from(this.blacklistedSymbols).join(', ')} (from env: "${blacklistEnv}")`
+      );
+      
+      // Debug: Log if NVDA should be blacklisted
+      if (this.blacklistedSymbols.has('NVDA')) {
+        this.logger.log(`✅ NVDA is in blacklist - will be filtered`);
+      } else {
+        this.logger.warn(`⚠️ NVDA is NOT in blacklist! Current blacklist: ${Array.from(this.blacklistedSymbols).join(', ')}`);
+      }
+    } else {
+      // Default blacklist: NVDA (experimental market)
+      this.blacklistedSymbols = new Set(['NVDA']);
+      this.logger.log(
+        `Using default blacklist: ${Array.from(this.blacklistedSymbols).join(', ')}`
+      );
+    }
+
     // Load configuration
     const symbolsEnv = this.configService.get<string>('KEEPER_SYMBOLS');
     // If KEEPER_SYMBOLS is explicitly set, use it; otherwise auto-discover
     if (symbolsEnv) {
-      this.symbols = symbolsEnv.split(',').map(s => s.trim());
+      // Normalize symbols helper (defined above)
+      const normalizeSymbol = (symbol: string): string => {
+        return symbol
+          .trim()
+          .toUpperCase()
+          .replace('USDT', '')
+          .replace('USDC', '')
+          .replace('-PERP', '')
+          .replace('PERP', '');
+      };
+      this.symbols = symbolsEnv.split(',').map(s => s.trim()).filter(s => {
+        const normalized = normalizeSymbol(s);
+        return !this.blacklistedSymbols.has(normalized);
+      });
       this.logger.log(
         `Scheduler initialized with configured symbols: ${this.symbols.join(',')}`
       );
+      if (symbolsEnv.split(',').length !== this.symbols.length) {
+        const normalizeSymbol = (symbol: string): string => {
+          return symbol
+            .trim()
+            .toUpperCase()
+            .replace('USDT', '')
+            .replace('USDC', '')
+            .replace('-PERP', '')
+            .replace('PERP', '');
+        };
+        const filtered = symbolsEnv.split(',').map(s => s.trim()).filter(s => {
+          const normalized = normalizeSymbol(s);
+          return this.blacklistedSymbols.has(normalized);
+        });
+        this.logger.warn(
+          `Filtered out blacklisted symbols from KEEPER_SYMBOLS: ${filtered.join(', ')}`
+        );
+      }
     } else {
       this.logger.log(
-        `Scheduler initialized - will auto-discover all assets on first run`
+        `Scheduler initialized - will auto-discover all assets on first run (excluding blacklisted symbols)`
       );
     }
     
@@ -169,6 +241,26 @@ export class PerpKeeperScheduler implements OnModuleInit {
   }
 
   /**
+   * Normalize symbol for blacklist checking (matches FundingRateAggregator normalization)
+   */
+  private normalizeSymbolForBlacklist(symbol: string): string {
+    return symbol
+      .toUpperCase()
+      .replace('USDT', '')
+      .replace('USDC', '')
+      .replace('-PERP', '')
+      .replace('PERP', '');
+  }
+
+  /**
+   * Check if a symbol is blacklisted
+   */
+  private isBlacklisted(symbol: string): boolean {
+    const normalized = this.normalizeSymbolForBlacklist(symbol);
+    return this.blacklistedSymbols.has(normalized);
+  }
+
+  /**
    * Discover all common assets across exchanges (with caching)
    */
   private async discoverAssetsIfNeeded(): Promise<string[]> {
@@ -176,17 +268,37 @@ export class PerpKeeperScheduler implements OnModuleInit {
     
     // Use cache if available and fresh
     if (this.symbols.length > 0 && (now - this.lastDiscoveryTime) < this.DISCOVERY_CACHE_TTL) {
+      // Still filter blacklisted symbols from cache (defensive)
+      const filtered = this.symbols.filter(s => !this.isBlacklisted(s));
+      if (filtered.length !== this.symbols.length) {
+        const removed = this.symbols.filter(s => this.isBlacklisted(s));
+        this.logger.warn(`Filtered ${removed.length} blacklisted symbols from cache: ${removed.join(', ')}`);
+        this.symbols = filtered;
+      }
       return this.symbols;
     }
 
     // Auto-discover all assets
     try {
       this.logger.log('Auto-discovering all available assets across exchanges...');
-      this.symbols = await this.orchestrator.discoverCommonAssets();
+      const discoveredSymbols = await this.orchestrator.discoverCommonAssets();
+      
+      // Filter out blacklisted symbols using normalized comparison
+      this.symbols = discoveredSymbols.filter(s => !this.isBlacklisted(s));
       this.lastDiscoveryTime = now;
-      this.logger.log(
-        `Auto-discovery complete: Found ${this.symbols.length} common assets: ${this.symbols.join(', ')}`
-      );
+      
+      const filteredCount = discoveredSymbols.length - this.symbols.length;
+      if (filteredCount > 0) {
+        const filtered = discoveredSymbols.filter(s => this.isBlacklisted(s));
+        this.logger.log(
+          `Auto-discovery complete: Found ${discoveredSymbols.length} common assets, ` +
+          `filtered out ${filteredCount} blacklisted: ${filtered.join(', ')}`
+        );
+      } else {
+        this.logger.log(
+          `Auto-discovery complete: Found ${this.symbols.length} common assets: ${this.symbols.join(', ')}`
+        );
+      }
       return this.symbols;
     } catch (error: any) {
       this.logger.error(`Asset discovery failed: ${error.message}`);
@@ -261,27 +373,46 @@ export class PerpKeeperScheduler implements OnModuleInit {
         return;
       }
 
+      // Filter out blacklisted symbols before finding opportunities (defensive check)
+      const filteredSymbols = symbols.filter(s => !this.isBlacklisted(s));
+      if (filteredSymbols.length !== symbols.length) {
+        const filtered = symbols.filter(s => this.isBlacklisted(s));
+        this.logger.warn(
+          `⚠️ Filtered out ${filtered.length} blacklisted symbols before opportunity search: ${filtered.join(', ')}`
+        );
+      }
+
       // Find opportunities across ALL discovered assets (with progress bar)
-      this.logger.log(`🔍 Searching for arbitrage opportunities across ${symbols.length} assets...`);
-      const allOpportunities = await this.orchestrator.findArbitrageOpportunities(
-        symbols,
+      this.logger.log(`🔍 Searching for arbitrage opportunities across ${filteredSymbols.length} assets...`);
+      const opportunities = await this.orchestrator.findArbitrageOpportunities(
+        filteredSymbols,
         this.minSpread,
         true, // Show progress bar
       );
 
-      // Filter out opportunities that failed after 5 retries
-      const opportunities = allOpportunities.filter((opp) => {
-        const filterKey = this.getRetryKey(opp.symbol, opp.longExchange, opp.shortExchange);
-        if (this.filteredOpportunities.has(filterKey)) {
-          this.logger.debug(
-            `Skipping filtered opportunity ${opp.symbol} (${opp.longExchange}/${opp.shortExchange})`,
+      // Filter out any opportunities for blacklisted symbols (defensive check)
+      const filteredOpportunities = opportunities.filter(
+        opp => !this.isBlacklisted(opp.symbol)
+      );
+      if (filteredOpportunities.length !== opportunities.length) {
+        const filtered = opportunities.filter(opp => this.isBlacklisted(opp.symbol));
+        const filteredSymbolsList = [...new Set(filtered.map(opp => opp.symbol))];
+        this.logger.warn(
+          `⚠️ Filtered out ${filtered.length} opportunities for blacklisted symbols: ${filteredSymbolsList.join(', ')}`
+        );
+        // Debug: Log blacklist status
+        this.logger.log(
+          `🔍 Blacklist check: Current blacklist contains: ${Array.from(this.blacklistedSymbols).join(', ')}`
+        );
+        filteredSymbolsList.forEach(symbol => {
+          const normalized = this.normalizeSymbolForBlacklist(symbol);
+          this.logger.log(
+            `🔍 Symbol "${symbol}" normalized to "${normalized}", blacklisted: ${this.blacklistedSymbols.has(normalized)}`
           );
-          return false;
-        }
-        return true;
-      });
+        });
+      }
 
-      this.logger.log(`Found ${opportunities.length} arbitrage opportunities (${allOpportunities.length - opportunities.length} filtered out)`);
+      this.logger.log(`Found ${filteredOpportunities.length} arbitrage opportunities (after blacklist filter)`);
 
       // STEP 1: Close all existing positions to free up margin for rebalancing
       // This ensures we can use locked margin when rebalancing funds
@@ -358,7 +489,7 @@ export class PerpKeeperScheduler implements OnModuleInit {
       // Move funds from exchanges without opportunities to exchanges with opportunities
       try {
         this.logger.log('🔄 Rebalancing exchange balances based on opportunities...');
-        const rebalanceResult = await this.keeperService.rebalanceExchangeBalances(opportunities);
+        const rebalanceResult = await this.keeperService.rebalanceExchangeBalances(filteredOpportunities);
         if (rebalanceResult.transfersExecuted > 0) {
           this.logger.log(
             `✅ Rebalanced ${rebalanceResult.transfersExecuted} transfers, ` +
@@ -380,14 +511,16 @@ export class PerpKeeperScheduler implements OnModuleInit {
         // Don't fail the entire execution if rebalancing fails
       }
 
-      if (opportunities.length === 0) {
-        this.logger.log('No opportunities found, skipping execution');
+      if (filteredOpportunities.length === 0) {
+        this.logger.log('No opportunities found (after blacklist filter), skipping execution');
         return;
       }
 
-      // Execute strategy across ALL discovered assets
+      // Execute strategy across filtered assets (defensive: filter symbols again)
+      const symbolsToExecute = filteredSymbols.filter(s => !this.isBlacklisted(s));
+      this.logger.log(`Executing strategy with ${symbolsToExecute.length} symbols (blacklist applied)`);
       const result = await this.orchestrator.executeArbitrageStrategy(
-        symbols,
+        symbolsToExecute,
         this.minSpread,
         this.maxPositionSizeUsd,
       );
@@ -409,6 +542,8 @@ export class PerpKeeperScheduler implements OnModuleInit {
         `Expected return: $${result.totalExpectedReturn.toFixed(2)}, ` +
         `Orders placed: ${result.ordersPlaced}`,
       );
+
+        const positionsResult = await this.orchestrator.getAllPositionsWithMetrics();
 
       if (result.errors.length > 0) {
         this.logger.warn(`Execution had ${result.errors.length} errors:`, result.errors);

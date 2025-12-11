@@ -527,6 +527,28 @@ export class FundingRateAggregator {
             // If we have both long and short opportunities on different exchanges, create arbitrage
             // This works for ALL cases: both negative, both positive, or mixed signs
             if (bestLong && bestShort && bestLong.exchange !== bestShort.exchange) {
+              // Validate that both exchanges actually support this symbol for trading
+              const mapping = this.getSymbolMapping(symbol);
+              const longSymbolSupported = mapping && (
+                (bestLong.exchange === ExchangeType.ASTER && mapping.asterSymbol) ||
+                (bestLong.exchange === ExchangeType.LIGHTER && mapping.lighterMarketIndex !== undefined) ||
+                (bestLong.exchange === ExchangeType.HYPERLIQUID && mapping.hyperliquidSymbol)
+              );
+              const shortSymbolSupported = mapping && (
+                (bestShort.exchange === ExchangeType.ASTER && mapping.asterSymbol) ||
+                (bestShort.exchange === ExchangeType.LIGHTER && mapping.lighterMarketIndex !== undefined) ||
+                (bestShort.exchange === ExchangeType.HYPERLIQUID && mapping.hyperliquidSymbol)
+              );
+
+              if (!longSymbolSupported || !shortSymbolSupported) {
+                // Skip this opportunity - one or both exchanges don't support trading this symbol
+                // (even though they may have funding rate data)
+                this.logger.debug(
+                  `Skipping ${symbol} opportunity: ${bestLong.exchange} supported=${!!longSymbolSupported}, ${bestShort.exchange} supported=${!!shortSymbolSupported}`
+                );
+                return [];
+              }
+
               const longRate = Percentage.fromDecimal(bestLong.currentRate);
               const shortRate = Percentage.fromDecimal(bestShort.currentRate);
               // Spread = shortRate - longRate (positive when profitable)
@@ -561,6 +583,63 @@ export class FundingRateAggregator {
               }
             }
 
+            // Also check for simple spread arbitrage (long on highest, short on lowest)
+            if (comparison.highestRate && comparison.lowestRate && 
+                comparison.highestRate.exchange !== comparison.lowestRate.exchange) {
+              // Validate that both exchanges actually support this symbol for trading
+              const mapping = this.getSymbolMapping(symbol);
+              const highestSymbolSupported = mapping && (
+                (comparison.highestRate.exchange === ExchangeType.ASTER && mapping.asterSymbol) ||
+                (comparison.highestRate.exchange === ExchangeType.LIGHTER && mapping.lighterMarketIndex !== undefined) ||
+                (comparison.highestRate.exchange === ExchangeType.HYPERLIQUID && mapping.hyperliquidSymbol)
+              );
+              const lowestSymbolSupported = mapping && (
+                (comparison.lowestRate.exchange === ExchangeType.ASTER && mapping.asterSymbol) ||
+                (comparison.lowestRate.exchange === ExchangeType.LIGHTER && mapping.lighterMarketIndex !== undefined) ||
+                (comparison.lowestRate.exchange === ExchangeType.HYPERLIQUID && mapping.hyperliquidSymbol)
+              );
+
+              if (!highestSymbolSupported || !lowestSymbolSupported) {
+                // Skip this opportunity - one or both exchanges don't support trading this symbol
+                this.logger.debug(
+                  `Skipping ${symbol} spread opportunity: ${comparison.highestRate.exchange} supported=${!!highestSymbolSupported}, ${comparison.lowestRate.exchange} supported=${!!lowestSymbolSupported}`
+                );
+                return [];
+              }
+
+              const longRate = Percentage.fromDecimal(comparison.highestRate.currentRate);
+              const shortRate = Percentage.fromDecimal(comparison.lowestRate.currentRate);
+              const spread = longRate.subtract(shortRate);
+              
+              if (spread.toDecimal() >= minSpread) {
+                // Funding rates are typically hourly
+                const periodsPerDay = 24; // Hourly funding periods
+                const periodsPerYear = periodsPerDay * 365;
+                const expectedReturn = Percentage.fromDecimal(spread.toDecimal() * periodsPerYear);
+
+                const highestRate = comparison.highestRate;
+                const lowestRate = comparison.lowestRate;
+                const highestMarkPrice = highestRate.markPrice > 0 ? highestRate.markPrice : undefined;
+                const lowestMarkPrice = lowestRate.markPrice > 0 ? lowestRate.markPrice : undefined;
+
+                symbolOpportunities.push({
+                  symbol,
+                  longExchange: highestRate.exchange,
+                  shortExchange: lowestRate.exchange,
+                  longRate,
+                  shortRate,
+                  spread: Percentage.fromDecimal(Math.abs(spread.toDecimal())),
+                  expectedReturn,
+                  longMarkPrice: highestMarkPrice,
+                  shortMarkPrice: lowestMarkPrice,
+                  longOpenInterest: highestRate.openInterest !== undefined && highestRate.openInterest > 0 ? highestRate.openInterest : undefined,
+                  shortOpenInterest: lowestRate.openInterest !== undefined && lowestRate.openInterest > 0 ? lowestRate.openInterest : undefined,
+                  timestamp: new Date(),
+                });
+              }
+            }
+
+>>>>>>> f8ad4ef224d979acf8cf19008e9c466cb3b3699f
             return symbolOpportunities;
           } catch (error: any) {
             // Only log actual errors (not expected failures like missing data)

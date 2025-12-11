@@ -448,35 +448,94 @@ export class FundingArbitrageStrategy {
     };
 
     try {
-      // Find arbitrage opportunities
+      // Load blacklist from config (defensive filtering at strategy level)
+      const blacklistEnv = this.configService.get<string>('KEEPER_BLACKLISTED_SYMBOLS');
+      const normalizeSymbol = (symbol: string): string => {
+        return symbol
+          .trim()
+          .toUpperCase()
+          .replace('USDT', '')
+          .replace('USDC', '')
+          .replace('-PERP', '')
+          .replace('PERP', '');
+      };
+      
+      let blacklistedSymbols: Set<string> = new Set();
+      if (blacklistEnv) {
+        blacklistedSymbols = new Set(
+          blacklistEnv
+            .split(',')
+            .map(s => s.trim())
+            .filter(s => s.length > 0)
+            .map(s => normalizeSymbol(s))
+        );
+      } else {
+        // Default: NVDA
+        blacklistedSymbols = new Set(['NVDA']);
+      }
+      
+      // Filter symbols before finding opportunities
+      const filteredSymbols = symbols.filter(s => {
+        const normalized = normalizeSymbol(s);
+        return !blacklistedSymbols.has(normalized);
+      });
+      
+      if (filteredSymbols.length !== symbols.length) {
+        const filtered = symbols.filter(s => {
+          const normalized = normalizeSymbol(s);
+          return blacklistedSymbols.has(normalized);
+        });
+        this.logger.warn(
+          `🚫 Strategy-level blacklist: Filtered out ${filtered.length} blacklisted symbols: ${filtered.join(', ')}`
+        );
+      }
+
+      // Find arbitrage opportunities (using filtered symbols)
       const opportunities = await this.aggregator.findArbitrageOpportunities(
-        symbols,
+        filteredSymbols,
         minSpread || this.strategyConfig.defaultMinSpread.toDecimal(),
       );
 
-      result.opportunitiesEvaluated = opportunities.length;
+      // Filter opportunities again (defensive check)
+      const filteredOpportunities = opportunities.filter(opp => {
+        const normalized = normalizeSymbol(opp.symbol);
+        return !blacklistedSymbols.has(normalized);
+      });
+      
+      if (filteredOpportunities.length !== opportunities.length) {
+        const filtered = opportunities.filter(opp => {
+          const normalized = normalizeSymbol(opp.symbol);
+          return blacklistedSymbols.has(normalized);
+        });
+        const filteredSymbolsList = [...new Set(filtered.map(opp => opp.symbol))];
+        this.logger.warn(
+          `🚫 Strategy-level blacklist: Filtered out ${filtered.length} opportunities for blacklisted symbols: ${filteredSymbolsList.join(', ')}`
+        );
+      }
+
+      result.opportunitiesEvaluated = filteredOpportunities.length;
 
       this.logger.debug(
-        `Found ${opportunities.length} arbitrage opportunities`,
+        `Found ${filteredOpportunities.length} arbitrage opportunities (after blacklist filter)`,
       );
 
-      // Emit events for discovered opportunities
+      // Emit events for discovered opportunities (only non-blacklisted)
       if (this.eventBus) {
-        for (const opportunity of opportunities) {
+        for (const opportunity of filteredOpportunities) {
           await this.eventBus.publish(
             new ArbitrageOpportunityDiscoveredEvent(opportunity, opportunity.symbol),
           );
         }
       }
 
-      if (opportunities.length === 0) {
+      if (filteredOpportunities.length === 0) {
         return result;
       }
 
       // Pre-fetch balances for all unique exchanges to reduce API calls
       // This batches balance calls instead of calling for each opportunity
       const uniqueExchanges = new Set<ExchangeType>();
-      opportunities.forEach((opp) => {
+      filteredOpportunities.forEach((opp) => {
         uniqueExchanges.add(opp.longExchange);
         uniqueExchanges.add(opp.shortExchange);
       });
@@ -545,7 +604,7 @@ export class FundingArbitrageStrategy {
         }
       }
 
-      // Evaluate all opportunities and create execution plans
+      // Evaluate all opportunities and create execution plans (using filtered opportunities)
       // Process sequentially with delays to avoid rate limits
       // Mark prices are already included in the opportunity object from funding rate data
       // Then select the MOST PROFITABLE one (highest expected return)
@@ -564,8 +623,8 @@ export class FundingArbitrageStrategy {
         shortBidAsk: { bestBid: number; bestAsk: number } | null;
       }> = [];
 
-      for (let i = 0; i < opportunities.length; i++) {
-        const opportunity = opportunities[i];
+      for (let i = 0; i < filteredOpportunities.length; i++) {
+        const opportunity = filteredOpportunities[i];
 
         try {
           // Use pre-fetched balances instead of calling getBalance() in createExecutionPlan
