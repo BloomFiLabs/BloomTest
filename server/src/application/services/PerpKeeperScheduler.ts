@@ -280,7 +280,6 @@ export class PerpKeeperScheduler implements OnModuleInit {
 
     // Auto-discover all assets
     try {
-      this.logger.log('Auto-discovering all available assets across exchanges...');
       const discoveredSymbols = await this.orchestrator.discoverCommonAssets();
       
       // Filter out blacklisted symbols using normalized comparison
@@ -291,12 +290,7 @@ export class PerpKeeperScheduler implements OnModuleInit {
       if (filteredCount > 0) {
         const filtered = discoveredSymbols.filter(s => this.isBlacklisted(s));
         this.logger.log(
-          `Auto-discovery complete: Found ${discoveredSymbols.length} common assets, ` +
-          `filtered out ${filteredCount} blacklisted: ${filtered.join(', ')}`
-        );
-      } else {
-        this.logger.log(
-          `Auto-discovery complete: Found ${this.symbols.length} common assets: ${this.symbols.join(', ')}`
+          `Auto-discovery: ${discoveredSymbols.length} assets, filtered ${filteredCount} blacklisted`
         );
       }
       return this.symbols;
@@ -375,49 +369,23 @@ export class PerpKeeperScheduler implements OnModuleInit {
 
       // Filter out blacklisted symbols before finding opportunities (defensive check)
       const filteredSymbols = symbols.filter(s => !this.isBlacklisted(s));
-      if (filteredSymbols.length !== symbols.length) {
-        const filtered = symbols.filter(s => this.isBlacklisted(s));
-        this.logger.warn(
-          `⚠️ Filtered out ${filtered.length} blacklisted symbols before opportunity search: ${filtered.join(', ')}`
-        );
-      }
 
-      // Find opportunities across ALL discovered assets (with progress bar)
-      this.logger.log(`🔍 Searching for arbitrage opportunities across ${filteredSymbols.length} assets...`);
+      // Find opportunities across ALL discovered assets
       const opportunities = await this.orchestrator.findArbitrageOpportunities(
         filteredSymbols,
         this.minSpread,
-        true, // Show progress bar
+        false, // Hide progress bar
       );
 
       // Filter out any opportunities for blacklisted symbols (defensive check)
       const filteredOpportunities = opportunities.filter(
         opp => !this.isBlacklisted(opp.symbol)
       );
-      if (filteredOpportunities.length !== opportunities.length) {
-        const filtered = opportunities.filter(opp => this.isBlacklisted(opp.symbol));
-        const filteredSymbolsList = [...new Set(filtered.map(opp => opp.symbol))];
-        this.logger.warn(
-          `⚠️ Filtered out ${filtered.length} opportunities for blacklisted symbols: ${filteredSymbolsList.join(', ')}`
-        );
-        // Debug: Log blacklist status
-        this.logger.log(
-          `🔍 Blacklist check: Current blacklist contains: ${Array.from(this.blacklistedSymbols).join(', ')}`
-        );
-        filteredSymbolsList.forEach(symbol => {
-          const normalized = this.normalizeSymbolForBlacklist(symbol);
-          this.logger.log(
-            `🔍 Symbol "${symbol}" normalized to "${normalized}", blacklisted: ${this.blacklistedSymbols.has(normalized)}`
-          );
-        });
-      }
 
-      this.logger.log(`Found ${filteredOpportunities.length} arbitrage opportunities (after blacklist filter)`);
+      this.logger.log(`Found ${filteredOpportunities.length} arbitrage opportunities`);
 
       // STEP 1: Close all existing positions to free up margin for rebalancing
-      // This ensures we can use locked margin when rebalancing funds
       try {
-        this.logger.log('🔍 Checking for existing positions to close before rebalancing...');
         const positionsResult = await this.orchestrator.getAllPositionsWithMetrics();
         const allPositions = positionsResult.positions;
         if (allPositions.length > 0) {
@@ -433,10 +401,9 @@ export class PerpKeeperScheduler implements OnModuleInit {
               const retrySuccess = await this.tryOpenMissingSide(position);
               
               if (!retrySuccess) {
-                // Retries failed - close the position
+                // Retries exhausted - close the position
                 this.logger.error(
-                  `🚨 Closing single-leg position ${position.symbol} (${position.side}) on ${position.exchangeType} ` +
-                  `after retry attempts failed`,
+                  `🚨 Closing single-leg position ${position.symbol} (${position.side}) on ${position.exchangeType} after retries failed`,
                 );
                 await this.closeSingleLegPosition(position);
               }
@@ -448,10 +415,7 @@ export class PerpKeeperScheduler implements OnModuleInit {
             const stillSingleLeg = this.detectSingleLegPositions(updatedPositions);
             
             if (stillSingleLeg.length > 0) {
-              this.logger.error(
-                `🚨 Still have ${stillSingleLeg.length} single-leg position(s) after retries. Closing them...`,
-              );
-              // Close remaining single-leg positions with progressive price improvement
+              // Close remaining single-leg positions
               for (const position of stillSingleLeg) {
                 await this.closeSingleLegPosition(position);
               }
@@ -466,19 +430,16 @@ export class PerpKeeperScheduler implements OnModuleInit {
             allPositions.push(...remainingPositions);
           }
           
-          // Close remaining positions (non-single-leg) with progressive price improvement
+          // Close remaining positions (non-single-leg)
           if (allPositions.length > 0) {
-            this.logger.log(`🔄 Closing ${allPositions.length} existing position(s) to free up margin...`);
+            this.logger.log(`🔄 Closing ${allPositions.length} existing position(s)...`);
             for (const position of allPositions) {
               await this.closePositionWithRetry(position);
             }
           }
           
           // Wait for positions to settle and margin to be freed
-          this.logger.log('⏳ Waiting 2 seconds for positions to settle and margin to be freed...');
           await new Promise(resolve => setTimeout(resolve, 2000));
-        } else {
-          this.logger.log('✅ No existing positions to close');
         }
       } catch (error: any) {
         this.logger.warn(`Failed to close existing positions: ${error.message}`);
@@ -486,25 +447,13 @@ export class PerpKeeperScheduler implements OnModuleInit {
       }
 
       // STEP 2: Rebalance exchange balances based on opportunities
-      // Move funds from exchanges without opportunities to exchanges with opportunities
       try {
-        this.logger.log('🔄 Rebalancing exchange balances based on opportunities...');
         const rebalanceResult = await this.keeperService.rebalanceExchangeBalances(filteredOpportunities);
         if (rebalanceResult.transfersExecuted > 0) {
           this.logger.log(
-            `✅ Rebalanced ${rebalanceResult.transfersExecuted} transfers, ` +
-            `$${rebalanceResult.totalTransferred.toFixed(2)} total transferred ` +
-            `(moved funds from inactive exchanges to active ones)`
+            `✅ Rebalanced ${rebalanceResult.transfersExecuted} transfers, $${rebalanceResult.totalTransferred.toFixed(2)} total`
           );
-          if (rebalanceResult.errors.length > 0) {
-            this.logger.warn(`⚠️ Rebalancing had ${rebalanceResult.errors.length} errors`);
-          }
-          
-          // Wait a bit for transfers to settle before executing trades
-          this.logger.log('⏳ Waiting 3 seconds for transfers to settle...');
           await new Promise(resolve => setTimeout(resolve, 3000));
-        } else {
-          this.logger.log('✅ Exchange balances are balanced, no rebalancing needed');
         }
       } catch (error: any) {
         this.logger.warn(`Failed to rebalance exchange balances: ${error.message}`);
@@ -516,9 +465,8 @@ export class PerpKeeperScheduler implements OnModuleInit {
         return;
       }
 
-      // Execute strategy across filtered assets (defensive: filter symbols again)
+      // Execute strategy across filtered assets
       const symbolsToExecute = filteredSymbols.filter(s => !this.isBlacklisted(s));
-      this.logger.log(`Executing strategy with ${symbolsToExecute.length} symbols (blacklist applied)`);
       const result = await this.orchestrator.executeArbitrageStrategy(
         symbolsToExecute,
         this.minSpread,
@@ -665,6 +613,7 @@ export class PerpKeeperScheduler implements OnModuleInit {
   /**
    * Check for single-leg positions and try to open missing side
    * Called periodically to handle single-leg positions detected outside of execution cycle
+   * Policy: After all retries fail, close the single leg and move to next opportunity
    */
   private async checkAndRetrySingleLegPositions(): Promise<void> {
     try {
@@ -678,7 +627,7 @@ export class PerpKeeperScheduler implements OnModuleInit {
       const singleLegPositions = this.detectSingleLegPositions(allPositions);
       if (singleLegPositions.length > 0) {
         this.logger.warn(
-          `⚠️ Detected ${singleLegPositions.length} single-leg position(s) during periodic check. Attempting to open missing side...`,
+          `⚠️ Detected ${singleLegPositions.length} single-leg position(s). Attempting to open missing side...`,
         );
         
         // Try to open missing side for each single-leg position
@@ -686,16 +635,17 @@ export class PerpKeeperScheduler implements OnModuleInit {
           const retrySuccess = await this.tryOpenMissingSide(position);
           
           if (!retrySuccess) {
-            // Retries failed - log but don't close here (let execution cycle handle it)
+            // Retries exhausted - close the single leg position
             this.logger.error(
-              `🚨 Single-leg position ${position.symbol} (${position.side}) on ${position.exchangeType} ` +
-              `still missing after retry attempts. Will be handled in next execution cycle!`,
+              `🚨 Closing single-leg position ${position.symbol} (${position.side}) on ${position.exchangeType} ` +
+              `after all retry attempts failed. Will open 2 legs on next best opportunity.`,
             );
+            await this.closeSingleLegPosition(position);
           }
         }
       }
     } catch (error: any) {
-      this.logger.debug(`Failed to check single-leg positions: ${error.message}`);
+      // Silently fail to avoid spam
     }
   }
 
@@ -886,10 +836,9 @@ export class PerpKeeperScheduler implements OnModuleInit {
   @Interval(600000) // Every 10 minutes (600000 ms)
   async checkWalletBalancePeriodically() {
     try {
-      this.logger.debug('🔍 Periodic wallet balance check (every 10 minutes)...');
       await this.checkAndDepositWalletFunds();
     } catch (error: any) {
-      this.logger.debug(`Periodic wallet balance check failed: ${error.message}`);
+      // Silently fail
     }
   }
 
@@ -901,56 +850,25 @@ export class PerpKeeperScheduler implements OnModuleInit {
     try {
       const walletBalance = await this.getWalletUsdcBalance();
       if (walletBalance <= 0) {
-        this.logger.debug('No USDC in wallet, skipping deposit');
         return;
       }
 
-      this.logger.log(
-        `💰 Found $${walletBalance.toFixed(2)} USDC in wallet, checking if deposits are needed...`,
-      );
+      this.logger.log(`💰 Found $${walletBalance.toFixed(2)} USDC in wallet, depositing to exchanges...`);
 
       // Get all exchange adapters
       const adapters = this.keeperService.getExchangeAdapters();
       if (adapters.size === 0) {
-        this.logger.debug('No exchange adapters available, skipping deposit');
-        return;
-      }
-
-      // Get current balances on all exchanges for logging
-      const exchangeBalances = new Map<ExchangeType, number>();
-      for (const [exchange, adapter] of adapters) {
-        try {
-          const balance = await adapter.getBalance();
-          exchangeBalances.set(exchange, balance);
-        } catch (error: any) {
-          this.logger.debug(
-            `Failed to get balance for ${exchange}: ${error.message}`,
-          );
-          exchangeBalances.set(exchange, 0);
-        }
-      }
-
-      // Log current balances
-      this.logger.log('Current exchange balances:');
-      for (const [exchange, balance] of exchangeBalances) {
-        this.logger.log(`  ${exchange}: $${balance.toFixed(2)}`);
-      }
-
-      // Distribute wallet funds equally to all exchanges (scalable approach)
-      const exchangesToDeposit = Array.from(adapters.keys());
-      if (exchangesToDeposit.length === 0) {
-        this.logger.debug('No exchanges available for deposit');
         return;
       }
 
       // Distribute wallet funds equally to all exchanges
+      const exchangesToDeposit = Array.from(adapters.keys());
+      if (exchangesToDeposit.length === 0) {
+        return;
+      }
+
       let remainingWalletBalance = walletBalance;
       const amountPerExchange = walletBalance / exchangesToDeposit.length;
-
-      this.logger.log(
-        `📊 Distributing $${walletBalance.toFixed(2)} equally to ${exchangesToDeposit.length} exchange(s): ` +
-        `$${amountPerExchange.toFixed(2)} per exchange`,
-      );
 
       for (const exchange of exchangesToDeposit) {
         if (remainingWalletBalance <= 0) {
@@ -963,51 +881,24 @@ export class PerpKeeperScheduler implements OnModuleInit {
         const depositAmount = Math.min(amountPerExchange, remainingWalletBalance);
         if (depositAmount < 5) {
           // Minimum deposit is usually $5
-          this.logger.debug(
-            `Skipping deposit to ${exchange}: amount too small ($${depositAmount.toFixed(2)})`,
-          );
           continue;
         }
 
         try {
-          this.logger.log(
-            `📥 Depositing $${depositAmount.toFixed(2)} from wallet to ${exchange}...`,
-          );
           await adapter.depositExternal(depositAmount, 'USDC');
-          this.logger.log(
-            `✅ Successfully deposited $${depositAmount.toFixed(2)} to ${exchange}`,
-          );
+          this.logger.log(`✅ Deposited $${depositAmount.toFixed(2)} to ${exchange}`);
           remainingWalletBalance -= depositAmount;
-          // Wait a bit between deposits to avoid rate limits
           await new Promise((resolve) => setTimeout(resolve, 2000));
         } catch (error: any) {
           // Check if it's a 404 error (endpoint doesn't exist) - Aster may require on-chain deposits
           if (error.message?.includes('404') || error.message?.includes('on-chain')) {
-            this.logger.warn(
-              `⚠️ ${exchange} deposits may require on-chain transactions. ` +
-              `Skipping deposit to ${exchange}. Funds remain in wallet. ` +
-              `Error: ${error.message}`,
-            );
-            // Don't subtract from remaining balance - funds stay in wallet
             continue;
           }
-          this.logger.warn(
-            `Failed to deposit $${depositAmount.toFixed(2)} to ${exchange}: ${error.message}`,
-          );
-          // Don't subtract on error - funds remain in wallet for retry
+          // Silently fail - will retry next cycle
         }
       }
-
-      if (remainingWalletBalance < walletBalance) {
-        const deposited = walletBalance - remainingWalletBalance;
-        this.logger.log(
-          `✅ Wallet deposit cycle complete: Deposited $${deposited.toFixed(2)} of $${walletBalance.toFixed(2)} total`,
-        );
-      }
     } catch (error: any) {
-      this.logger.debug(
-        `Error checking/depositing wallet funds: ${error.message}`,
-      );
+      // Silently fail
     }
   }
 
@@ -1026,7 +917,6 @@ export class PerpKeeperScheduler implements OnModuleInit {
                            this.configService.get<string>('CENTRAL_WALLET_ADDRESS');
       
       if (!privateKey && !walletAddress) {
-        this.logger.debug('No PRIVATE_KEY or WALLET_ADDRESS configured, skipping wallet balance check');
         return 0;
       }
 
@@ -1046,20 +936,13 @@ export class PerpKeeperScheduler implements OnModuleInit {
       let address: string;
       if (walletAddress) {
         address = walletAddress;
-        this.logger.debug(`Using WALLET_ADDRESS from config: ${address}`);
       } else if (privateKey) {
         const normalizedKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
         const wallet = new Wallet(normalizedKey);
         address = wallet.address;
-        this.logger.debug(`Derived address from PRIVATE_KEY: ${address}`);
       } else {
         return 0;
       }
-
-      this.logger.log(
-        `🔍 Checking USDC balance on Arbitrum for address: ${address} ` +
-        `(USDC contract: ${usdcAddress})`,
-      );
 
       // Check USDC balance
       const usdcContract = new Contract(usdcAddress, erc20Abi, provider);
@@ -1067,13 +950,12 @@ export class PerpKeeperScheduler implements OnModuleInit {
       const decimals = await usdcContract.decimals();
       const balanceUsd = parseFloat(formatUnits(balance, decimals));
 
-      this.logger.log(
-        `💰 USDC balance on Arbitrum for ${address}: $${balanceUsd.toFixed(2)} USDC`,
-      );
+      if (balanceUsd > 0) {
+        this.logger.log(`💰 USDC balance on Arbitrum: $${balanceUsd.toFixed(2)}`);
+      }
 
       return balanceUsd;
     } catch (error: any) {
-      this.logger.debug(`Failed to get wallet USDC balance on Arbitrum: ${error.message}`);
       return 0;
     }
   }
@@ -1111,9 +993,6 @@ export class PerpKeeperScheduler implements OnModuleInit {
       // Find opportunity for this symbol to determine which exchange should have the missing side
       const comparison = await this.orchestrator.compareFundingRates(position.symbol);
       if (!comparison || comparison.rates.length < 2) {
-        this.logger.warn(
-          `No opportunity found for ${position.symbol} - cannot determine missing exchange`,
-        );
         return false;
       }
 
@@ -1136,9 +1015,6 @@ export class PerpKeeperScheduler implements OnModuleInit {
       
       // Check if already filtered out
       if (this.filteredOpportunities.has(retryKey)) {
-        this.logger.debug(
-          `Opportunity ${position.symbol} (${expectedLongExchange}/${expectedShortExchange}) already filtered out`,
-        );
         return false;
       }
 
@@ -1156,23 +1032,17 @@ export class PerpKeeperScheduler implements OnModuleInit {
 
       // Check retry count
       if (retryInfo.retryCount >= 5) {
-        this.logger.error(
-          `❌ Filtering out ${position.symbol} (${expectedLongExchange}/${expectedShortExchange}) ` +
-          `after 5 failed retry attempts`,
-        );
         this.filteredOpportunities.add(retryKey);
         return false;
       }
 
       // Try to open missing side
       this.logger.log(
-        `🔄 Retry ${retryInfo.retryCount + 1}/5: Attempting to open missing ${missingSide} side ` +
-        `for ${position.symbol} on ${missingExchange}...`,
+        `🔄 Retry ${retryInfo.retryCount + 1}/5: Opening missing ${missingSide} side for ${position.symbol} on ${missingExchange}`,
       );
 
       const adapter = this.keeperService.getExchangeAdapter(missingExchange);
       if (!adapter) {
-        this.logger.warn(`No adapter found for ${missingExchange}`);
         retryInfo.retryCount++;
         retryInfo.lastRetryTime = new Date();
         return false;
@@ -1204,42 +1074,26 @@ export class PerpKeeperScheduler implements OnModuleInit {
         );
 
         if (positionOpened) {
-          this.logger.log(
-            `✅ Successfully opened missing ${missingSide} side for ${position.symbol} on ${missingExchange}`,
-          );
+          this.logger.log(`✅ Opened missing ${missingSide} side for ${position.symbol} on ${missingExchange}`);
           // Reset retry count on success
           this.singleLegRetries.delete(retryKey);
           return true;
-        } else {
-          this.logger.warn(
-            `⚠️ Order placed but position not detected for ${position.symbol} on ${missingExchange}`,
-          );
         }
       }
 
       // Increment retry count
       retryInfo.retryCount++;
       retryInfo.lastRetryTime = new Date();
-      this.logger.warn(
-        `⚠️ Retry ${retryInfo.retryCount}/5 failed for ${position.symbol}. ` +
-        `Will try again next cycle.`,
-      );
 
       // After 5 retries, filter out this opportunity
       if (retryInfo.retryCount >= 5) {
         this.filteredOpportunities.add(retryKey);
-        this.logger.error(
-          `❌ Filtering out ${position.symbol} (${expectedLongExchange}/${expectedShortExchange}) ` +
-          `after 5 failed retry attempts. Moving to next opportunity.`,
-        );
         return false;
       }
 
       return false;
     } catch (error: any) {
-      this.logger.warn(
-        `Error retrying missing side for ${position.symbol}: ${error.message}`,
-      );
+      // Silently handle errors - retry count will be incremented
       return false;
     }
   }
@@ -1296,12 +1150,7 @@ export class PerpKeeperScheduler implements OnModuleInit {
           );
           
           if (attempt === 0) {
-            this.logger.error(`   🚨 CRITICAL: Closing single-leg position ${position.symbol} (${position.side}) on ${position.exchangeType}...`);
-          } else {
-            this.logger.warn(
-              `   🔄 Retry ${attempt}/${priceImprovements.length - 1}: Closing ${position.symbol} with ` +
-              `${(priceImprovement * 100).toFixed(2)}% worse price`,
-            );
+            this.logger.error(`🚨 Closing single-leg position ${position.symbol} (${position.side}) on ${position.exchangeType}...`);
           }
           
           const closeResponse = await adapter.placeOrder(closeOrder);
@@ -1342,30 +1191,15 @@ export class PerpKeeperScheduler implements OnModuleInit {
           
           if (closeResponse.isFilled() && !positionStillExists) {
             positionClosed = true;
-            if (attempt > 0) {
-              this.logger.log(
-                `   ✅ Successfully closed single-leg position ${position.symbol} on attempt ${attempt + 1} ` +
-                `with ${(priceImprovement * 100).toFixed(2)}% worse price`,
-              );
-            } else {
-              this.logger.log(`   ✅ Successfully closed single-leg position: ${position.symbol} on ${position.exchangeType}`);
-            }
+            this.logger.log(`✅ Closed single-leg position: ${position.symbol} on ${position.exchangeType}`);
             break; // Position closed successfully
           }
           
           if (attempt < priceImprovements.length - 1) {
-            this.logger.warn(
-              `   ⚠️ Close order for ${position.symbol} didn't fill on attempt ${attempt + 1}, ` +
-              `trying with worse price...`,
-            );
             await new Promise(resolve => setTimeout(resolve, 1000)); // Wait before next attempt
           }
         } catch (attemptError: any) {
-          this.logger.warn(
-            `   Error on close attempt ${attempt + 1} for ${position.symbol}: ${attemptError.message}`,
-          );
           if (attempt === priceImprovements.length - 1) {
-            // Last attempt failed
             break;
           }
           await new Promise(resolve => setTimeout(resolve, 1000));
@@ -1374,12 +1208,11 @@ export class PerpKeeperScheduler implements OnModuleInit {
       
       if (!positionClosed) {
         this.logger.error(
-          `   ❌ CRITICAL: Failed to close single-leg position ${position.symbol} on ${position.exchangeType} ` +
-          `after ${priceImprovements.length} attempts with progressive price improvement`,
+          `❌ Failed to close single-leg position ${position.symbol} on ${position.exchangeType} after ${priceImprovements.length} attempts`,
         );
       }
     } catch (error: any) {
-      this.logger.error(`   ❌ CRITICAL: Error closing single-leg position ${position.symbol} on ${position.exchangeType}: ${error.message}`);
+      this.logger.error(`❌ Error closing single-leg position ${position.symbol} on ${position.exchangeType}: ${error.message}`);
     }
   }
 
@@ -1404,7 +1237,6 @@ export class PerpKeeperScheduler implements OnModuleInit {
         true, // Reduce only
       );
       
-      this.logger.log(`   Closing ${position.symbol} on ${position.exchangeType}...`);
       const closeResponse = await adapter.placeOrder(closeOrder);
       
       // Wait and retry if order didn't fill immediately
@@ -1420,7 +1252,6 @@ export class PerpKeeperScheduler implements OnModuleInit {
           try {
             const statusResponse = await adapter.getOrderStatus(closeResponse.orderId, position.symbol);
             if (statusResponse.isFilled()) {
-              this.logger.log(`   ✅ Order filled on attempt ${attempt + 1}/${maxRetries}`);
               break;
             }
             if (statusResponse.status === OrderStatus.CANCELLED || statusResponse.error) {
@@ -1434,7 +1265,7 @@ export class PerpKeeperScheduler implements OnModuleInit {
       
       await new Promise(resolve => setTimeout(resolve, 500));
     } catch (error: any) {
-      this.logger.error(`   Error closing position ${position.symbol} on ${position.exchangeType}: ${error.message}`);
+      this.logger.error(`Error closing position ${position.symbol} on ${position.exchangeType}: ${error.message}`);
     }
   }
 }
