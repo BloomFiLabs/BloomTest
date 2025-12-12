@@ -508,14 +508,51 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
           this.logger.warn(`Order transaction wait failed: ${error.message}`);
         }
 
-        // Check if order was filled immediately or is resting
-        // Lighter doesn't provide immediate fill status, so we mark as SUBMITTED
-        // The actual status can be checked later via getOrderStatus
-        const status = OrderStatus.SUBMITTED;
+        // CRITICAL: Wait a short time and check if order was immediately filled or canceled
+        // Lighter may cancel orders immediately if they don't meet certain conditions
+        await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second wait
+        
+        // Check positions to see if order filled immediately
+        try {
+          const positions = await this.getPositions();
+          const matchingPosition = positions.find(
+            p => p.symbol === request.symbol && 
+                 p.side === request.side &&
+                 Math.abs(p.size) > 0.0001
+          );
+          
+          if (matchingPosition) {
+            // Order filled immediately - check if size matches
+            const expectedSize = request.size;
+            const actualSize = matchingPosition.size;
+            const sizeMatch = Math.abs(actualSize - expectedSize) < 0.0001;
+            
+            if (sizeMatch || actualSize >= expectedSize * 0.9) { // Allow 10% tolerance
+              this.logger.log(
+                `✅ Lighter order ${orderId} filled immediately: ${actualSize.toFixed(4)} ${request.symbol}`
+              );
+              return new PerpOrderResponse(
+                orderId,
+                OrderStatus.FILLED,
+                request.symbol,
+                request.side,
+                request.clientOrderId,
+                actualSize,
+                undefined,
+                undefined,
+                new Date(),
+              );
+            }
+          }
+        } catch (positionError: any) {
+          this.logger.debug(`Could not check positions immediately after order placement: ${positionError.message}`);
+        }
 
+        // Order is resting on the book (or may have been canceled - will be checked in waitForOrderFill)
+        // Mark as SUBMITTED - caller should verify via waitForOrderFill
         return new PerpOrderResponse(
           orderId,
-          status,
+          OrderStatus.SUBMITTED,
           request.symbol,
           request.side,
           request.clientOrderId,
@@ -885,16 +922,57 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
       await this.ensureInitialized();
       
       // Lighter SDK limitation: The @reservoir0x/lighter-ts-sdk doesn't provide a method to query order status
-      // by order ID. This means we can't reliably check if an order has filled.
-      // The SDK only provides order placement methods, not order status queries.
-      // As a workaround, we return SUBMITTED status and rely on position checks to verify fills.
-      // In production, you would need to query Lighter's API directly or implement a custom order tracking system.
-      this.logger.debug('getOrderStatus: Lighter SDK limitation - cannot query order status by ID, using position checks instead');
+      // by order ID. We work around this by checking positions to see if the order filled.
+      // If no matching position exists, the order may be resting on the book or canceled.
       
+      if (!symbol) {
+        this.logger.warn('getOrderStatus: Symbol required for Lighter order status check');
+        return new PerpOrderResponse(
+          orderId,
+          OrderStatus.SUBMITTED,
+          'UNKNOWN',
+          OrderSide.LONG,
+          undefined,
+          undefined,
+          undefined,
+          'Symbol required for Lighter order status check',
+          new Date(),
+        );
+      }
+      
+      // Check positions to see if order filled
+      try {
+        const positions = await this.getPositions();
+        
+        // Try to infer order side from positions (if we have a position for this symbol)
+        // Note: This is imperfect but better than always returning SUBMITTED
+        const matchingPosition = positions.find(
+          p => p.symbol === symbol && Math.abs(p.size) > 0.0001
+        );
+        
+        if (matchingPosition) {
+          // Position exists - order may have filled (but we can't be 100% sure it's this specific order)
+          // Return SUBMITTED to let waitForOrderFill continue checking
+          this.logger.debug(
+            `getOrderStatus: Found position for ${symbol} (${matchingPosition.side}, size: ${matchingPosition.size}), ` +
+            `but cannot confirm if order ${orderId} filled. Returning SUBMITTED.`
+          );
+        } else {
+          // No position found - order may be resting on book or canceled
+          // We can't distinguish between these cases without querying open orders
+          this.logger.debug(
+            `getOrderStatus: No position found for ${symbol}. Order ${orderId} may be resting or canceled.`
+          );
+        }
+      } catch (positionError: any) {
+        this.logger.debug(`Could not check positions for order status: ${positionError.message}`);
+      }
+      
+      // Return SUBMITTED - waitForOrderFill will continue checking positions
       return new PerpOrderResponse(
         orderId,
         OrderStatus.SUBMITTED,
-        symbol || 'UNKNOWN',
+        symbol,
         OrderSide.LONG, // Default, actual side unknown without order data
         undefined,
         undefined,

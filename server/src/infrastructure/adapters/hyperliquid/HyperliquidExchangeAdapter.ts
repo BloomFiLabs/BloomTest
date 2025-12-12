@@ -393,7 +393,9 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
       if (clearinghouseState.assetPositions) {
         for (const assetPos of clearinghouseState.assetPositions) {
           const size = parseFloat(assetPos.position.szi || '0');
-          if (size !== 0) {
+          // Filter out positions with very small sizes (likely rounding errors or stale data)
+          // Use absolute value and check against a minimum threshold
+          if (Math.abs(size) > 0.0001) {
             const side = size > 0 ? OrderSide.LONG : OrderSide.SHORT;
             const entryPrice = parseFloat(assetPos.position.entryPx || '0');
             const unrealizedPnl = parseFloat(assetPos.position.unrealizedPnl || '0');

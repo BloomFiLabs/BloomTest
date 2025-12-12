@@ -174,8 +174,10 @@ export class PerpKeeperOrchestrator {
     for (const [exchangeType, adapter] of this.exchangeAdapters) {
       try {
         const positions = await adapter.getPositions();
-        allPositions.push(...positions);
-        positionsByExchange.set(exchangeType, positions);
+        // Filter out positions with very small sizes (likely rounding errors or stale data)
+        const validPositions = positions.filter(p => Math.abs(p.size) > 0.0001);
+        allPositions.push(...validPositions);
+        positionsByExchange.set(exchangeType, validPositions);
       } catch (error) {
         this.logger.error(`Failed to get positions from ${exchangeType}: ${error.message}`);
       }

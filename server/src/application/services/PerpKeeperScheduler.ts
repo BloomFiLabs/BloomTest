@@ -387,7 +387,8 @@ export class PerpKeeperScheduler implements OnModuleInit {
       // STEP 1: Close all existing positions to free up margin for rebalancing
       try {
         const positionsResult = await this.orchestrator.getAllPositionsWithMetrics();
-        const allPositions = positionsResult.positions;
+        // Filter out positions with very small sizes (likely rounding errors or stale data)
+        const allPositions = positionsResult.positions.filter(p => Math.abs(p.size) > 0.0001);
         if (allPositions.length > 0) {
           // CRITICAL: Detect single-leg positions first (positions without matching pair on another exchange)
           const singleLegPositions = this.detectSingleLegPositions(allPositions);
@@ -409,16 +410,49 @@ export class PerpKeeperScheduler implements OnModuleInit {
               }
             }
             
-            // Refresh positions after retry attempts
+            // Wait for positions to settle after closing
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            // Refresh positions after retry attempts and verify they're closed
             const updatedPositionsResult = await this.orchestrator.getAllPositionsWithMetrics();
-            const updatedPositions = updatedPositionsResult.positions;
+            // Filter out very small positions (stale data)
+            const updatedPositions = updatedPositionsResult.positions.filter(p => Math.abs(p.size) > 0.0001);
             const stillSingleLeg = this.detectSingleLegPositions(updatedPositions);
             
             if (stillSingleLeg.length > 0) {
               // Close remaining single-leg positions
+              this.logger.warn(
+                `⚠️ Still detecting ${stillSingleLeg.length} single-leg position(s) after closing. Closing them...`,
+              );
               for (const position of stillSingleLeg) {
                 await this.closeSingleLegPosition(position);
               }
+              
+              // Wait again and verify
+              await new Promise(resolve => setTimeout(resolve, 3000));
+              const finalPositionsResult = await this.orchestrator.getAllPositionsWithMetrics();
+              const finalPositions = finalPositionsResult.positions.filter(p => Math.abs(p.size) > 0.0001);
+              const finalSingleLeg = this.detectSingleLegPositions(finalPositions);
+              
+              if (finalSingleLeg.length === 0) {
+                this.logger.log(
+                  `✅ All single-leg positions closed. Triggering new opportunity search and idle funds management...`,
+                );
+                // Trigger new opportunity search after closing single-leg positions
+                await this.triggerNewOpportunitySearch();
+              } else {
+                this.logger.warn(
+                  `⚠️ Still detecting ${finalSingleLeg.length} single-leg position(s) after second close attempt. ` +
+                  `This may be stale data - will retry next cycle.`,
+                );
+              }
+            } else {
+              // All positions closed successfully
+              this.logger.log(
+                `✅ All single-leg positions closed. Triggering new opportunity search and idle funds management...`,
+              );
+              // Trigger new opportunity search after closing single-leg positions
+              await this.triggerNewOpportunitySearch();
             }
             
             // Remove single-leg positions from allPositions to avoid double-closing
@@ -508,7 +542,10 @@ export class PerpKeeperScheduler implements OnModuleInit {
    */
   private async updatePerformanceMetrics(): Promise<void> {
     try {
-      const positions = await this.keeperService.getAllPositions();
+      const allPositions = await this.keeperService.getAllPositions();
+      
+      // Filter out positions with very small sizes (likely rounding errors or stale data)
+      const positions = allPositions.filter(p => Math.abs(p.size) > 0.0001);
       
       // Only get funding rates for symbols that have positions (not all discovered symbols)
       // This prevents excessive API calls that cause rate limiting
@@ -618,7 +655,8 @@ export class PerpKeeperScheduler implements OnModuleInit {
   private async checkAndRetrySingleLegPositions(): Promise<void> {
     try {
       const positionsResult = await this.orchestrator.getAllPositionsWithMetrics();
-      const allPositions = positionsResult.positions;
+      // Filter out positions with very small sizes (likely rounding errors or stale data)
+      const allPositions = positionsResult.positions.filter(p => Math.abs(p.size) > 0.0001);
       
       if (allPositions.length === 0) {
         return;
@@ -629,6 +667,8 @@ export class PerpKeeperScheduler implements OnModuleInit {
         this.logger.warn(
           `⚠️ Detected ${singleLegPositions.length} single-leg position(s). Attempting to open missing side...`,
         );
+        
+        let anyClosed = false;
         
         // Try to open missing side for each single-leg position
         for (const position of singleLegPositions) {
@@ -641,11 +681,85 @@ export class PerpKeeperScheduler implements OnModuleInit {
               `after all retry attempts failed. Will open 2 legs on next best opportunity.`,
             );
             await this.closeSingleLegPosition(position);
+            anyClosed = true;
+          }
+        }
+        
+        // If any positions were closed, refresh positions and look for new opportunities
+        if (anyClosed) {
+          // Wait for positions to settle
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          // Refresh positions to ensure we have latest state
+          const refreshedPositionsResult = await this.orchestrator.getAllPositionsWithMetrics();
+          const refreshedPositions = refreshedPositionsResult.positions;
+          
+          // Verify positions are actually closed
+          const stillSingleLeg = this.detectSingleLegPositions(refreshedPositions);
+          if (stillSingleLeg.length === 0) {
+            this.logger.log(
+              `✅ All single-leg positions closed. Looking for new opportunities...`,
+            );
+            
+            // Trigger new opportunity search and idle funds management
+            await this.triggerNewOpportunitySearch();
+          } else {
+            this.logger.warn(
+              `⚠️ Still detecting ${stillSingleLeg.length} single-leg position(s) after closing. ` +
+              `This may be stale data - will retry next cycle.`,
+            );
           }
         }
       }
     } catch (error: any) {
       // Silently fail to avoid spam
+      this.logger.debug(`Error in checkAndRetrySingleLegPositions: ${error.message}`);
+    }
+  }
+  
+  /**
+   * Trigger new opportunity search and idle funds management after closing positions
+   */
+  private async triggerNewOpportunitySearch(): Promise<void> {
+    try {
+      // Get available symbols
+      const symbols = await this.discoverAssetsIfNeeded();
+      if (symbols.length === 0) {
+        this.logger.debug('No symbols available for new opportunity search');
+        return;
+      }
+      
+      // Execute strategy to find and execute new opportunities
+      // This will also trigger idle funds management (integrated in FundingArbitrageStrategy)
+      const filteredSymbols = symbols.filter(s => !this.isBlacklisted(s));
+      if (filteredSymbols.length === 0) {
+        this.logger.debug('No non-blacklisted symbols available');
+        return;
+      }
+      
+      this.logger.log(
+        `🔍 Searching for new opportunities after closing single-leg positions...`,
+      );
+      
+      const result = await this.orchestrator.executeArbitrageStrategy(
+        filteredSymbols,
+        this.minSpread,
+        this.maxPositionSizeUsd,
+      );
+      
+      if (result.opportunitiesExecuted > 0) {
+        this.logger.log(
+          `✅ Found and executed ${result.opportunitiesExecuted} new opportunity/opportunities after closing single-leg positions`,
+        );
+      } else {
+        this.logger.debug(
+          `No new opportunities found after closing single-leg positions`,
+        );
+      }
+    } catch (error: any) {
+      this.logger.warn(
+        `Failed to trigger new opportunity search: ${error.message}`,
+      );
     }
   }
 
@@ -1180,13 +1294,20 @@ export class PerpKeeperScheduler implements OnModuleInit {
           }
           
           // Check if position is actually closed
-          await new Promise(resolve => setTimeout(resolve, 500));
+          // Wait longer to ensure position updates propagate
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          // Clear any position caches before checking
+          if ('clearPositionCache' in adapter && typeof (adapter as any).clearPositionCache === 'function') {
+            (adapter as any).clearPositionCache();
+          }
+          
           const currentPositions = await adapter.getPositions();
           const positionStillExists = currentPositions.some(
             (p) =>
               p.symbol === position.symbol &&
               p.exchangeType === position.exchangeType &&
-              Math.abs(p.size) > 0.0001,
+              Math.abs(p.size) > 0.0001, // Filter out very small positions (rounding errors)
           );
           
           if (closeResponse.isFilled() && !positionStillExists) {

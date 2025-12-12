@@ -53,10 +53,33 @@ export class OrderExecutor implements IOrderExecutor {
     isClosingPosition: boolean = false,
   ): Promise<PerpOrderResponse> {
     const operationType = isClosingPosition ? 'CLOSE' : 'OPEN';
+    const isLighter = exchangeType === ExchangeType.LIGHTER;
 
     this.logger.log(
       `⏳ Waiting for ${operationType} order ${orderId} to fill on ${exchangeType} (${symbol})...`,
     );
+
+    // For Lighter orders, track initial position to detect fills
+    let initialPosition: { size: number; side: OrderSide } | null = null;
+    if (isLighter) {
+      try {
+        const positions = await adapter.getPositions();
+        const matchingPosition = positions.find(
+          p => p.symbol === symbol && Math.abs(p.size) > 0.0001
+        );
+        if (matchingPosition) {
+          initialPosition = {
+            size: matchingPosition.size,
+            side: matchingPosition.side,
+          };
+          this.logger.debug(
+            `Initial position for ${symbol}: ${initialPosition.side} ${initialPosition.size.toFixed(4)}`
+          );
+        }
+      } catch (error: any) {
+        this.logger.debug(`Could not get initial position: ${error.message}`);
+      }
+    }
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
@@ -74,6 +97,85 @@ export class OrderExecutor implements IOrderExecutor {
           );
 
           await new Promise((resolve) => setTimeout(resolve, backoffDelay));
+        }
+
+        // For Lighter orders, check positions to detect fills (since getOrderStatus doesn't work)
+        if (isLighter) {
+          try {
+            const positions = await adapter.getPositions();
+            const matchingPosition = positions.find(
+              p => p.symbol === symbol && Math.abs(p.size) > 0.0001
+            );
+            
+            if (matchingPosition) {
+              const currentSize = matchingPosition.size;
+              const currentSide = matchingPosition.side;
+              
+              // Determine expected side based on operation type
+              const expectedSide = isClosingPosition
+                ? (currentSide === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG)
+                : currentSide;
+              
+              // Check if position changed (indicating fill)
+              if (initialPosition) {
+                const sizeChange = Math.abs(currentSize - initialPosition.size);
+                if (sizeChange >= expectedSize * 0.9) { // At least 90% of expected size
+                  this.logger.log(
+                    `✅ ${operationType} order ${orderId} filled (detected via position change): ` +
+                    `${currentSize.toFixed(4)} ${symbol} (change: ${sizeChange.toFixed(4)})`
+                  );
+                  return new PerpOrderResponse(
+                    orderId,
+                    OrderStatus.FILLED,
+                    symbol,
+                    currentSide,
+                    undefined,
+                    sizeChange,
+                    undefined,
+                    undefined,
+                    new Date(),
+                  );
+                }
+              } else {
+                // No initial position - check if current position matches expected
+                if (currentSide === expectedSide && currentSize >= expectedSize * 0.9) {
+                  this.logger.log(
+                    `✅ ${operationType} order ${orderId} filled (detected via position): ` +
+                    `${currentSize.toFixed(4)} ${symbol}`
+                  );
+                  return new PerpOrderResponse(
+                    orderId,
+                    OrderStatus.FILLED,
+                    symbol,
+                    currentSide,
+                    undefined,
+                    currentSize,
+                    undefined,
+                    undefined,
+                    new Date(),
+                  );
+                }
+              }
+            } else if (initialPosition && isClosingPosition) {
+              // Position closed - order filled
+              this.logger.log(
+                `✅ ${operationType} order ${orderId} filled (position closed)`
+              );
+              return new PerpOrderResponse(
+                orderId,
+                OrderStatus.FILLED,
+                symbol,
+                initialPosition.side,
+                undefined,
+                initialPosition.size,
+                undefined,
+                undefined,
+                new Date(),
+              );
+            }
+          } catch (positionError: any) {
+            this.logger.debug(`Could not check positions: ${positionError.message}`);
+          }
         }
 
         const statusResponse = await adapter.getOrderStatus(orderId, symbol);
@@ -368,10 +470,16 @@ export class OrderExecutor implements IOrderExecutor {
           ]);
 
           // Wait for orders to fill if they're not immediately filled
+          // CRITICAL: For Lighter orders, always check status even if marked as SUBMITTED,
+          // as they may be immediately canceled by the system
           let finalLongResponse = longResponse;
           let finalShortResponse = shortResponse;
 
-          if (!longResponse.isFilled() && longResponse.orderId) {
+          // Always check Lighter orders - they're never immediately filled and may be canceled
+          const longIsLighter = opportunity.longExchange === ExchangeType.LIGHTER;
+          const shortIsLighter = opportunity.shortExchange === ExchangeType.LIGHTER;
+          
+          if ((!longResponse.isFilled() || longIsLighter) && longResponse.orderId) {
             finalLongResponse = await this.waitForOrderFill(
               longAdapter,
               longResponse.orderId,
@@ -384,7 +492,7 @@ export class OrderExecutor implements IOrderExecutor {
             );
           }
 
-          if (!shortResponse.isFilled() && shortResponse.orderId) {
+          if ((!shortResponse.isFilled() || shortIsLighter) && shortResponse.orderId) {
             finalShortResponse = await this.waitForOrderFill(
               shortAdapter,
               shortResponse.orderId,
@@ -400,6 +508,46 @@ export class OrderExecutor implements IOrderExecutor {
           // Check if both orders succeeded
           const longIsGTC = plan.longOrder.timeInForce === TimeInForce.GTC;
           const shortIsGTC = plan.shortOrder.timeInForce === TimeInForce.GTC;
+          
+          // Check if orders were canceled (especially for Lighter)
+          const longCanceled = finalLongResponse.status === OrderStatus.CANCELLED || 
+                               (finalLongResponse.error && finalLongResponse.error.toLowerCase().includes('cancel'));
+          const shortCanceled = finalShortResponse.status === OrderStatus.CANCELLED || 
+                               (finalShortResponse.error && finalShortResponse.error.toLowerCase().includes('cancel'));
+          
+          // If an order was canceled, treat it as failed and retry
+          if (longCanceled || shortCanceled) {
+            this.logger.warn(
+              `⚠️ Order canceled for ${opportunity.symbol}: ` +
+              `Long: ${longCanceled ? 'CANCELED' : 'OK'}, ` +
+              `Short: ${shortCanceled ? 'CANCELED' : 'OK'}. ` +
+              `Will retry...`
+            );
+            
+            // Treat canceled orders as failures - will trigger retry below
+            if (executionAttempt < this.config.maxExecutionRetries) {
+              const delayIndex = executionAttempt - 1;
+              const retryDelay =
+                this.config.executionRetryDelays[delayIndex] ||
+                this.config.executionRetryDelays[
+                  this.config.executionRetryDelays.length - 1
+                ];
+
+              this.logger.warn(
+                `⚠️ Retrying ${opportunity.symbol} after order cancellation in ${retryDelay / 1000}s... ` +
+                  `(attempt ${executionAttempt}/${this.config.maxExecutionRetries})`,
+              );
+
+              await new Promise((resolve) => setTimeout(resolve, retryDelay));
+              continue; // Retry the order placement
+            } else {
+              result.errors.push(
+                `Order canceled for ${opportunity.symbol} after ${executionAttempt} attempts`,
+              );
+              break; // Max retries reached
+            }
+          }
+          
           const longSuccess =
             finalLongResponse.isSuccess() &&
             (finalLongResponse.isFilled() ||

@@ -166,27 +166,30 @@ export class PerpKeeperPerformanceLogger implements IPerpKeeperPerformanceLogger
     const metrics = this.exchangeMetrics.get(exchange);
     if (!metrics) return;
 
-    metrics.positionsCount = positions.length;
-    metrics.totalPositionValue = positions.reduce((sum, pos) => sum + pos.getPositionValue(), 0);
-    metrics.totalUnrealizedPnl = positions.reduce((sum, pos) => sum + pos.unrealizedPnl, 0);
+    // Filter out positions with very small sizes (likely rounding errors or stale data)
+    const validPositions = positions.filter(p => Math.abs(p.size) > 0.0001);
+    
+    metrics.positionsCount = validPositions.length;
+    metrics.totalPositionValue = validPositions.reduce((sum, pos) => sum + pos.getPositionValue(), 0);
+    metrics.totalUnrealizedPnl = validPositions.reduce((sum, pos) => sum + pos.unrealizedPnl, 0);
     metrics.lastUpdateTime = new Date();
 
     // Remove old snapshots for positions being updated on this exchange
     // If positions is empty (all closed), remove ALL snapshots for this exchange
     // Otherwise, remove snapshots only for symbols that are being updated
-    if (positions.length === 0) {
+    if (validPositions.length === 0) {
       // All positions closed - remove all snapshots for this exchange
       this.fundingSnapshots = this.fundingSnapshots.filter((s) => s.exchange !== exchange);
     } else {
       // Remove snapshots for symbols that are being updated (to prevent duplicates)
-      const symbolsToUpdate = new Set(positions.map(p => p.symbol));
+      const symbolsToUpdate = new Set(validPositions.map(p => p.symbol));
       this.fundingSnapshots = this.fundingSnapshots.filter(
         (s) => !(symbolsToUpdate.has(s.symbol) && s.exchange === exchange)
       );
     }
 
     // Create funding rate snapshots for APY estimation
-    for (const position of positions) {
+    for (const position of validPositions) {
       const fundingRate = fundingRates.find(
         (fr) => fr.symbol === position.symbol && fr.exchange === exchange
       );
