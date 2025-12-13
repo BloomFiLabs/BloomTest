@@ -798,7 +798,7 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
       
       throw new Error(`Could not parse order book data for ${symbol}: ${JSON.stringify(l2Book).substring(0, 200)}`);
     } catch (error: any) {
-      this.logger.warn(`Failed to get order book for ${symbol}: ${error.message}. Falling back to mark price.`);
+      this.logger.debug(`Failed to get order book for ${symbol}: ${error.message}. Falling back to mark price.`);
       
       // Fallback to mark price if order book fails
       const markPrice = await this.getMarkPrice(symbol);
