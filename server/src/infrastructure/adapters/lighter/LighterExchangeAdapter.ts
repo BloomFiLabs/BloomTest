@@ -1542,6 +1542,135 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
     }
   }
 
+  // ==================== Fast Withdraw Helper Methods ====================
+  
+  /**
+   * Build memo from Ethereum address for fast withdraw
+   * Format: 20 bytes address + 12 zeros = 32 bytes total
+   */
+  private buildFastWithdrawMemo(address: string): string {
+    const cleanAddress = address.toLowerCase().replace(/^0x/, '');
+    if (cleanAddress.length !== 40) {
+      throw new Error(`Invalid address length: ${cleanAddress.length}`);
+    }
+    
+    // Convert address to bytes (20 bytes)
+    const addrBytes = Buffer.from(cleanAddress, 'hex');
+    
+    // Create 32-byte memo: 20 bytes address + 12 zeros
+    const memo = Buffer.alloc(32, 0);
+    addrBytes.copy(memo, 0);
+    
+    // Return as hex string (without 0x prefix)
+    return memo.toString('hex');
+  }
+
+  /**
+   * Get fast withdraw pool info from Lighter API
+   */
+  private async getFastWithdrawInfo(
+    authToken: string,
+    maxRetries: number = 3
+  ): Promise<{ to_account_index: number; withdraw_limit?: number }> {
+    let lastError: any;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await axios.get(
+          `${this.config.baseUrl}/api/v1/fastwithdraw/info`,
+          {
+            params: { 
+              account_index: this.config.accountIndex,
+              auth: authToken
+            },
+            timeout: 30000,
+          }
+        );
+
+        if (response.data.code !== 200) {
+          throw new Error(`Pool info failed: ${response.data.message || 'Unknown error'}`);
+        }
+
+        return {
+          to_account_index: response.data.to_account_index,
+          withdraw_limit: response.data.withdraw_limit,
+        };
+      } catch (error: any) {
+        lastError = error;
+        this.logger.debug(`Fast withdraw info attempt ${attempt}/${maxRetries} failed: ${error.message}`);
+        
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+      }
+    }
+    
+    throw lastError;
+  }
+
+  /**
+   * Get transfer fee for fast withdraw
+   */
+  private async getFastWithdrawFee(
+    toAccountIndex: number,
+    authToken: string
+  ): Promise<number> {
+    const response = await axios.get(
+      `${this.config.baseUrl}/api/v1/transferFeeInfo`,
+      {
+        params: {
+          account_index: this.config.accountIndex,
+          to_account_index: toAccountIndex,
+          auth: authToken,
+        },
+        timeout: 10000,
+      }
+    );
+
+    if (response.data.code !== 200) {
+      throw new Error(`Transfer fee failed: ${response.data.message || 'Unknown error'}`);
+    }
+
+    // transfer_fee_usdc is in micro-USDC (1e6)
+    return response.data.transfer_fee_usdc;
+  }
+
+  /**
+   * Get next nonce for Lighter transactions
+   */
+  private async getFastWithdrawNonce(): Promise<{ apiKeyIndex: number; nonce: number }> {
+    const response = await axios.get(`${this.config.baseUrl}/api/v1/nextNonce`, {
+      params: { 
+        account_index: this.config.accountIndex, 
+        api_key_index: this.config.apiKeyIndex 
+      },
+      timeout: 10000,
+    });
+
+    if (response.data && typeof response.data === 'object') {
+      if (response.data.nonce !== undefined && response.data.api_key_index !== undefined) {
+        return {
+          apiKeyIndex: response.data.api_key_index,
+          nonce: response.data.nonce,
+        };
+      } else if (response.data.nonce !== undefined) {
+        return {
+          apiKeyIndex: this.config.apiKeyIndex!,
+          nonce: response.data.nonce,
+        };
+      }
+    } else if (typeof response.data === 'number') {
+      return {
+        apiKeyIndex: this.config.apiKeyIndex!,
+        nonce: response.data,
+      };
+    }
+
+    throw new Error(`Unexpected nonce format: ${JSON.stringify(response.data)}`);
+  }
+
+  // ==================== End Fast Withdraw Helper Methods ====================
+
   async transferInternal(amount: number, toPerp: boolean): Promise<string> {
     try {
       if (amount <= 0) {
@@ -1790,6 +1919,16 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
     }
   }
 
+  /**
+   * Withdraw funds from Lighter to an external Ethereum address using fast withdraw
+   * 
+   * Fast withdraw works by:
+   * 1. Creating an auth token with the SDK
+   * 2. Getting the fast withdraw pool info
+   * 3. Getting the transfer fee
+   * 4. Signing the transfer with BOTH L2 (Lighter) and L1 (Ethereum) signatures
+   * 5. Submitting to the fast withdraw endpoint
+   */
   async withdrawExternal(amount: number, asset: string, destination: string): Promise<string> {
     try {
       if (amount <= 0) {
@@ -1800,68 +1939,124 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
         throw new Error('Invalid destination address. Must be a valid Ethereum address (0x followed by 40 hex characters)');
       }
 
-      this.logger.log(`Withdrawing $${amount.toFixed(2)} ${asset} to ${destination} on Lighter...`);
-
-      // Lighter withdrawals are done via the Gateway contract on Ethereum mainnet
-      // Check if there's an API endpoint or SDK method first
-      try {
-        await this.ensureInitialized();
-        const apiClient = new ApiClient({ host: this.config.baseUrl });
-        const { AccountApi } = await import('@reservoir0x/lighter-ts-sdk');
-        const accountApi = new AccountApi(apiClient);
-
-        // Check if AccountApi has a withdraw method
-        if (typeof (accountApi as any).withdraw === 'function') {
-          const result = await (accountApi as any).withdraw({
-            amount: amount.toString(),
-            asset: asset,
-            destination: destination,
-          });
-
-          if (result && result.code === 200) {
-            const txHash = result.txHash || result.id || `lighter-withdraw-${Date.now()}`;
-            this.logger.log(`✅ Withdrawal initiated - TX: ${txHash}`);
-            return txHash;
-          } else {
-            throw new Error(`Withdrawal failed: ${JSON.stringify(result)}`);
-          }
-        }
-      } catch (sdkError: any) {
-        // SDK doesn't support withdrawals, fall through to Gateway contract message
-        this.logger.debug(`SDK withdraw method not available: ${sdkError.message}`);
+      // Only USDC is supported for fast withdrawals
+      if (asset.toUpperCase() !== 'USDC') {
+        throw new Error(`Only USDC withdrawals are supported. Received: ${asset}`);
       }
 
-      // Try direct API call to withdrawal endpoint (if it exists)
-      try {
-        const response = await axios.post(
-          `${this.config.baseUrl}/api/v1/withdraw`,
-          {
-            amount: amount.toString(),
-            asset: asset,
-            destination: destination,
-          },
-          {
-            timeout: 30000,
-            headers: {
-              'Content-Type': 'application/json',
-            },
-          }
-        );
+      this.logger.log(`🏦 Fast withdrawing $${amount.toFixed(2)} ${asset} to ${destination} on Lighter...`);
 
-        if (response.data && response.data.code === 200) {
-          const txHash = response.data.txHash || response.data.id || `lighter-withdraw-${Date.now()}`;
-          this.logger.log(`✅ Withdrawal successful - TX: ${txHash}`);
-          return txHash;
-        } else {
-          throw new Error(`Withdrawal failed: ${JSON.stringify(response.data)}`);
+      await this.ensureInitialized();
+
+      // Get Ethereum private key for L1 signing
+      const ethPrivateKey = this.configService.get<string>('ETH_PRIVATE_KEY') || 
+                           this.configService.get<string>('PRIVATE_KEY') ||
+                           this.configService.get<string>('LIGHTER_PRIVATE_KEY');
+      if (!ethPrivateKey) {
+        throw new Error('ETH_PRIVATE_KEY, PRIVATE_KEY, or LIGHTER_PRIVATE_KEY required for fast withdrawals (L1 signature)');
+      }
+      const normalizedEthKey = ethPrivateKey.startsWith('0x') ? ethPrivateKey : `0x${ethPrivateKey}`;
+
+      // Constants
+      const ASSET_ID_USDC = 3;
+      const ROUTE_PERP = 0;
+      const CHAIN_ID = 304; // Lighter chain ID
+
+      // 1. Create auth token using the proper SignerClient method
+      this.logger.debug('Creating auth token...');
+      const authToken = await this.signerClient!.createAuthTokenWithExpiry(600); // 10 minutes
+
+      // 2. Get fast withdraw pool info
+      this.logger.debug('Getting fast withdraw pool info...');
+      const poolInfo = await this.getFastWithdrawInfo(authToken);
+      const toAccountIndex = poolInfo.to_account_index;
+      
+      // Check withdraw limit
+      if (poolInfo.withdraw_limit !== undefined) {
+        const limitUsdc = poolInfo.withdraw_limit / 1e6;
+        if (amount > limitUsdc) {
+          throw new Error(`Withdrawal amount ($${amount.toFixed(2)}) exceeds pool limit ($${limitUsdc.toFixed(2)})`);
         }
-      } catch (apiError: any) {
-        // If API call fails, provide helpful error message
-        throw new Error(
-          'External withdrawals from Lighter must be done by interacting with the Lighter Gateway contract on Ethereum mainnet. ' +
-          'This adapter does not support on-chain transactions. Please use a wallet or the Gateway contract directly. ' +
-          `Error: ${apiError.message}. Gateway contract address can be found in Lighter documentation.`
-        );
+      }
+      this.logger.debug(`Pool: ${toAccountIndex}, Limit: ${poolInfo.withdraw_limit ? (poolInfo.withdraw_limit / 1e6).toFixed(2) : 'N/A'} USDC`);
+
+      // 3. Get transfer fee
+      this.logger.debug('Getting transfer fee...');
+      const fee = await this.getFastWithdrawFee(toAccountIndex, authToken);
+      const feeUsdc = fee / 1e6;
+      this.logger.debug(`Transfer fee: $${feeUsdc.toFixed(2)} USDC`);
+
+      // 4. Get next nonce
+      this.logger.debug('Getting next nonce...');
+      const { apiKeyIndex, nonce } = await this.getFastWithdrawNonce();
+      this.logger.debug(`Nonce: ${nonce}, API Key Index: ${apiKeyIndex}`);
+
+      // 5. Build memo (20-byte address + 12 zeros)
+      const memoHex = this.buildFastWithdrawMemo(destination);
+
+      // 6. Sign transfer with BOTH L2 (Lighter) and L1 (Ethereum) signatures
+      this.logger.debug('Signing transfer...');
+      const amountMicroUsdc = Math.floor(amount * 1e6);
+
+      // Build the L1 message (matching SDK format)
+      const toHex = (value: number): string => '0x' + value.toString(16).padStart(16, '0');
+      
+      const l1Message = `Transfer\n\nnonce: ${toHex(nonce)}\nfrom: ${toHex(this.config.accountIndex!)} (route ${toHex(ROUTE_PERP)})\napi key: ${toHex(apiKeyIndex)}\nto: ${toHex(toAccountIndex)} (route ${toHex(ROUTE_PERP)})\nasset: ${toHex(ASSET_ID_USDC)}\namount: ${toHex(amountMicroUsdc)}\nfee: ${toHex(fee)}\nchainId: ${toHex(CHAIN_ID)}\nmemo: ${memoHex}\nOnly sign this message for a trusted client!`;
+      
+      // Sign L1 message with Ethereum private key
+      const wallet = new ethers.Wallet(normalizedEthKey);
+      const l1Sig = await wallet.signMessage(l1Message);
+
+      // Access the internal wallet signer from the SignerClient
+      const wasmSigner = (this.signerClient as any).wallet;
+      
+      // Sign transfer using the internal WASM signer (which has the correct Lighter key)
+      const transferResult = await wasmSigner.signTransfer({
+        toAccountIndex: toAccountIndex,
+        assetIndex: ASSET_ID_USDC,
+        fromRouteType: ROUTE_PERP,
+        toRouteType: ROUTE_PERP,
+        amount: amountMicroUsdc,
+        usdcFee: fee,
+        memo: memoHex,
+        nonce: nonce,
+      });
+
+      if (transferResult.error) {
+        throw new Error(`Failed to sign transfer: ${transferResult.error}`);
+      }
+
+      // Add L1 signature to the tx_info
+      const txInfoParsed = JSON.parse(transferResult.txInfo);
+      txInfoParsed.L1Sig = l1Sig;
+      const txInfoStr = JSON.stringify(txInfoParsed);
+
+      // 7. Submit to fastwithdraw endpoint (auth as query param)
+      this.logger.log(`📤 Submitting fast withdraw of $${amount.toFixed(2)} USDC to ${destination}...`);
+      
+      const formData = new URLSearchParams();
+      formData.append('tx_info', txInfoStr);
+      formData.append('to_address', destination);
+
+      const response = await axios.post(
+        `${this.config.baseUrl}/api/v1/fastwithdraw?auth=${encodeURIComponent(authToken)}`,
+        formData.toString(),
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          timeout: 30000,
+        }
+      );
+
+      if (response.data.code === 200) {
+        const txHash = response.data.tx_hash || response.data.txHash || `lighter-fastwithdraw-${Date.now()}`;
+        this.logger.log(`✅ Fast withdrawal successful! TX: ${txHash}`);
+        this.logger.log(`   Amount: $${amount.toFixed(2)} USDC (fee: $${feeUsdc.toFixed(2)})`);
+        this.logger.log(`   Destination: ${destination}`);
+        return txHash;
+      } else {
+        throw new Error(`Fast withdrawal failed: ${response.data.message || JSON.stringify(response.data)}`);
       }
     } catch (error: any) {
       if (error instanceof ExchangeError) {
