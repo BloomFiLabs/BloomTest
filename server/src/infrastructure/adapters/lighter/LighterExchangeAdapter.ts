@@ -460,13 +460,11 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
             `(request.timeInForce was ${request.timeInForce === TimeInForce.IOC ? 'IOC' : request.timeInForce === TimeInForce.GTC ? 'GTC' : 'undefined'}, but LIMIT orders always use GTC)`
           );
 
-          // orderExpiry: Based on testing with lighter-open-position-test.ts
-          // For opening orders (reduceOnly = false): orderExpiry = 0 works
-          // For closing orders (reduceOnly = true): Keep existing logic (expiredAt + 1 hour)
-          // This matches the behavior found in testing
-          const orderExpiry = request.reduceOnly 
-            ? expiredAt + 3600000  // Closing orders: 1 hour after expiredAt
-            : 0;                    // Opening orders: 0
+          // orderExpiry: For GTC orders (timeInForce = 1), orderExpiry cannot be 0
+          // SDK code shows: wasmOrderExpiry = (timeInForce === IOC) ? 0 : orderExpiry
+          // This means for GTC orders, orderExpiry must be a valid timestamp >= expiredAt
+          // Use expiredAt + 2 minutes for GTC orders (short expiry for trading bot)
+          const orderExpiry = expiredAt + (2 * 60 * 1000); // 2 minutes from expiredAt
           
           orderParams = {
             marketIndex,
@@ -477,7 +475,7 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
             orderType: LighterOrderType.LIMIT,
             timeInForce, // 0 = IOC, 1 = GTC/GTT (Good Till Time)
             reduceOnly: request.reduceOnly ? 1 : 0, // Critical: must be 1 for closing orders
-            orderExpiry, // 0 for opening orders, expiredAt + 1 hour for closing orders
+            orderExpiry, // For GTC orders: expiredAt + 2 minutes (orderExpiry cannot be 0 for GTC)
             expiredAt,
           };
         }
