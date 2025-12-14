@@ -24,6 +24,7 @@ import {
   DomainException,
   ExchangeException,
   OrderExecutionException,
+  InsufficientBalanceException,
 } from '../../exceptions/DomainException';
 
 /**
@@ -285,6 +286,59 @@ export class OrderExecutor implements IOrderExecutor {
       );
     }
 
+    // PRE-FLIGHT CHECK: Cancel any existing open orders for this symbol to free up margin
+    // This prevents "Insufficient margin" errors caused by stale orders holding reserved margin
+    try {
+      const [longCancelled, shortCancelled] = await Promise.allSettled([
+        longAdapter.cancelAllOrders(opportunity.symbol).catch(() => 0),
+        shortAdapter.cancelAllOrders(opportunity.symbol).catch(() => 0),
+      ]);
+      const totalCancelled = 
+        (longCancelled.status === 'fulfilled' ? longCancelled.value : 0) +
+        (shortCancelled.status === 'fulfilled' ? shortCancelled.value : 0);
+      if (totalCancelled > 0) {
+        this.logger.log(`🗑️ Pre-flight: Cancelled ${totalCancelled} existing order(s) for ${opportunity.symbol}`);
+        // Small delay to let margin be released
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    } catch (error: any) {
+      this.logger.debug(`Pre-flight cancel failed (non-critical): ${error.message}`);
+    }
+
+    // PRE-FLIGHT CHECK: Verify both exchanges have sufficient margin
+    try {
+      const [longBalance, shortBalance] = await Promise.all([
+        longAdapter.getBalance(),
+        shortAdapter.getBalance(),
+      ]);
+      const requiredMargin = plan.positionSize.toUSD(
+        (plan.longOrder.price || 0 + (plan.shortOrder.price || 0)) / 2
+      ) / (this.config?.leverage || 2);
+      
+      if (longBalance < requiredMargin) {
+        return Result.failure(
+          new InsufficientBalanceException(
+            requiredMargin,
+            longBalance,
+            'USDC',
+            { symbol: opportunity.symbol, exchange: opportunity.longExchange },
+          ),
+        );
+      }
+      if (shortBalance < requiredMargin) {
+        return Result.failure(
+          new InsufficientBalanceException(
+            requiredMargin,
+            shortBalance,
+            'USDC',
+            { symbol: opportunity.symbol, exchange: opportunity.shortExchange },
+          ),
+        );
+      }
+    } catch (error: any) {
+      this.logger.warn(`Pre-flight balance check failed: ${error.message}`);
+    }
+
     // Place orders
     this.logger.log(
       `📤 Executing orders for ${opportunity.symbol}: ` +
@@ -453,6 +507,48 @@ export class OrderExecutor implements IOrderExecutor {
           if (!longAdapter || !shortAdapter) {
             result.errors.push(`Missing adapters for ${opportunity.symbol}`);
             break;
+          }
+
+          // PRE-FLIGHT CHECK: Cancel any existing open orders for this symbol to free up margin
+          try {
+            const [longCancelled, shortCancelled] = await Promise.allSettled([
+              longAdapter.cancelAllOrders(opportunity.symbol).catch(() => 0),
+              shortAdapter.cancelAllOrders(opportunity.symbol).catch(() => 0),
+            ]);
+            const totalCancelled = 
+              (longCancelled.status === 'fulfilled' ? longCancelled.value : 0) +
+              (shortCancelled.status === 'fulfilled' ? shortCancelled.value : 0);
+            if (totalCancelled > 0) {
+              this.logger.log(`🗑️ Pre-flight: Cancelled ${totalCancelled} existing order(s) for ${opportunity.symbol}`);
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
+          } catch (error: any) {
+            this.logger.debug(`Pre-flight cancel failed (non-critical): ${error.message}`);
+          }
+
+          // PRE-FLIGHT CHECK: Verify both exchanges have sufficient margin
+          const [longBalance, shortBalance] = await Promise.all([
+            longAdapter.getBalance(),
+            shortAdapter.getBalance(),
+          ]);
+          const avgPrice = ((plan.longOrder.price || 0) + (plan.shortOrder.price || 0)) / 2;
+          const requiredMargin = avgPrice > 0 
+            ? plan.positionSize.toUSD(avgPrice) / (this.config?.leverage || 2)
+            : plan.positionSize.toBaseAsset() * 10; // Fallback estimate
+          
+          if (longBalance < requiredMargin || shortBalance < requiredMargin) {
+            const insufficientExchange = longBalance < requiredMargin 
+              ? opportunity.longExchange 
+              : opportunity.shortExchange;
+            const availableBalance = Math.min(longBalance, shortBalance);
+            this.logger.warn(
+              `⚠️ Insufficient margin for ${opportunity.symbol} on ${insufficientExchange}: ` +
+              `need $${requiredMargin.toFixed(2)}, have $${availableBalance.toFixed(2)}`
+            );
+            result.errors.push(
+              `Insufficient margin for ${opportunity.symbol}: need $${requiredMargin.toFixed(2)}, have $${availableBalance.toFixed(2)}`
+            );
+            break; // Skip this opportunity, move to next
           }
 
           // Place orders
