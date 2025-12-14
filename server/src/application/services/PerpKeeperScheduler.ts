@@ -1073,7 +1073,7 @@ export class PerpKeeperScheduler implements OnModuleInit {
    */
   @Interval(600000) // Every 10 minutes (600000 ms)
   async cleanupStaleOrders() {
-    const STALE_ORDER_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
+    const STALE_ORDER_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
     
     try {
       const adapters = this.keeperService.getExchangeAdapters();
