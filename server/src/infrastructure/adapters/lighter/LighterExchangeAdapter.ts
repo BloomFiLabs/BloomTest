@@ -1543,6 +1543,35 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
   }
 
   // ==================== Fast Withdraw Helper Methods ====================
+
+  /**
+   * Get fast withdraw pool availability in USDC
+   * Returns the amount available in the fast withdraw pool, or null if unable to check
+   * 
+   * This is useful for checking if the pool has sufficient liquidity before attempting a withdrawal
+   */
+  async getFastWithdrawPoolAvailability(): Promise<number | null> {
+    try {
+      await this.ensureInitialized();
+      
+      // Create auth token
+      const authToken = await this.signerClient!.createAuthTokenWithExpiry(600);
+      
+      // Get pool info
+      const poolInfo = await this.getFastWithdrawInfo(authToken);
+      
+      if (poolInfo.withdraw_limit !== undefined) {
+        const availableUsdc = poolInfo.withdraw_limit / 1e6;
+        this.logger.debug(`Lighter fast withdraw pool availability: $${availableUsdc.toFixed(2)} USDC`);
+        return availableUsdc;
+      }
+      
+      return null;
+    } catch (error: any) {
+      this.logger.warn(`Failed to check fast withdraw pool availability: ${error.message}`);
+      return null;
+    }
+  }
   
   /**
    * Build memo from Ethereum address for fast withdraw

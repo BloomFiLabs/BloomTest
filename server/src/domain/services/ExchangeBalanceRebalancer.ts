@@ -470,8 +470,36 @@ export class ExchangeBalanceRebalancer {
       );
     }
 
-    // Step 1: Withdraw from source exchange to central wallet
-    this.logger.log(`📤 Step 1: Withdrawing $${amount.toFixed(2)} from ${fromExchange} to central wallet ${this.CENTRAL_WALLET_ADDRESS}...`);
+    // Step 1: Check pool availability for Lighter (fast withdraw has limited pool)
+    if (fromExchange === ExchangeType.LIGHTER) {
+      // Check if the adapter has the getFastWithdrawPoolAvailability method
+      if (typeof (fromAdapter as any).getFastWithdrawPoolAvailability === 'function') {
+        try {
+          const poolAvailable = await (fromAdapter as any).getFastWithdrawPoolAvailability();
+          if (poolAvailable !== null && poolAvailable < amount) {
+            throw new Error(
+              `Lighter fast withdraw pool has insufficient funds. ` +
+              `Requested: $${amount.toFixed(2)}, Available: $${poolAvailable.toFixed(2)}. ` +
+              `The fast withdraw pool is shared across all users and may refill later. ` +
+              `Skipping this transfer.`
+            );
+          }
+          if (poolAvailable !== null) {
+            this.logger.log(`   ℹ️ Lighter fast withdraw pool has $${poolAvailable.toFixed(2)} available`);
+          }
+        } catch (poolCheckError: any) {
+          // If it's an insufficient funds error, rethrow it
+          if (poolCheckError.message.includes('insufficient funds')) {
+            throw poolCheckError;
+          }
+          // Otherwise just log the warning and continue
+          this.logger.warn(`   ⚠️ Could not check Lighter pool availability: ${poolCheckError.message}`);
+        }
+      }
+    }
+
+    // Step 2: Withdraw from source exchange to central wallet
+    this.logger.log(`📤 Step 2: Withdrawing $${amount.toFixed(2)} from ${fromExchange} to central wallet ${this.CENTRAL_WALLET_ADDRESS}...`);
     let withdrawTxHash: string;
     try {
       withdrawTxHash = await fromAdapter.withdrawExternal(
@@ -491,9 +519,9 @@ export class ExchangeBalanceRebalancer {
     // Wait a bit for withdrawal to settle (if on-chain)
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // Step 2: Deposit from central wallet to destination exchange
+    // Step 3: Deposit from central wallet to destination exchange
     // Note: External deposits may not be supported via API for all exchanges
-    this.logger.log(`📥 Step 2: Depositing $${amount.toFixed(2)} from central wallet to ${toExchange}...`);
+    this.logger.log(`📥 Step 3: Depositing $${amount.toFixed(2)} from central wallet to ${toExchange}...`);
     try {
       const depositTxHash = await toAdapterResolved.depositExternal(
         amount,

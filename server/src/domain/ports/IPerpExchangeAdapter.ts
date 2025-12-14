@@ -179,6 +179,13 @@ export interface IPerpExchangeAdapter {
    * @throws ExchangeError if fetch fails
    */
   getOpenOrders?(): Promise<OpenOrder[]>;
+
+  /**
+   * Get fast withdraw pool availability (Lighter-specific)
+   * Returns the amount available in the fast withdraw pool, or null if not applicable
+   * @returns Available USDC in the fast withdraw pool, or null
+   */
+  getFastWithdrawPoolAvailability?(): Promise<number | null>;
 }
 
 /**
