@@ -83,6 +83,31 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
     }
   }
 
+  /**
+   * Reset the SignerClient to force re-initialization
+   * This is useful when nonce gets out of sync with the server
+   */
+  private async resetSignerClient(): Promise<void> {
+    this.logger.warn('🔄 Resetting Lighter SignerClient to re-sync nonce...');
+    
+    // Close existing client if it has a close method
+    if (this.signerClient && typeof (this.signerClient as any).close === 'function') {
+      try {
+        await (this.signerClient as any).close();
+      } catch (e) {
+        // Ignore close errors
+      }
+    }
+    
+    // Clear the client to force re-initialization
+    this.signerClient = null;
+    
+    // Re-initialize
+    await this.ensureInitialized();
+    
+    this.logger.log('✅ Lighter SignerClient reset complete');
+  }
+
   private async getMarketHelper(marketIndex: number): Promise<MarketHelper> {
     if (!this.marketHelpers.has(marketIndex)) {
       await this.ensureInitialized();
@@ -597,6 +622,8 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
                            errorMsg.includes('market config');
         const isMarginModeError = errorMsg.includes('invalid margin mode') || 
                                  errorMsg.includes('margin mode');
+        const isNonceError = errorMsg.toLowerCase().includes('invalid nonce') ||
+                            errorMsg.toLowerCase().includes('nonce');
         
         if (isRateLimit && attempt < maxRetries - 1) {
           // Silenced 429/rate limit warnings - only show errors
@@ -604,6 +631,21 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
             `Order placement rate limited for ${request.symbol} ` +
             `(attempt ${attempt + 1}/${maxRetries}): ${errorMsg}. Will retry.`
           );
+          continue;
+        }
+        
+        // Nonce errors - reset client and retry
+        if (isNonceError && attempt < maxRetries - 1) {
+          this.logger.warn(
+            `⚠️ Lighter nonce error for ${request.symbol}: ${errorMsg}. ` +
+            `Re-syncing nonce and retrying (attempt ${attempt + 1}/${maxRetries})...`
+          );
+          
+          // Reset the SignerClient to get a fresh nonce from the server
+          await this.resetSignerClient();
+          
+          // Wait a bit before retrying
+          await new Promise(resolve => setTimeout(resolve, 1000));
           continue;
         }
         
