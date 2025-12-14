@@ -530,30 +530,16 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
 
       this.logger.debug(`Cancelling order ${orderId} for ${symbol} (asset index: ${assetId})`);
 
-      // Hyperliquid SDK: Use cancelOrder method if available, otherwise use order() with cancels
-      // The SDK may have cancelOrder as a separate method or as part of order()
-      let result: any;
-      if (typeof (this.exchangeClient as any).cancelOrder === 'function') {
-        // Try direct cancelOrder method
-        result = await (this.exchangeClient as any).cancelOrder({
-          cancels: [
-            {
-              a: assetId,      // Asset index
-              o: orderIdNum,   // Order ID
-            },
-          ],
-        });
-      } else {
-        // Fallback: Use order() method with cancels (may not be typed correctly)
-        result = await (this.exchangeClient.order as any)({
-          cancels: [
-            {
-              a: assetId,      // Asset index
-              o: orderIdNum,   // Order ID
-            },
-          ],
-        });
-      }
+      // Hyperliquid SDK: Use the cancel() method (not cancelOrder)
+      // See: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint#cancel-order-s
+      const result = await this.exchangeClient.cancel({
+        cancels: [
+          {
+            a: assetId,      // Asset index
+            o: orderIdNum,   // Order ID
+          },
+        ],
+      });
 
       if (result.status === 'ok') {
         this.logger.log(`✅ Order ${orderId} cancelled successfully on Hyperliquid`);
@@ -610,21 +596,11 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
         };
       });
 
-      // Hyperliquid SDK: Use cancelOrder method if available, otherwise use order() with cancels
-      // Type assertion needed because SDK types may not include cancels parameter
-      const exchangeClientAny = this.exchangeClient as any;
-      let result: any;
-      if (typeof exchangeClientAny.cancelOrder === 'function') {
-        // Try direct cancelOrder method
-        result = await exchangeClientAny.cancelOrder({
-          cancels,
-        });
-      } else {
-        // Fallback: Use order() method with cancels (may not be typed correctly)
-        result = await exchangeClientAny.order({
-          cancels,
-        });
-      }
+      // Hyperliquid SDK: Use the cancel() method
+      // See: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint#cancel-order-s
+      const result = await this.exchangeClient.cancel({
+        cancels,
+      });
 
       if (result.status === 'ok') {
         this.logger.log(`✅ Cancelled ${cancels.length} order(s) for ${symbol} on Hyperliquid`);
