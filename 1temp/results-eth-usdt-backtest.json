@@ -1,0 +1,2938 @@
+{
+  "pool": "ETH/USDT 0.3%",
+  "strategy": "±0.5% concentrated range",
+  "summary": {
+    "initialValue": 1000000,
+    "finalValue": 1404236.4916534312,
+    "totalReturn": 40.42364916534312,
+    "annualizedReturn": 40.423649165343114,
+    "days": 365,
+    "totalRebalances": 308,
+    "totalGasCost": 3.0799999999999783,
+    "totalPoolFees": 687724.6821186065,
+    "totalCosts": 687727.7621186065,
+    "avgTimeInRange": 17.534246575342465
+  },
+  "dailyResults": [
+    {
+      "date": "2024-11-20",
+      "price": 0.0003254141697544071,
+      "positionValue": 1014967.2718303815,
+      "cumulativeReturn": 1.4967271830381477,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2024-11-21",
+      "price": 0.00029713136432554744,
+      "positionValue": 1015523.4182806995,
+      "cumulativeReturn": 1.5523418280699524,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-11-22",
+      "price": 0.000301223404792904,
+      "positionValue": 1016079.8694687985,
+      "cumulativeReturn": 1.607986946879851,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-11-23",
+      "price": 0.00029467075058937984,
+      "positionValue": 1016636.6255616582,
+      "cumulativeReturn": 1.6636625561658176,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-11-24",
+      "price": 0.000297535184332472,
+      "positionValue": 1017193.6867263495,
+      "cumulativeReturn": 1.7193686726349522,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-11-25",
+      "price": 0.0002922458961707227,
+      "positionValue": 1017751.0531300352,
+      "cumulativeReturn": 1.7751053130035173,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-11-26",
+      "price": 0.00030057246969804704,
+      "positionValue": 1018308.7249399695,
+      "cumulativeReturn": 1.8308724939969485,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-11-27",
+      "price": 0.000273087173312981,
+      "positionValue": 1018866.7023234982,
+      "cumulativeReturn": 1.8866702323498203,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-11-28",
+      "price": 0.00027891285241002486,
+      "positionValue": 1019424.985448059,
+      "cumulativeReturn": 1.9424985448059044,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-11-29",
+      "price": 0.00027806275095504113,
+      "positionValue": 1032468.7786922046,
+      "cumulativeReturn": 3.2468778692204623,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2024-11-30",
+      "price": 0.0002693306981760772,
+      "positionValue": 1033034.5150092962,
+      "cumulativeReturn": 3.3034515009296244,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-01",
+      "price": 0.0002691771007975358,
+      "positionValue": 1043877.8891165124,
+      "cumulativeReturn": 4.387788911651238,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2024-12-02",
+      "price": 0.0002752388069188278,
+      "positionValue": 1044449.8770009598,
+      "cumulativeReturn": 4.444987700095982,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-03",
+      "price": 0.00027603314136619926,
+      "positionValue": 1067933.2103994999,
+      "cumulativeReturn": 6.793321039949986,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2024-12-04",
+      "price": 0.0002605590092524256,
+      "positionValue": 1068518.3792819106,
+      "cumulativeReturn": 6.85183792819106,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-05",
+      "price": 0.00026401915573443023,
+      "positionValue": 1069103.8688048047,
+      "cumulativeReturn": 6.910386880480475,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-06",
+      "price": 0.0002497101872118075,
+      "positionValue": 1069689.6791438758,
+      "cumulativeReturn": 6.968967914387584,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-07",
+      "price": 0.0002496727759676429,
+      "positionValue": 1074339.0803655377,
+      "cumulativeReturn": 7.433908036553767,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2024-12-08",
+      "price": 0.0002497395091509075,
+      "positionValue": 1081283.9727099035,
+      "cumulativeReturn": 8.12839727099035,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2024-12-09",
+      "price": 0.0002693216328678833,
+      "positionValue": 1081876.4570785116,
+      "cumulativeReturn": 8.18764570785116,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-10",
+      "price": 0.0002757689505275623,
+      "positionValue": 1082469.2660960888,
+      "cumulativeReturn": 8.246926609608881,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-11",
+      "price": 0.00026068811602361836,
+      "positionValue": 1083062.399940525,
+      "cumulativeReturn": 8.306239994052495,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-12",
+      "price": 0.00025832375472089415,
+      "positionValue": 1083655.8587898074,
+      "cumulativeReturn": 8.365585878980742,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-13",
+      "price": 0.0002561261577282916,
+      "positionValue": 1084249.642822021,
+      "cumulativeReturn": 8.424964282202092,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-14",
+      "price": 0.00025878500755330703,
+      "positionValue": 1084843.752215348,
+      "cumulativeReturn": 8.484375221534796,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-15",
+      "price": 0.00025234817785629507,
+      "positionValue": 1085438.1871480688,
+      "cumulativeReturn": 8.543818714806878,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-16",
+      "price": 0.0002507874274288556,
+      "positionValue": 1086032.9477985608,
+      "cumulativeReturn": 8.603294779856084,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-17",
+      "price": 0.00025763156505571606,
+      "positionValue": 1086628.0343452997,
+      "cumulativeReturn": 8.66280343452997,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-18",
+      "price": 0.00027553118841821243,
+      "positionValue": 1087223.4469668588,
+      "cumulativeReturn": 8.722344696685882,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-19",
+      "price": 0.000291702071600412,
+      "positionValue": 1087819.1858419091,
+      "cumulativeReturn": 8.781918584190915,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-20",
+      "price": 0.00028815758013119817,
+      "positionValue": 1088415.2511492197,
+      "cumulativeReturn": 8.84152511492197,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-21",
+      "price": 0.0002995850857892508,
+      "positionValue": 1089011.6430676577,
+      "cumulativeReturn": 8.901164306765772,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-22",
+      "price": 0.0003050006105109925,
+      "positionValue": 1089608.361776188,
+      "cumulativeReturn": 8.960836177618802,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-23",
+      "price": 0.0002918201091630479,
+      "positionValue": 1090205.4074538737,
+      "cumulativeReturn": 9.020540745387366,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-24",
+      "price": 0.00028610085990383424,
+      "positionValue": 1090802.7802798757,
+      "cumulativeReturn": 9.080278027987573,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-25",
+      "price": 0.0002865722127079375,
+      "positionValue": 1093828.4772647084,
+      "cumulativeReturn": 9.382847726470837,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2024-12-26",
+      "price": 0.00030068752774384456,
+      "positionValue": 1094427.8353344426,
+      "cumulativeReturn": 9.442783533444256,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-27",
+      "price": 0.0003005669966563984,
+      "positionValue": 1101842.5320820592,
+      "cumulativeReturn": 10.18425320820592,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2024-12-28",
+      "price": 0.000293418749583799,
+      "positionValue": 1102446.281414707,
+      "cumulativeReturn": 10.244628141470697,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-29",
+      "price": 0.00029794519726312,
+      "positionValue": 1103050.3615689068,
+      "cumulativeReturn": 10.305036156890681,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2024-12-30",
+      "price": 0.0002969547851798099,
+      "positionValue": 1111858.418915403,
+      "cumulativeReturn": 11.185841891540308,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2024-12-31",
+      "price": 0.0002994587481660926,
+      "positionValue": 1112467.6564052198,
+      "cumulativeReturn": 11.24676564052198,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-01",
+      "price": 0.00029727332795441446,
+      "positionValue": 1113077.227723798,
+      "cumulativeReturn": 11.307722772379801,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-02",
+      "price": 0.00029017525209800257,
+      "positionValue": 1113687.1330540576,
+      "cumulativeReturn": 11.36871330540576,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-03",
+      "price": 0.00027675940657644293,
+      "positionValue": 1114297.3725790188,
+      "cumulativeReturn": 11.42973725790188,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-04",
+      "price": 0.00027333206263215726,
+      "positionValue": 1114907.9464818018,
+      "cumulativeReturn": 11.49079464818018,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-05",
+      "price": 0.0002744105190516349,
+      "positionValue": 1118289.1309889357,
+      "cumulativeReturn": 11.82891309889357,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-01-06",
+      "price": 0.00027197092645201917,
+      "positionValue": 1128505.4937986059,
+      "cumulativeReturn": 12.850549379860588,
+      "inRange": true,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-07",
+      "price": 0.00029532434160493707,
+      "positionValue": 1129123.85297329,
+      "cumulativeReturn": 12.912385297329001,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-08",
+      "price": 0.0003007710460187531,
+      "positionValue": 1129742.5509749192,
+      "cumulativeReturn": 12.974255097491923,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-09",
+      "price": 0.00031056822801094167,
+      "positionValue": 1130361.5879891522,
+      "cumulativeReturn": 13.036158798915217,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-10",
+      "price": 0.0003056958709875854,
+      "positionValue": 1130980.964201749,
+      "cumulativeReturn": 13.098096420174906,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-11",
+      "price": 0.00030374918787122977,
+      "positionValue": 1131600.6797985719,
+      "cumulativeReturn": 13.160067979857185,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-12",
+      "price": 0.0003064854907839954,
+      "positionValue": 1132220.7349655847,
+      "cumulativeReturn": 13.22207349655847,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-13",
+      "price": 0.0003191985219928019,
+      "positionValue": 1132841.1298888535,
+      "cumulativeReturn": 13.284112988885353,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-14",
+      "price": 0.00030943137411330916,
+      "positionValue": 1133461.864754546,
+      "cumulativeReturn": 13.346186475454596,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-15",
+      "price": 0.00029048909475829664,
+      "positionValue": 1134082.939748932,
+      "cumulativeReturn": 13.40829397489319,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-16",
+      "price": 0.0003028561020125458,
+      "positionValue": 1134704.3550583834,
+      "cumulativeReturn": 13.470435505838344,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-17",
+      "price": 0.0002878249421315467,
+      "positionValue": 1135326.1108693744,
+      "cumulativeReturn": 13.532611086937434,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-18",
+      "price": 0.0003021404389852064,
+      "positionValue": 1135948.207368481,
+      "cumulativeReturn": 13.594820736848098,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-19",
+      "price": 0.00031171435284351357,
+      "positionValue": 1136570.6447423815,
+      "cumulativeReturn": 13.657064474238153,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-20",
+      "price": 0.00030536314331985594,
+      "positionValue": 1137193.4231778567,
+      "cumulativeReturn": 13.71934231778567,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-21",
+      "price": 0.000301119865343527,
+      "positionValue": 1137816.5428617897,
+      "cumulativeReturn": 13.781654286178972,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-22",
+      "price": 0.00030893093456308465,
+      "positionValue": 1138440.003981166,
+      "cumulativeReturn": 13.844000398116604,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-23",
+      "price": 0.0002998979937579482,
+      "positionValue": 1139063.8067230736,
+      "cumulativeReturn": 13.906380672307359,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-24",
+      "price": 0.0003015698785911314,
+      "positionValue": 1139687.9512747026,
+      "cumulativeReturn": 13.968795127470257,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-25",
+      "price": 0.0003006485796253442,
+      "positionValue": 1143287.1374190312,
+      "cumulativeReturn": 14.328713741903124,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-01-26",
+      "price": 0.0003085969327875941,
+      "positionValue": 1143913.5961244663,
+      "cumulativeReturn": 14.391359612446628,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-27",
+      "price": 0.00031518425001821217,
+      "positionValue": 1144540.3980949454,
+      "cumulativeReturn": 14.454039809494535,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-28",
+      "price": 0.00032538131593913496,
+      "positionValue": 1145167.543518559,
+      "cumulativeReturn": 14.516754351855907,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-29",
+      "price": 0.00032048751735551514,
+      "positionValue": 1145795.0325835007,
+      "cumulativeReturn": 14.579503258350071,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-30",
+      "price": 0.0003072076097448141,
+      "positionValue": 1146422.865478067,
+      "cumulativeReturn": 14.642286547806696,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-01-31",
+      "price": 0.0003038726777211516,
+      "positionValue": 1147051.0423906576,
+      "cumulativeReturn": 14.705104239065758,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-01",
+      "price": 0.000320124714505144,
+      "positionValue": 1147679.5635097758,
+      "cumulativeReturn": 14.76795635097758,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-02",
+      "price": 0.0003493865544915327,
+      "positionValue": 1148308.4290240277,
+      "cumulativeReturn": 14.830842902402766,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-03",
+      "price": 0.0003478866157596996,
+      "positionValue": 1213371.5476691858,
+      "cumulativeReturn": 21.33715476691858,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-02-04",
+      "price": 0.0003649738011631044,
+      "positionValue": 1214036.4087911963,
+      "cumulativeReturn": 21.403640879119628,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-05",
+      "price": 0.0003590596308111288,
+      "positionValue": 1214701.634220671,
+      "cumulativeReturn": 21.47016342206709,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-06",
+      "price": 0.0003728483481707317,
+      "positionValue": 1215367.2241572302,
+      "cumulativeReturn": 21.536722415723023,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-07",
+      "price": 0.0003820008904428264,
+      "positionValue": 1216033.178800604,
+      "cumulativeReturn": 21.60331788006041,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-08",
+      "price": 0.0003794723074468051,
+      "positionValue": 1216699.498350632,
+      "cumulativeReturn": 21.66994983506319,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-09",
+      "price": 0.00038077631885170056,
+      "positionValue": 1223204.8680811608,
+      "cumulativeReturn": 22.320486808116083,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-02-10",
+      "price": 0.00037590258234479945,
+      "positionValue": 1223875.117323945,
+      "cumulativeReturn": 22.387511732394504,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-11",
+      "price": 0.00038406759455204945,
+      "positionValue": 1224545.7338265884,
+      "cumulativeReturn": 22.454573382658836,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-12",
+      "price": 0.0003655136212056144,
+      "positionValue": 1225216.717790329,
+      "cumulativeReturn": 22.52167177903289,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-13",
+      "price": 0.00037425093093139763,
+      "positionValue": 1225888.0694165153,
+      "cumulativeReturn": 22.58880694165153,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-14",
+      "price": 0.00036739065020354096,
+      "positionValue": 1226559.7889066066,
+      "cumulativeReturn": 22.65597889066066,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-15",
+      "price": 0.00037089476177435787,
+      "positionValue": 1227231.8764621718,
+      "cumulativeReturn": 22.723187646217177,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-16",
+      "price": 0.0003757635662669359,
+      "positionValue": 1227904.3322848908,
+      "cumulativeReturn": 22.790433228489082,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-17",
+      "price": 0.00036466195343715736,
+      "positionValue": 1228577.1565765538,
+      "cumulativeReturn": 22.857715657655383,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-18",
+      "price": 0.0003753110774789345,
+      "positionValue": 1229250.3495390615,
+      "cumulativeReturn": 22.925034953906152,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-19",
+      "price": 0.00036749352786579316,
+      "positionValue": 1229923.9113744255,
+      "cumulativeReturn": 22.992391137442553,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-20",
+      "price": 0.00036520269799113973,
+      "positionValue": 1230597.8422847677,
+      "cumulativeReturn": 23.059784228476765,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-21",
+      "price": 0.0003765754841468601,
+      "positionValue": 1231272.142472321,
+      "cumulativeReturn": 23.127214247232093,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-22",
+      "price": 0.00036109445081188,
+      "positionValue": 1231946.8121394292,
+      "cumulativeReturn": 23.194681213942918,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-23",
+      "price": 0.0003540783653619871,
+      "positionValue": 1232621.8514885467,
+      "cumulativeReturn": 23.26218514885467,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-24",
+      "price": 0.0003988179391713214,
+      "positionValue": 1233297.260722239,
+      "cumulativeReturn": 23.329726072223902,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-25",
+      "price": 0.0003996684478392089,
+      "positionValue": 1270272.3786882258,
+      "cumulativeReturn": 27.027237868822574,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-02-26",
+      "price": 0.00042884201397711767,
+      "positionValue": 1270968.418347781,
+      "cumulativeReturn": 27.096841834778107,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-27",
+      "price": 0.00043310366558537783,
+      "positionValue": 1271664.8393989305,
+      "cumulativeReturn": 27.166483939893055,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-02-28",
+      "price": 0.0004476745387896235,
+      "positionValue": 1272361.642050656,
+      "cumulativeReturn": 27.236164205065606,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-01",
+      "price": 0.0004518836306309481,
+      "positionValue": 1273058.8265120536,
+      "cumulativeReturn": 27.30588265120536,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-02",
+      "price": 0.00039711431354960827,
+      "positionValue": 1273756.3929923342,
+      "cumulativeReturn": 27.375639299233423,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-03",
+      "price": 0.0004651142701281224,
+      "positionValue": 1274454.341700823,
+      "cumulativeReturn": 27.445434170082304,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-04",
+      "price": 0.0004610003993421119,
+      "positionValue": 1275152.6728469604,
+      "cumulativeReturn": 27.515267284696037,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-05",
+      "price": 0.00044553130822694157,
+      "positionValue": 1275851.3866403012,
+      "cumulativeReturn": 27.585138664030122,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-06",
+      "price": 0.00045313182838433195,
+      "positionValue": 1276550.4832905151,
+      "cumulativeReturn": 27.655048329051514,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-07",
+      "price": 0.0004682732405124995,
+      "positionValue": 1277249.9630073865,
+      "cumulativeReturn": 27.724996300738653,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-08",
+      "price": 0.00045439613749834797,
+      "positionValue": 1277949.8260008153,
+      "cumulativeReturn": 27.794982600081525,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-09",
+      "price": 0.0004964526420296281,
+      "positionValue": 1278650.0724808157,
+      "cumulativeReturn": 27.865007248081568,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-10",
+      "price": 0.0005356004227787632,
+      "positionValue": 1279350.7026575175,
+      "cumulativeReturn": 27.935070265751747,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-11",
+      "price": 0.0005199125154859509,
+      "positionValue": 1280051.7167411654,
+      "cumulativeReturn": 28.005171674116536,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-12",
+      "price": 0.000524384605042558,
+      "positionValue": 1280753.1149421195,
+      "cumulativeReturn": 28.075311494211945,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-13",
+      "price": 0.000535664922813818,
+      "positionValue": 1281454.897470855,
+      "cumulativeReturn": 28.145489747085495,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-14",
+      "price": 0.000522381902406465,
+      "positionValue": 1282157.0645379622,
+      "cumulativeReturn": 28.21570645379622,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-15",
+      "price": 0.0005147922601204954,
+      "positionValue": 1282859.6163541474,
+      "cumulativeReturn": 28.28596163541474,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-16",
+      "price": 0.0005310394395888399,
+      "positionValue": 1283562.5531302318,
+      "cumulativeReturn": 28.356255313023183,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-17",
+      "price": 0.0005186429506211995,
+      "positionValue": 1284265.8750771524,
+      "cumulativeReturn": 28.42658750771524,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-18",
+      "price": 0.0005182235044520493,
+      "positionValue": 1288735.044811086,
+      "cumulativeReturn": 28.873504481108604,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-03-19",
+      "price": 0.00048484977059000633,
+      "positionValue": 1289441.2010000236,
+      "cumulativeReturn": 28.944120100002362,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-20",
+      "price": 0.0005054558227446885,
+      "positionValue": 1290147.7441238593,
+      "cumulativeReturn": 29.014774412385936,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-21",
+      "price": 0.0005081001354975009,
+      "positionValue": 1290854.6743946122,
+      "cumulativeReturn": 29.085467439461222,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-22",
+      "price": 0.0005046879612671658,
+      "positionValue": 1291561.9920244175,
+      "cumulativeReturn": 29.15619920244175,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-23",
+      "price": 0.0005000342060769464,
+      "positionValue": 1292269.6972255267,
+      "cumulativeReturn": 29.226969722552663,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-24",
+      "price": 0.0004819474107873451,
+      "positionValue": 1292977.7902103078,
+      "cumulativeReturn": 29.297779021030777,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-25",
+      "price": 0.00048460224578055936,
+      "positionValue": 1293686.271191245,
+      "cumulativeReturn": 29.368627119124497,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-26",
+      "price": 0.0004989254810769579,
+      "positionValue": 1294395.1403809388,
+      "cumulativeReturn": 29.43951403809388,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-27",
+      "price": 0.0004984645432362556,
+      "positionValue": 1299304.0530331614,
+      "cumulativeReturn": 29.930405303316142,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-03-28",
+      "price": 0.0005273140666501351,
+      "positionValue": 1300016.000459481,
+      "cumulativeReturn": 30.001600045948102,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-29",
+      "price": 0.0005479592730319294,
+      "positionValue": 1300728.3379939795,
+      "cumulativeReturn": 30.072833799397948,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-30",
+      "price": 0.0005547999676662547,
+      "positionValue": 1301441.0658504146,
+      "cumulativeReturn": 30.14410658504146,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-03-31",
+      "price": 0.0005477318241349666,
+      "positionValue": 1302154.1842426613,
+      "cumulativeReturn": 30.215418424266133,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-01",
+      "price": 0.0005234071496219644,
+      "positionValue": 1302867.693384712,
+      "cumulativeReturn": 30.28676933847121,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-02",
+      "price": 0.0005559918744485277,
+      "positionValue": 1303581.5934906763,
+      "cumulativeReturn": 30.358159349067627,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-03",
+      "price": 0.0005508735599960452,
+      "positionValue": 1304295.8847747808,
+      "cumulativeReturn": 30.42958847747808,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-04",
+      "price": 0.0005509142721680068,
+      "positionValue": 1308611.2271471217,
+      "cumulativeReturn": 30.86112271471217,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-04-05",
+      "price": 0.0005542117571240226,
+      "positionValue": 1309328.2743948735,
+      "cumulativeReturn": 30.932827439487355,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-06",
+      "price": 0.0006344278952325916,
+      "positionValue": 1310045.714545227,
+      "cumulativeReturn": 31.00457145452269,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-07",
+      "price": 0.0006425073872308823,
+      "positionValue": 1310763.547813471,
+      "cumulativeReturn": 31.076354781347092,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-08",
+      "price": 0.000679402420926695,
+      "positionValue": 1311481.7744150127,
+      "cumulativeReturn": 31.148177441501268,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-09",
+      "price": 0.0006000185489394899,
+      "positionValue": 1312200.3945653772,
+      "cumulativeReturn": 31.220039456537712,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-10",
+      "price": 0.0006550581680842222,
+      "positionValue": 1312919.4084802074,
+      "cumulativeReturn": 31.291940848020744,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-11",
+      "price": 0.0006384014612045146,
+      "positionValue": 1313638.8163752651,
+      "cumulativeReturn": 31.363881637526514,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-12",
+      "price": 0.0006069962780780185,
+      "positionValue": 1314358.6184664296,
+      "cumulativeReturn": 31.435861846642965,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-13",
+      "price": 0.0006268081196921407,
+      "positionValue": 1315078.814969699,
+      "cumulativeReturn": 31.50788149696989,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-14",
+      "price": 0.0006159839933392159,
+      "positionValue": 1315799.406101189,
+      "cumulativeReturn": 31.579940610118907,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-15",
+      "price": 0.0006289885767754856,
+      "positionValue": 1316520.392077135,
+      "cumulativeReturn": 31.652039207713496,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-16",
+      "price": 0.0006336943576523139,
+      "positionValue": 1317241.7731138896,
+      "cumulativeReturn": 31.724177311388964,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-17",
+      "price": 0.0006313030430861352,
+      "positionValue": 1324348.6008996423,
+      "cumulativeReturn": 32.43486008996423,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-04-18",
+      "price": 0.0006281398453575237,
+      "positionValue": 1325074.2713658886,
+      "cumulativeReturn": 32.50742713658886,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-19",
+      "price": 0.0006184281101247187,
+      "positionValue": 1325800.3394597878,
+      "cumulativeReturn": 32.58003394597878,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-20",
+      "price": 0.0006316101082770871,
+      "positionValue": 1326526.8053992179,
+      "cumulativeReturn": 32.65268053992179,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-21",
+      "price": 0.0006343545802304799,
+      "positionValue": 1336505.7180526461,
+      "cumulativeReturn": 33.65057180526461,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-04-22",
+      "price": 0.0005693224680616094,
+      "positionValue": 1337238.049952949,
+      "cumulativeReturn": 33.72380499529489,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-23",
+      "price": 0.0005564690818031505,
+      "positionValue": 1337970.7831310052,
+      "cumulativeReturn": 33.79707831310053,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-24",
+      "price": 0.0005651877534763512,
+      "positionValue": 1338703.9178066934,
+      "cumulativeReturn": 33.87039178066934,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-25",
+      "price": 0.0005586731595104885,
+      "positionValue": 1339437.4542000121,
+      "cumulativeReturn": 33.943745420001214,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-26",
+      "price": 0.0005494483121156261,
+      "positionValue": 1340171.3925310806,
+      "cumulativeReturn": 34.01713925310806,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-27",
+      "price": 0.0005583811898977151,
+      "positionValue": 1340905.7330201387,
+      "cumulativeReturn": 34.09057330201387,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-28",
+      "price": 0.0005556448810103524,
+      "positionValue": 1352266.0984903765,
+      "cumulativeReturn": 35.22660984903765,
+      "inRange": true,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-04-29",
+      "price": 0.0005572926410022838,
+      "positionValue": 1360968.836311103,
+      "cumulativeReturn": 36.09688363111031,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-04-30",
+      "price": 0.0005571759068884348,
+      "positionValue": 1369338.8821545357,
+      "cumulativeReturn": 36.93388821545358,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-05-01",
+      "price": 0.0005435380119413505,
+      "positionValue": 1370089.2048296889,
+      "cumulativeReturn": 37.00892048296889,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-02",
+      "price": 0.0005423262969890157,
+      "positionValue": 1378050.084885625,
+      "cumulativeReturn": 37.80500848856249,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-05-03",
+      "price": 0.000544844355544016,
+      "positionValue": 1382093.6247568296,
+      "cumulativeReturn": 38.20936247568296,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-05-04",
+      "price": 0.0005525180094463875,
+      "positionValue": 1382850.9363320388,
+      "cumulativeReturn": 38.28509363320388,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-05",
+      "price": 0.0005486363976625599,
+      "positionValue": 1383608.6628724947,
+      "cumulativeReturn": 38.360866287249465,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-06",
+      "price": 0.0005514574806512087,
+      "positionValue": 1384366.8046055755,
+      "cumulativeReturn": 38.43668046055755,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-07",
+      "price": 0.0005512843939542449,
+      "positionValue": 1393399.3582130936,
+      "cumulativeReturn": 39.33993582130936,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-05-08",
+      "price": 0.0004541527567274206,
+      "positionValue": 1394162.8647107447,
+      "cumulativeReturn": 39.41628647107447,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-09",
+      "price": 0.00042730426944792034,
+      "positionValue": 1394926.7895681204,
+      "cumulativeReturn": 39.492678956812036,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-10",
+      "price": 0.00038646637208877464,
+      "positionValue": 1395691.1330144592,
+      "cumulativeReturn": 39.56911330144592,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-11",
+      "price": 0.00039883896415077733,
+      "positionValue": 1396455.8952791246,
+      "cumulativeReturn": 39.64558952791246,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-12",
+      "price": 0.0004012635309735647,
+      "positionValue": 1397221.0765916063,
+      "cumulativeReturn": 39.72210765916063,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-13",
+      "price": 0.0003734472513387095,
+      "positionValue": 1397986.6771815196,
+      "cumulativeReturn": 39.79866771815196,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-14",
+      "price": 0.00038378801281411065,
+      "positionValue": 1398752.6972786053,
+      "cumulativeReturn": 39.87526972786053,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-15",
+      "price": 0.000392504651266507,
+      "positionValue": 1399519.1371127306,
+      "cumulativeReturn": 39.951913711273065,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-16",
+      "price": 0.0003938932023112815,
+      "positionValue": 1411206.6583390657,
+      "cumulativeReturn": 41.12066583390657,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-05-17",
+      "price": 0.00040470430723666984,
+      "positionValue": 1411979.9222614432,
+      "cumulativeReturn": 41.19799222614432,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-18",
+      "price": 0.0003994343208308931,
+      "positionValue": 1412753.6098900796,
+      "cumulativeReturn": 41.27536098900796,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-19",
+      "price": 0.0003959288735689448,
+      "positionValue": 1413527.7214571426,
+      "cumulativeReturn": 41.35277214571426,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-20",
+      "price": 0.000396370505492753,
+      "positionValue": 1431803.65555719,
+      "cumulativeReturn": 43.18036555571901,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-05-21",
+      "price": 0.00039249270840908674,
+      "positionValue": 1432588.2055054405,
+      "cumulativeReturn": 43.258820550544044,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-22",
+      "price": 0.0003761904634570576,
+      "positionValue": 1433373.1853440737,
+      "cumulativeReturn": 43.33731853440737,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-23",
+      "price": 0.0003968534850253544,
+      "positionValue": 1434158.5953086459,
+      "cumulativeReturn": 43.41585953086459,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-24",
+      "price": 0.00039567167257206846,
+      "positionValue": 1439719.9987332122,
+      "cumulativeReturn": 43.971999873321224,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-05-25",
+      "price": 0.00039273580191451663,
+      "positionValue": 1440508.886403751,
+      "cumulativeReturn": 44.050888640375106,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-26",
+      "price": 0.00039039225529736017,
+      "positionValue": 1441298.2063415067,
+      "cumulativeReturn": 44.12982063415067,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-27",
+      "price": 0.0003760894896880259,
+      "positionValue": 1442087.9587833376,
+      "cumulativeReturn": 44.20879587833376,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-28",
+      "price": 0.0003734237953641433,
+      "positionValue": 1442878.1439662327,
+      "cumulativeReturn": 44.28781439662327,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-29",
+      "price": 0.0003804882263986423,
+      "positionValue": 1443668.76212731,
+      "cumulativeReturn": 44.36687621273101,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-30",
+      "price": 0.00039587919106193816,
+      "positionValue": 1444459.8135038181,
+      "cumulativeReturn": 44.445981350381814,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-05-31",
+      "price": 0.00039459755273664243,
+      "positionValue": 1453133.944662518,
+      "cumulativeReturn": 45.31339446625181,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-06-01",
+      "price": 0.0003938037088985358,
+      "positionValue": 1453930.1824404153,
+      "cumulativeReturn": 45.39301824404153,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-02",
+      "price": 0.00038361288629746795,
+      "positionValue": 1454726.8565129854,
+      "cumulativeReturn": 45.47268565129855,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-03",
+      "price": 0.00038537813469691136,
+      "positionValue": 1468195.3507670164,
+      "cumulativeReturn": 46.81953507670164,
+      "inRange": true,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-04",
+      "price": 0.00038340165939349056,
+      "positionValue": 1468999.8413701765,
+      "cumulativeReturn": 46.899984137017654,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-05",
+      "price": 0.00041337284732881975,
+      "positionValue": 1469804.7727901053,
+      "cumulativeReturn": 46.98047727901053,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-06",
+      "price": 0.00040329953143950593,
+      "positionValue": 1470610.1452683464,
+      "cumulativeReturn": 47.06101452683464,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-07",
+      "price": 0.0003954532651713417,
+      "positionValue": 1471415.9590465757,
+      "cumulativeReturn": 47.14159590465757,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-08",
+      "price": 0.00039863350085773746,
+      "positionValue": 1472222.2143666013,
+      "cumulativeReturn": 47.222221436660135,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-09",
+      "price": 0.0003724501001295475,
+      "positionValue": 1473028.9114703638,
+      "cumulativeReturn": 47.302891147036384,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-10",
+      "price": 0.00035617020760111707,
+      "positionValue": 1473836.0505999366,
+      "cumulativeReturn": 47.38360505999366,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-11",
+      "price": 0.0003610207605543618,
+      "positionValue": 1474643.6319975257,
+      "cumulativeReturn": 47.46436319975257,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-12",
+      "price": 0.0003772153667610865,
+      "positionValue": 1475451.6559054696,
+      "cumulativeReturn": 47.54516559054696,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-13",
+      "price": 0.00038830137987609333,
+      "positionValue": 1476260.1225662397,
+      "cumulativeReturn": 47.626012256623966,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-14",
+      "price": 0.0003950666365738239,
+      "positionValue": 1477069.0322224405,
+      "cumulativeReturn": 47.706903222244044,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-15",
+      "price": 0.00039338895033355674,
+      "positionValue": 1482473.3118240547,
+      "cumulativeReturn": 48.24733118240547,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-06-16",
+      "price": 0.00039317792144691257,
+      "positionValue": 1496090.2020367866,
+      "cumulativeReturn": 49.60902020367866,
+      "inRange": true,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-17",
+      "price": 0.00039806392657927494,
+      "positionValue": 1496909.9774899574,
+      "cumulativeReturn": 49.690997748995734,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-18",
+      "price": 0.00039637494612162864,
+      "positionValue": 1509069.038959584,
+      "cumulativeReturn": 50.9069038959584,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-06-19",
+      "price": 0.00039617079565252596,
+      "positionValue": 1513979.7725025807,
+      "cumulativeReturn": 51.397977250258066,
+      "inRange": true,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-20",
+      "price": 0.0004166241441576526,
+      "positionValue": 1514809.3504601163,
+      "cumulativeReturn": 51.48093504601163,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-21",
+      "price": 0.000436244236451498,
+      "positionValue": 1515639.3829809164,
+      "cumulativeReturn": 51.563938298091635,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-22",
+      "price": 0.0004491193383937393,
+      "positionValue": 1516469.8703140568,
+      "cumulativeReturn": 51.64698703140568,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-23",
+      "price": 0.00041366814343785254,
+      "positionValue": 1517300.8127087494,
+      "cumulativeReturn": 51.73008127087494,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-24",
+      "price": 0.00040961557424739806,
+      "positionValue": 1518132.2104143433,
+      "cumulativeReturn": 51.81322104143433,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-25",
+      "price": 0.00041392337595292506,
+      "positionValue": 1518964.0636803238,
+      "cumulativeReturn": 51.89640636803238,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-26",
+      "price": 0.0004147402473246555,
+      "positionValue": 1529313.7992025476,
+      "cumulativeReturn": 52.93137992025476,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-06-27",
+      "price": 0.00041291780590459296,
+      "positionValue": 1536775.7005663116,
+      "cumulativeReturn": 53.67757005663116,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-06-28",
+      "price": 0.00041055796271766956,
+      "positionValue": 1537617.7694433343,
+      "cumulativeReturn": 53.76177694433343,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-29",
+      "price": 0.0003995954847663259,
+      "positionValue": 1538460.2997279607,
+      "cumulativeReturn": 53.846029972796075,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-06-30",
+      "price": 0.00040142730824500975,
+      "positionValue": 1545810.9665536964,
+      "cumulativeReturn": 54.58109665536964,
+      "inRange": true,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-01",
+      "price": 0.00041686723140086957,
+      "positionValue": 1546657.9862613971,
+      "cumulativeReturn": 54.66579862613972,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-02",
+      "price": 0.0003880678389754005,
+      "positionValue": 1547505.4700894856,
+      "cumulativeReturn": 54.75054700894857,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-03",
+      "price": 0.00038563284113989337,
+      "positionValue": 1548353.4182922745,
+      "cumulativeReturn": 54.835341829227445,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-04",
+      "price": 0.00039804151030928796,
+      "positionValue": 1549201.8311242154,
+      "cumulativeReturn": 54.92018311242154,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-05",
+      "price": 0.0003976566617477975,
+      "positionValue": 1552001.1867697882,
+      "cumulativeReturn": 55.20011867697882,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-07-06",
+      "price": 0.0003889789916408339,
+      "positionValue": 1552851.598378977,
+      "cumulativeReturn": 55.2851598378977,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-07",
+      "price": 0.0003939622127444874,
+      "positionValue": 1553702.47596713,
+      "cumulativeReturn": 55.37024759671299,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-08",
+      "price": 0.0003831438854589289,
+      "positionValue": 1554553.8197895777,
+      "cumulativeReturn": 55.455381978957774,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-09",
+      "price": 0.0003604071952221417,
+      "positionValue": 1555405.6301017911,
+      "cumulativeReturn": 55.54056301017911,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-10",
+      "price": 0.0003389630237419243,
+      "positionValue": 1556257.907159381,
+      "cumulativeReturn": 55.62579071593811,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-11",
+      "price": 0.0003387300854571011,
+      "positionValue": 1573122.0585400627,
+      "cumulativeReturn": 57.31220585400627,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-07-12",
+      "price": 0.00034025115710506986,
+      "positionValue": 1578473.6466085208,
+      "cumulativeReturn": 57.84736466085207,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-07-13",
+      "price": 0.00033674689162854874,
+      "positionValue": 1579338.5636751556,
+      "cumulativeReturn": 57.93385636751557,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-14",
+      "price": 0.00033189093099207065,
+      "positionValue": 1580203.9546689503,
+      "cumulativeReturn": 58.020395466895025,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-15",
+      "price": 0.00031909095495066077,
+      "positionValue": 1581069.8198495908,
+      "cumulativeReturn": 58.10698198495907,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-16",
+      "price": 0.00029725287610383674,
+      "positionValue": 1581936.1594769056,
+      "cumulativeReturn": 58.19361594769056,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-17",
+      "price": 0.00028710743041532983,
+      "positionValue": 1582802.9738108655,
+      "cumulativeReturn": 58.280297381086555,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-18",
+      "price": 0.00028257637929737935,
+      "positionValue": 1583670.263111584,
+      "cumulativeReturn": 58.36702631115839,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-19",
+      "price": 0.00027817960016609427,
+      "positionValue": 1584538.0276393162,
+      "cumulativeReturn": 58.45380276393162,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-20",
+      "price": 0.00026635571715860867,
+      "positionValue": 1585406.267654461,
+      "cumulativeReturn": 58.54062676544611,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-21",
+      "price": 0.0002656666161740568,
+      "positionValue": 1605255.8961793785,
+      "cumulativeReturn": 60.52558961793785,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-07-22",
+      "price": 0.00026743591546904254,
+      "positionValue": 1627801.5800785366,
+      "cumulativeReturn": 62.78015800785366,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-07-23",
+      "price": 0.0002761260093032207,
+      "positionValue": 1628693.5261498126,
+      "cumulativeReturn": 62.86935261498127,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-24",
+      "price": 0.00026967145291427534,
+      "positionValue": 1629585.9609586617,
+      "cumulativeReturn": 62.95859609586617,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-25",
+      "price": 0.0002689692308959808,
+      "positionValue": 1653324.5319248592,
+      "cumulativeReturn": 65.33245319248591,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-07-26",
+      "price": 0.00026678317660471803,
+      "positionValue": 1654230.463175229,
+      "cumulativeReturn": 65.4230463175229,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-27",
+      "price": 0.0002588104935808981,
+      "positionValue": 1655136.890826284,
+      "cumulativeReturn": 65.51368908262839,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-28",
+      "price": 0.00026403839642513596,
+      "positionValue": 1656043.8151500244,
+      "cumulativeReturn": 65.60438151500244,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-07-29",
+      "price": 0.00026394589563191246,
+      "positionValue": 1677330.6093796073,
+      "cumulativeReturn": 67.73306093796072,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-07-30",
+      "price": 0.0002630050084989919,
+      "positionValue": 1698124.8349752265,
+      "cumulativeReturn": 69.81248349752266,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-07-31",
+      "price": 0.0002705561489567437,
+      "positionValue": 1699055.3143368568,
+      "cumulativeReturn": 69.90553143368568,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-01",
+      "price": 0.00028713838651865165,
+      "positionValue": 1699986.3035501922,
+      "cumulativeReturn": 69.99863035501922,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-02",
+      "price": 0.0002941641867365992,
+      "positionValue": 1700917.8028946032,
+      "cumulativeReturn": 70.09178028946033,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-03",
+      "price": 0.00028516323964870014,
+      "positionValue": 1701849.812649614,
+      "cumulativeReturn": 70.1849812649614,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-04",
+      "price": 0.00026873039828607904,
+      "positionValue": 1702782.3330949014,
+      "cumulativeReturn": 70.27823330949015,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-05",
+      "price": 0.00027678446831625803,
+      "positionValue": 1703715.364510296,
+      "cumulativeReturn": 70.3715364510296,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-06",
+      "price": 0.000272141081781632,
+      "positionValue": 1704648.907175781,
+      "cumulativeReturn": 70.4648907175781,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-07",
+      "price": 0.00025606581167843983,
+      "positionValue": 1705582.9613714938,
+      "cumulativeReturn": 70.55829613714938,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-08",
+      "price": 0.00024884498855588235,
+      "positionValue": 1706517.5273777246,
+      "cumulativeReturn": 70.65175273777247,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-09",
+      "price": 0.00023474096968152805,
+      "positionValue": 1707452.605474918,
+      "cumulativeReturn": 70.7452605474918,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-10",
+      "price": 0.00023565905567619292,
+      "positionValue": 1725117.2119832998,
+      "cumulativeReturn": 72.51172119832998,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-08-11",
+      "price": 0.00023700500839945616,
+      "positionValue": 1726062.4816884962,
+      "cumulativeReturn": 72.60624816884962,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-12",
+      "price": 0.00021791522746899758,
+      "positionValue": 1727008.2693496954,
+      "cumulativeReturn": 72.70082693496954,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-13",
+      "price": 0.00021006373452558727,
+      "positionValue": 1727954.575250709,
+      "cumulativeReturn": 72.7954575250709,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-14",
+      "price": 0.0002196039447335141,
+      "positionValue": 1728901.3996755038,
+      "cumulativeReturn": 72.89013996755038,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-15",
+      "price": 0.00022575778792914892,
+      "positionValue": 1729848.7429082028,
+      "cumulativeReturn": 72.98487429082027,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-16",
+      "price": 0.00022621989019589044,
+      "positionValue": 1740817.9520171275,
+      "cumulativeReturn": 74.08179520171275,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-08-17",
+      "price": 0.00022313268990652123,
+      "positionValue": 1741771.824867548,
+      "cumulativeReturn": 74.1771824867548,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-18",
+      "price": 0.000231812205555357,
+      "positionValue": 1742726.2203880234,
+      "cumulativeReturn": 74.27262203880234,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-19",
+      "price": 0.00024561260769958096,
+      "positionValue": 1743681.1388649484,
+      "cumulativeReturn": 74.36811388649485,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-20",
+      "price": 0.00023044798028980454,
+      "positionValue": 1744636.5805848744,
+      "cumulativeReturn": 74.46365805848744,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-21",
+      "price": 0.0002368036116115742,
+      "positionValue": 1745592.54583451,
+      "cumulativeReturn": 74.55925458345098,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-22",
+      "price": 0.0002069405657629011,
+      "positionValue": 1746549.0349007205,
+      "cumulativeReturn": 74.65490349007204,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-23",
+      "price": 0.00020908317072978785,
+      "positionValue": 1747506.048070529,
+      "cumulativeReturn": 74.7506048070529,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-24",
+      "price": 0.00020892248715738702,
+      "positionValue": 1770245.2296066952,
+      "cumulativeReturn": 77.02452296066953,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-08-25",
+      "price": 0.00022848284439891232,
+      "positionValue": 1771215.226992781,
+      "cumulativeReturn": 77.1215226992781,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-26",
+      "price": 0.00021719382162100218,
+      "positionValue": 1772185.755884284,
+      "cumulativeReturn": 77.2185755884284,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-27",
+      "price": 0.000222499580699423,
+      "positionValue": 1773156.8165724396,
+      "cumulativeReturn": 77.31568165724396,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-28",
+      "price": 0.0002220941017840481,
+      "positionValue": 1789760.3453640935,
+      "cumulativeReturn": 78.97603453640936,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-08-29",
+      "price": 0.00022928472048636697,
+      "positionValue": 1790741.035964293,
+      "cumulativeReturn": 79.0741035964293,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-08-30",
+      "price": 0.0002284426873018074,
+      "positionValue": 1802584.7840329504,
+      "cumulativeReturn": 80.25847840329504,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-08-31",
+      "price": 0.00022799851024174846,
+      "positionValue": 1803572.5017228315,
+      "cumulativeReturn": 80.35725017228316,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-01",
+      "price": 0.000232279100210978,
+      "positionValue": 1804560.760627885,
+      "cumulativeReturn": 80.45607606278851,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-02",
+      "price": 0.00023130457341103504,
+      "positionValue": 1830292.784152984,
+      "cumulativeReturn": 83.02927841529839,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-09-03",
+      "price": 0.0002243192434260178,
+      "positionValue": 1831295.6843086842,
+      "cumulativeReturn": 83.12956843086842,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-04",
+      "price": 0.00023206865062771025,
+      "positionValue": 1832299.1339987163,
+      "cumulativeReturn": 83.22991339987162,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-05",
+      "price": 0.0002322143351171089,
+      "positionValue": 1886702.8550510108,
+      "cumulativeReturn": 88.67028550510109,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-09-06",
+      "price": 0.0002336355770638872,
+      "positionValue": 1887736.6648346004,
+      "cumulativeReturn": 88.77366648346005,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-07",
+      "price": 0.00023195067422658114,
+      "positionValue": 1888771.0410893043,
+      "cumulativeReturn": 88.87710410893042,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-08",
+      "price": 0.0002320135185546236,
+      "positionValue": 1901637.3032717549,
+      "cumulativeReturn": 90.16373032717549,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-09-09",
+      "price": 0.00023222033624494727,
+      "positionValue": 1915026.75431395,
+      "cumulativeReturn": 91.50267543139499,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-09-10",
+      "price": 0.00023028200506812713,
+      "positionValue": 1916076.0840423412,
+      "cumulativeReturn": 91.60760840423411,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-11",
+      "price": 0.00022438526868453015,
+      "positionValue": 1917125.988745926,
+      "cumulativeReturn": 91.7125988745926,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-12",
+      "price": 0.00021277353795044572,
+      "positionValue": 1918176.4687397594,
+      "cumulativeReturn": 91.81764687397595,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-13",
+      "price": 0.00021450576078297517,
+      "positionValue": 1919227.524339069,
+      "cumulativeReturn": 91.9227524339069,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-14",
+      "price": 0.00021670308440501618,
+      "positionValue": 1920279.1558592548,
+      "cumulativeReturn": 92.02791558592548,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-15",
+      "price": 0.00022143709809093487,
+      "positionValue": 1921331.36361589,
+      "cumulativeReturn": 92.13313636158901,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-16",
+      "price": 0.0002217363581991354,
+      "positionValue": 1934251.5174195562,
+      "cumulativeReturn": 93.42515174195562,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-09-17",
+      "price": 0.00021752496488887637,
+      "positionValue": 1935311.3812647176,
+      "cumulativeReturn": 93.53113812647176,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-18",
+      "price": 0.0002180818677417978,
+      "positionValue": 1945360.2865772555,
+      "cumulativeReturn": 94.53602865772555,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-09-19",
+      "price": 0.00022380603308181347,
+      "positionValue": 1946426.2374192155,
+      "cumulativeReturn": 94.64262374192155,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-20",
+      "price": 0.00022287407745766812,
+      "positionValue": 1949405.3860150725,
+      "cumulativeReturn": 94.94053860150726,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-09-21",
+      "price": 0.00022439187426182388,
+      "positionValue": 1961822.3832081216,
+      "cumulativeReturn": 96.18223832081216,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-09-22",
+      "price": 0.0002383840863301694,
+      "positionValue": 1962897.3543770027,
+      "cumulativeReturn": 96.28973543770026,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-23",
+      "price": 0.00023961093612053804,
+      "positionValue": 1963972.9145711819,
+      "cumulativeReturn": 96.39729145711819,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-24",
+      "price": 0.00024086523509319355,
+      "positionValue": 1965049.0641134128,
+      "cumulativeReturn": 96.50490641134127,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-25",
+      "price": 0.00025887224534413644,
+      "positionValue": 1966125.8033266256,
+      "cumulativeReturn": 96.61258033266256,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-26",
+      "price": 0.0002483161231297856,
+      "positionValue": 1967203.132533928,
+      "cumulativeReturn": 96.72031325339279,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-27",
+      "price": 0.00024908921507748824,
+      "positionValue": 1974296.8426321603,
+      "cumulativeReturn": 97.42968426321603,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-09-28",
+      "price": 0.00024202869923575196,
+      "positionValue": 1975378.6491212738,
+      "cumulativeReturn": 97.53786491212738,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-29",
+      "price": 0.00023682546569228917,
+      "positionValue": 1976461.0483810662,
+      "cumulativeReturn": 97.64610483810662,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-09-30",
+      "price": 0.0002419240173344746,
+      "positionValue": 1977544.0407363435,
+      "cumulativeReturn": 97.75440407363435,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-01",
+      "price": 0.00023058083941728116,
+      "positionValue": 1978627.6265120895,
+      "cumulativeReturn": 97.86276265120895,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-02",
+      "price": 0.00022360890829411137,
+      "positionValue": 1979711.806033466,
+      "cumulativeReturn": 97.9711806033466,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-03",
+      "price": 0.00022114287600554137,
+      "positionValue": 1980796.579625813,
+      "cumulativeReturn": 98.07965796258131,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-04",
+      "price": 0.000223160937468293,
+      "positionValue": 1981881.947614649,
+      "cumulativeReturn": 98.18819476146491,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-05",
+      "price": 0.00022175613603373374,
+      "positionValue": 1982967.9103256708,
+      "cumulativeReturn": 98.29679103256709,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-06",
+      "price": 0.00021317045509069787,
+      "positionValue": 1984054.4680847535,
+      "cumulativeReturn": 98.40544680847535,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-07",
+      "price": 0.00022446513030148285,
+      "positionValue": 1985141.6212179507,
+      "cumulativeReturn": 98.51416212179507,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-08",
+      "price": 0.00022104728990023146,
+      "positionValue": 1986229.3700514948,
+      "cumulativeReturn": 98.62293700514948,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-09",
+      "price": 0.0002288469379444055,
+      "positionValue": 1987317.714911797,
+      "cumulativeReturn": 98.73177149117971,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-10",
+      "price": 0.00026123131835473744,
+      "positionValue": 1988406.6561254475,
+      "cumulativeReturn": 98.84066561254474,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-11",
+      "price": 0.00026715381715082157,
+      "positionValue": 1989496.194019215,
+      "cumulativeReturn": 98.9496194019215,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-12",
+      "price": 0.00024089178612529853,
+      "positionValue": 1990586.3289200475,
+      "cumulativeReturn": 99.05863289200475,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-13",
+      "price": 0.00023532604765542,
+      "positionValue": 1991677.0611550722,
+      "cumulativeReturn": 99.16770611550722,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-14",
+      "price": 0.00024201014959714318,
+      "positionValue": 1992768.3910515956,
+      "cumulativeReturn": 99.27683910515955,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-15",
+      "price": 0.0002512221255596114,
+      "positionValue": 1993860.3189371033,
+      "cumulativeReturn": 99.38603189371032,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-16",
+      "price": 0.0002571704347086722,
+      "positionValue": 1994952.8451392606,
+      "cumulativeReturn": 99.49528451392607,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-17",
+      "price": 0.00026117897516522183,
+      "positionValue": 1996045.9699859123,
+      "cumulativeReturn": 99.60459699859123,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-18",
+      "price": 0.0002574369695119321,
+      "positionValue": 1997139.6938050827,
+      "cumulativeReturn": 99.71396938050827,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-19",
+      "price": 0.0002509350598585763,
+      "positionValue": 1998234.016924976,
+      "cumulativeReturn": 99.8234016924976,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-20",
+      "price": 0.0002511636476478163,
+      "positionValue": 2014796.2666665446,
+      "cumulativeReturn": 101.47962666665447,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-10-21",
+      "price": 0.00025840348566886725,
+      "positionValue": 2015900.2646208825,
+      "cumulativeReturn": 101.59002646208826,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-22",
+      "price": 0.0002629159845314431,
+      "positionValue": 2017004.8675056063,
+      "cumulativeReturn": 101.70048675056063,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-23",
+      "price": 0.00025986254074250093,
+      "positionValue": 2018110.0756521847,
+      "cumulativeReturn": 101.81100756521846,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-24",
+      "price": 0.0002542560988007463,
+      "positionValue": 2019215.8893922681,
+      "cumulativeReturn": 101.92158893922681,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-25",
+      "price": 0.00025299693998577337,
+      "positionValue": 2023358.04708889,
+      "cumulativeReturn": 102.33580470888901,
+      "inRange": true,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-26",
+      "price": 0.0002401408416480251,
+      "positionValue": 2024466.7364297607,
+      "cumulativeReturn": 102.44667364297607,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-27",
+      "price": 0.00024300378470578534,
+      "positionValue": 2025576.03327164,
+      "cumulativeReturn": 102.55760332716402,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-28",
+      "price": 0.0002507293196239881,
+      "positionValue": 2026685.9379474053,
+      "cumulativeReturn": 102.66859379474053,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-29",
+      "price": 0.0002568772416359103,
+      "positionValue": 2027796.450790116,
+      "cumulativeReturn": 102.7796450790116,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-30",
+      "price": 0.0002634890544550123,
+      "positionValue": 2028907.5721330147,
+      "cumulativeReturn": 102.89075721330147,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-10-31",
+      "price": 0.00025943156445616905,
+      "positionValue": 2030019.302309526,
+      "cumulativeReturn": 103.00193023095258,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-11-01",
+      "price": 0.00025802772509250934,
+      "positionValue": 2031131.6416532572,
+      "cumulativeReturn": 103.11316416532573,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-11-02",
+      "price": 0.0002561652182086443,
+      "positionValue": 2032244.5904979988,
+      "cumulativeReturn": 103.22445904979986,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-11-03",
+      "price": 0.00027797867550576825,
+      "positionValue": 2033358.1491777238,
+      "cumulativeReturn": 103.33581491777237,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-11-04",
+      "price": 0.0003042922917414724,
+      "positionValue": 2034472.3180265883,
+      "cumulativeReturn": 103.44723180265882,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-11-05",
+      "price": 0.00029196118084690004,
+      "positionValue": 2035587.0973789317,
+      "cumulativeReturn": 103.55870973789317,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-11-06",
+      "price": 0.0003025577636840212,
+      "positionValue": 2036702.4875692762,
+      "cumulativeReturn": 103.67024875692763,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-11-07",
+      "price": 0.00029040712976674977,
+      "positionValue": 2037818.4889323278,
+      "cumulativeReturn": 103.78184889323279,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-11-08",
+      "price": 0.0002937608428669318,
+      "positionValue": 2038935.1018029756,
+      "cumulativeReturn": 103.89351018029755,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-11-09",
+      "price": 0.00027950279259292076,
+      "positionValue": 2040052.3265162923,
+      "cumulativeReturn": 104.00523265162921,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-11-10",
+      "price": 0.0002799867099861507,
+      "positionValue": 2057887.73568738,
+      "cumulativeReturn": 105.788773568738,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-11-11",
+      "price": 0.00029241825943525417,
+      "positionValue": 2059015.3454055649,
+      "cumulativeReturn": 105.90153454055648,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-11-12",
+      "price": 0.00029296357447257236,
+      "positionValue": 2083957.839210579,
+      "cumulativeReturn": 108.39578392105788,
+      "inRange": true,
+      "rebalanceEvent": false
+    },
+    {
+      "date": "2025-11-13",
+      "price": 0.00030878154609111005,
+      "positionValue": 2085099.7339169956,
+      "cumulativeReturn": 108.50997339169956,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-11-14",
+      "price": 0.0003213109637407306,
+      "positionValue": 2086242.2543191419,
+      "cumulativeReturn": 108.62422543191418,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-11-15",
+      "price": 0.0003154043612560298,
+      "positionValue": 2087385.4007598646,
+      "cumulativeReturn": 108.73854007598646,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-11-16",
+      "price": 0.00032281265528765087,
+      "positionValue": 2088529.1735821988,
+      "cumulativeReturn": 108.85291735821987,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-11-17",
+      "price": 0.0003309026157564818,
+      "positionValue": 2089673.573129367,
+      "cumulativeReturn": 108.96735731293671,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-11-18",
+      "price": 0.000320797931575875,
+      "positionValue": 2090818.5997447805,
+      "cumulativeReturn": 109.08185997447804,
+      "inRange": false,
+      "rebalanceEvent": true
+    },
+    {
+      "date": "2025-11-19",
+      "price": 0.0003228595551949,
+      "positionValue": 2091964.2537720378,
+      "cumulativeReturn": 109.19642537720378,
+      "inRange": false,
+      "rebalanceEvent": true
+    }
+  ]
+}

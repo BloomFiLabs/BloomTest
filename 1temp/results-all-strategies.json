@@ -1,0 +1,6001 @@
+{
+  "metrics": {
+    "totalReturn": 0.2514060865013162,
+    "sharpeRatio": 0.17860400215689443,
+    "maxDrawdown": 0.07088744882292351,
+    "finalValue": 100251.40608650132
+  },
+  "trades": [
+    {
+      "id": "volatile-1-1763178098741-0.41129797453263806",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20000,
+      "price": 0.00023208959386179632,
+      "timestamp": "2025-09-09T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178098741-0.4134046287587808",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20000,
+      "price": 0.00023208959386179632,
+      "timestamp": "2025-09-09T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178098742-0.30051425678664834",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12000,
+      "price": 0.00023208959386179632,
+      "timestamp": "2025-09-09T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178098742-0.2193830148663446",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9000,
+      "price": 0.00023208959386179632,
+      "timestamp": "2025-09-09T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178098742-0.24751893226243982",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9000,
+      "price": 0.00023208959386179632,
+      "timestamp": "2025-09-09T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178098742-0.6302661477475789",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800,
+      "price": 0.00023208959386179632,
+      "timestamp": "2025-09-09T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178099561-0.18887420667711063",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20000.002034758087,
+      "price": 0.00022990363633636625,
+      "timestamp": "2025-09-10T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178099561-0.49009334131114646",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20000.002034758087,
+      "price": 0.00022990363633636625,
+      "timestamp": "2025-09-10T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178099561-0.5540630523973643",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12000.00122085485,
+      "price": 0.00022990363633636625,
+      "timestamp": "2025-09-10T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178099561-0.9335498951196121",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9000.000915641138,
+      "price": 0.00022990363633636625,
+      "timestamp": "2025-09-10T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178099561-0.8527156977826378",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9000.000915641138,
+      "price": 0.00022990363633636625,
+      "timestamp": "2025-09-10T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178099561-0.3685231706497373",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800.000488341941,
+      "price": 0.00022990363633636625,
+      "timestamp": "2025-09-10T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178100277-0.2917666205565732",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 19999.9846266059,
+      "price": 0.00022412706890293253,
+      "timestamp": "2025-09-11T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178100277-0.24418010301476645",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 19999.9846266059,
+      "price": 0.00022412706890293253,
+      "timestamp": "2025-09-11T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178100277-0.6810409847733496",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 11999.990775963539,
+      "price": 0.00022412706890293253,
+      "timestamp": "2025-09-11T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178100277-0.14188536467728452",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 8999.993081972654,
+      "price": 0.00022412706890293253,
+      "timestamp": "2025-09-11T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178100277-0.6043179113166555",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 8999.993081972654,
+      "price": 0.00022412706890293253,
+      "timestamp": "2025-09-11T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178100277-0.8148198642272373",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4799.996310385415,
+      "price": 0.00022412706890293253,
+      "timestamp": "2025-09-11T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178100993-0.3112438942791288",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 19999.877155201393,
+      "price": 0.00021203920660890579,
+      "timestamp": "2025-09-12T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178100994-0.5240482208863527",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 19999.877155201393,
+      "price": 0.00021203920660890579,
+      "timestamp": "2025-09-12T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178100994-0.8171159143881745",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 11999.926293120834,
+      "price": 0.00021203920660890579,
+      "timestamp": "2025-09-12T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178100994-0.8901474126143744",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 8999.944719840625,
+      "price": 0.00021203920660890579,
+      "timestamp": "2025-09-12T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178100994-0.9468983116853843",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 8999.944719840625,
+      "price": 0.00021203920660890579,
+      "timestamp": "2025-09-12T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178100994-0.602061694327638",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4799.970517248334,
+      "price": 0.00021203920660890579,
+      "timestamp": "2025-09-12T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178101813-0.46735335881219464",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 19999.528583924788,
+      "price": 0.00021413093613781674,
+      "timestamp": "2025-09-13T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178101813-0.6421583042843323",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 19999.528583924788,
+      "price": 0.00021413093613781674,
+      "timestamp": "2025-09-13T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178101813-0.911703613886893",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 11999.717150354873,
+      "price": 0.00021413093613781674,
+      "timestamp": "2025-09-13T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178101813-0.3408360603502445",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 8999.787862766154,
+      "price": 0.00021413093613781674,
+      "timestamp": "2025-09-13T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178101813-0.88491730237331",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 8999.787862766154,
+      "price": 0.00021413093613781674,
+      "timestamp": "2025-09-13T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178101813-0.4690626626195338",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4799.886860141948,
+      "price": 0.00021413093613781674,
+      "timestamp": "2025-09-13T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178102530-0.1255266343928484",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 19999.620170268572,
+      "price": 0.00021700856868257977,
+      "timestamp": "2025-09-14T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178102530-0.7640820274467883",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 19999.620170268572,
+      "price": 0.00021700856868257977,
+      "timestamp": "2025-09-14T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178102530-0.5951397995868841",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 11999.772102161143,
+      "price": 0.00021700856868257977,
+      "timestamp": "2025-09-14T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178102530-0.5737695438498888",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 8999.829076620857,
+      "price": 0.00021700856868257977,
+      "timestamp": "2025-09-14T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178102530-0.14479210211816174",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 8999.829076620857,
+      "price": 0.00021700856868257977,
+      "timestamp": "2025-09-14T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178102530-0.4419165583435478",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4799.9088408644575,
+      "price": 0.00021700856868257977,
+      "timestamp": "2025-09-14T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178103348-0.5518743812424446",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 19999.772998859,
+      "price": 0.00022094548996588748,
+      "timestamp": "2025-09-15T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178103348-0.8260354022816219",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 19999.772998859,
+      "price": 0.00022094548996588748,
+      "timestamp": "2025-09-15T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178103348-0.8571825647974534",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 11999.8637993154,
+      "price": 0.00022094548996588748,
+      "timestamp": "2025-09-15T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178103349-0.3122859336265543",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 8999.89784948655,
+      "price": 0.00022094548996588748,
+      "timestamp": "2025-09-15T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178103349-0.16050490624771407",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 8999.89784948655,
+      "price": 0.00022094548996588748,
+      "timestamp": "2025-09-15T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178103349-0.7170860550647914",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4799.94551972616,
+      "price": 0.00022094548996588748,
+      "timestamp": "2025-09-15T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178104053-0.48651968037467297",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20000.018818009892,
+      "price": 0.0002220682611228496,
+      "timestamp": "2025-09-16T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178104053-0.5952033192172999",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20000.018818009892,
+      "price": 0.0002220682611228496,
+      "timestamp": "2025-09-16T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178104053-0.6473942107557041",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12000.011290805936,
+      "price": 0.0002220682611228496,
+      "timestamp": "2025-09-16T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178104053-0.8516397363883867",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9000.008468104452,
+      "price": 0.0002220682611228496,
+      "timestamp": "2025-09-16T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178104053-0.023253855436268456",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9000.008468104452,
+      "price": 0.0002220682611228496,
+      "timestamp": "2025-09-16T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178104053-0.3036871637612527",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800.004516322374,
+      "price": 0.0002220682611228496,
+      "timestamp": "2025-09-16T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178104718-0.7682545841125189",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20000.111750617336,
+      "price": 0.0002177375036919876,
+      "timestamp": "2025-09-17T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178104718-0.7490364568415864",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20000.111750617336,
+      "price": 0.0002177375036919876,
+      "timestamp": "2025-09-17T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178104718-0.09728042946503135",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12000.067050370402,
+      "price": 0.0002177375036919876,
+      "timestamp": "2025-09-17T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178104718-0.3510802978556935",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9000.050287777802,
+      "price": 0.0002177375036919876,
+      "timestamp": "2025-09-17T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178104718-0.31587041255984294",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9000.050287777802,
+      "price": 0.0002177375036919876,
+      "timestamp": "2025-09-17T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178104718-0.6874199690178251",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800.026820148161,
+      "price": 0.0002177375036919876,
+      "timestamp": "2025-09-17T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178105426-0.5915953406740045",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 19999.78810720481,
+      "price": 0.00021783944112362266,
+      "timestamp": "2025-09-18T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178105426-0.9781402065117566",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 19999.78810720481,
+      "price": 0.00021783944112362266,
+      "timestamp": "2025-09-18T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178105426-0.8679567217622016",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 11999.872864322886,
+      "price": 0.00021783944112362266,
+      "timestamp": "2025-09-18T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178105427-0.3750638087825596",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 8999.904648242164,
+      "price": 0.00021783944112362266,
+      "timestamp": "2025-09-18T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178105427-0.8944877808885277",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 8999.904648242164,
+      "price": 0.00021783944112362266,
+      "timestamp": "2025-09-18T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178105427-0.8167914552040316",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4799.949145729154,
+      "price": 0.00021783944112362266,
+      "timestamp": "2025-09-18T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178106216-0.9566970770503882",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 19999.816330953094,
+      "price": 0.00022366165132929383,
+      "timestamp": "2025-09-19T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178106216-0.1261121061322107",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 19999.816330953094,
+      "price": 0.00022366165132929383,
+      "timestamp": "2025-09-19T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178106216-0.26622325951328873",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 11999.889798571858,
+      "price": 0.00022366165132929383,
+      "timestamp": "2025-09-19T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178106216-0.6692154180461114",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 8999.917348928891,
+      "price": 0.00022366165132929383,
+      "timestamp": "2025-09-19T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178106216-0.4091955098551906",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 8999.917348928891,
+      "price": 0.00022366165132929383,
+      "timestamp": "2025-09-19T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178106216-0.6537084020701284",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4799.955919428742,
+      "price": 0.00022366165132929383,
+      "timestamp": "2025-09-19T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178106929-0.10770330766251957",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20000.41140850699,
+      "price": 0.00022304511024180467,
+      "timestamp": "2025-09-20T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178106929-0.8425972962271832",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20000.41140850699,
+      "price": 0.00022304511024180467,
+      "timestamp": "2025-09-20T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178106929-0.22504424570454296",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12000.246845104195,
+      "price": 0.00022304511024180467,
+      "timestamp": "2025-09-20T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178106929-0.6500598528694944",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9000.185133828147,
+      "price": 0.00022304511024180467,
+      "timestamp": "2025-09-20T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178106929-0.7936697401375028",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9000.185133828147,
+      "price": 0.00022304511024180467,
+      "timestamp": "2025-09-20T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178106929-0.43094229841819265",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800.098738041678,
+      "price": 0.00022304511024180467,
+      "timestamp": "2025-09-20T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178107536-0.31048404146804287",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20000.368195187923,
+      "price": 0.00022480584905181403,
+      "timestamp": "2025-09-21T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178107536-0.5524932948646754",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20000.368195187923,
+      "price": 0.00022480584905181403,
+      "timestamp": "2025-09-21T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178107536-0.5486926205861465",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12000.220917112752,
+      "price": 0.00022480584905181403,
+      "timestamp": "2025-09-21T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178107536-0.3716700515413567",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9000.165687834564,
+      "price": 0.00022480584905181403,
+      "timestamp": "2025-09-21T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178107536-0.8951401964102099",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9000.165687834564,
+      "price": 0.00022480584905181403,
+      "timestamp": "2025-09-21T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178107536-0.7746546847296618",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800.0883668451015,
+      "price": 0.00022480584905181403,
+      "timestamp": "2025-09-21T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178108264-0.667155210690126",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20000.602256839018,
+      "price": 0.0002379024894606169,
+      "timestamp": "2025-09-22T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178108264-0.677411050505853",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20000.602256839018,
+      "price": 0.0002379024894606169,
+      "timestamp": "2025-09-22T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178108264-0.20739176250892688",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12000.361354103412,
+      "price": 0.0002379024894606169,
+      "timestamp": "2025-09-22T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178108264-0.3722603056545519",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9000.271015577559,
+      "price": 0.0002379024894606169,
+      "timestamp": "2025-09-22T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178108264-0.7082109298037936",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9000.271015577559,
+      "price": 0.0002379024894606169,
+      "timestamp": "2025-09-22T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178108264-0.6961878948933963",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800.144541641364,
+      "price": 0.0002379024894606169,
+      "timestamp": "2025-09-22T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178109055-0.85239992908273",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20002.31066781777,
+      "price": 0.00024004204797349496,
+      "timestamp": "2025-09-23T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178109055-0.8674238575639942",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20002.31066781777,
+      "price": 0.00024004204797349496,
+      "timestamp": "2025-09-23T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178109055-0.6873976791991201",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12001.386400690659,
+      "price": 0.00024004204797349496,
+      "timestamp": "2025-09-23T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178109055-0.12848273714587521",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9001.039800517994,
+      "price": 0.00024004204797349496,
+      "timestamp": "2025-09-23T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178109055-0.802857191573359",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9001.039800517994,
+      "price": 0.00024004204797349496,
+      "timestamp": "2025-09-23T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178109055-0.38442058070569185",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800.554560276264,
+      "price": 0.00024004204797349496,
+      "timestamp": "2025-09-23T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178109672-0.4001017555350037",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20002.638004802415,
+      "price": 0.00024070497141207765,
+      "timestamp": "2025-09-24T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178109672-0.681430419190816",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20002.638004802415,
+      "price": 0.00024070497141207765,
+      "timestamp": "2025-09-24T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178109672-0.2666103301451128",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12001.582802881447,
+      "price": 0.00024070497141207765,
+      "timestamp": "2025-09-24T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178109673-0.8776251127107266",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9001.187102161084,
+      "price": 0.00024070497141207765,
+      "timestamp": "2025-09-24T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178109673-0.5351534095009007",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9001.187102161084,
+      "price": 0.00024070497141207765,
+      "timestamp": "2025-09-24T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178109673-0.6940390886727951",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800.6331211525785,
+      "price": 0.00024070497141207765,
+      "timestamp": "2025-09-24T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178110241-0.500155654432917",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20002.770200371302,
+      "price": 0.0002581749213852104,
+      "timestamp": "2025-09-25T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178110241-0.658504199798891",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20002.770200371302,
+      "price": 0.0002581749213852104,
+      "timestamp": "2025-09-25T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178110241-0.7520950921185797",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12001.66212022278,
+      "price": 0.0002581749213852104,
+      "timestamp": "2025-09-25T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178110241-0.2528394649868101",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9001.246590167084,
+      "price": 0.0002581749213852104,
+      "timestamp": "2025-09-25T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178110241-0.5195730948792452",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9001.246590167084,
+      "price": 0.0002581749213852104,
+      "timestamp": "2025-09-25T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178110241-0.1896060654886419",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800.664848089112,
+      "price": 0.0002581749213852104,
+      "timestamp": "2025-09-25T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178110926-0.07418068100628539",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20005.569293269586,
+      "price": 0.00024781572636817874,
+      "timestamp": "2025-09-26T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178110926-0.06769444939705227",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20005.569293269586,
+      "price": 0.00024781572636817874,
+      "timestamp": "2025-09-26T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178110926-0.4590076758330076",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12003.341575961751,
+      "price": 0.00024781572636817874,
+      "timestamp": "2025-09-26T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178110926-0.2003710677933861",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9002.506181971314,
+      "price": 0.00024781572636817874,
+      "timestamp": "2025-09-26T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178110926-0.9367893529621119",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9002.506181971314,
+      "price": 0.00024781572636817874,
+      "timestamp": "2025-09-26T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178110926-0.6828513677862661",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4801.336630384701,
+      "price": 0.00024781572636817874,
+      "timestamp": "2025-09-26T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178111692-0.5353837944876183",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20003.86891082749,
+      "price": 0.0002487737538625768,
+      "timestamp": "2025-09-27T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178111692-0.8137656411041927",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20003.86891082749,
+      "price": 0.0002487737538625768,
+      "timestamp": "2025-09-27T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178111692-0.4746930752176627",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12002.321346496494,
+      "price": 0.0002487737538625768,
+      "timestamp": "2025-09-27T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178111692-0.36612295565625663",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9001.741009872369,
+      "price": 0.0002487737538625768,
+      "timestamp": "2025-09-27T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178111692-0.45497993392704217",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9001.741009872369,
+      "price": 0.0002487737538625768,
+      "timestamp": "2025-09-27T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178111692-0.6955532561050326",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800.928538598597,
+      "price": 0.0002487737538625768,
+      "timestamp": "2025-09-27T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178112462-0.1475726234228124",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20004.08121099355,
+      "price": 0.00024116473732393887,
+      "timestamp": "2025-09-28T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178112462-0.3576801774764854",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20004.08121099355,
+      "price": 0.00024116473732393887,
+      "timestamp": "2025-09-28T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178112462-0.6606228162000946",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12002.448726596132,
+      "price": 0.00024116473732393887,
+      "timestamp": "2025-09-28T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178112462-0.17781279936597294",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9001.836544947098,
+      "price": 0.00024116473732393887,
+      "timestamp": "2025-09-28T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178112462-0.26366374264129777",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9001.836544947098,
+      "price": 0.00024116473732393887,
+      "timestamp": "2025-09-28T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178112462-0.6266324289910639",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800.979490638453,
+      "price": 0.00024116473732393887,
+      "timestamp": "2025-09-28T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178113105-0.059216728545254727",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20002.69432172573,
+      "price": 0.0002370700003571221,
+      "timestamp": "2025-09-29T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178113105-0.751784018805816",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20002.69432172573,
+      "price": 0.0002370700003571221,
+      "timestamp": "2025-09-29T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178113105-0.5110301140493902",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12001.616593035438,
+      "price": 0.0002370700003571221,
+      "timestamp": "2025-09-29T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178113105-0.4562658324935238",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9001.212444776578,
+      "price": 0.0002370700003571221,
+      "timestamp": "2025-09-29T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178113105-0.40190047816850527",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9001.212444776578,
+      "price": 0.0002370700003571221,
+      "timestamp": "2025-09-29T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178113105-0.6821843071603355",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800.646637214176,
+      "price": 0.0002370700003571221,
+      "timestamp": "2025-09-29T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178113792-0.45048686632467494",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20001.928250377416,
+      "price": 0.00024117441519231744,
+      "timestamp": "2025-09-30T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178113792-0.3783329414049601",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20001.928250377416,
+      "price": 0.00024117441519231744,
+      "timestamp": "2025-09-30T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178113792-0.517613792817706",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12001.156950226452,
+      "price": 0.00024117441519231744,
+      "timestamp": "2025-09-30T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178113792-0.936628273096656",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9000.867712669839,
+      "price": 0.00024117441519231744,
+      "timestamp": "2025-09-30T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178113792-0.3087163140529965",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9000.867712669839,
+      "price": 0.00024117441519231744,
+      "timestamp": "2025-09-30T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178113792-0.5298352425121398",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800.46278009058,
+      "price": 0.00024117441519231744,
+      "timestamp": "2025-09-30T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178114508-0.8424974824425696",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20002.82841921616,
+      "price": 0.000230018701586894,
+      "timestamp": "2025-10-01T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178114508-0.9300675085222369",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20002.82841921616,
+      "price": 0.000230018701586894,
+      "timestamp": "2025-10-01T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178114508-0.2622875545936788",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12001.697051529694,
+      "price": 0.000230018701586894,
+      "timestamp": "2025-10-01T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178114508-0.5704596336951473",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9001.272788647271,
+      "price": 0.000230018701586894,
+      "timestamp": "2025-10-01T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178114508-0.6730759727693023",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9001.272788647271,
+      "price": 0.000230018701586894,
+      "timestamp": "2025-10-01T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178114508-0.9294371398438568",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800.678820611878,
+      "price": 0.000230018701586894,
+      "timestamp": "2025-10-01T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178115294-0.3480945940786563",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20000.445119045886,
+      "price": 0.00022287097812295783,
+      "timestamp": "2025-10-02T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178115294-0.03081508868496463",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20000.445119045886,
+      "price": 0.00022287097812295783,
+      "timestamp": "2025-10-02T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178115294-0.10380545464628188",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12000.26707142753,
+      "price": 0.00022287097812295783,
+      "timestamp": "2025-10-02T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178115294-0.318975007557752",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9000.200303570648,
+      "price": 0.00022287097812295783,
+      "timestamp": "2025-10-02T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178115294-0.6976345747874462",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9000.200303570648,
+      "price": 0.00022287097812295783,
+      "timestamp": "2025-10-02T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178115294-0.2828530871066415",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800.106828571013,
+      "price": 0.00022287097812295783,
+      "timestamp": "2025-10-02T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178116047-0.9436821990611282",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 19998.86397940788,
+      "price": 0.0002214424685857134,
+      "timestamp": "2025-10-03T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178116047-0.5839044063008731",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 19998.86397940788,
+      "price": 0.0002214424685857134,
+      "timestamp": "2025-10-03T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178116047-0.8767438552414509",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 11999.31838764473,
+      "price": 0.0002214424685857134,
+      "timestamp": "2025-10-03T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178116047-0.9778620672252241",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 8999.488790733545,
+      "price": 0.0002214424685857134,
+      "timestamp": "2025-10-03T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178116047-0.5684670860071049",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 8999.488790733545,
+      "price": 0.0002214424685857134,
+      "timestamp": "2025-10-03T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178116047-0.5200269142849983",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4799.727355057891,
+      "price": 0.0002214424685857134,
+      "timestamp": "2025-10-03T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178116866-0.8962453537809221",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 19998.573366332566,
+      "price": 0.0002226952296224194,
+      "timestamp": "2025-10-04T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178116866-0.42022121500395015",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 19998.573366332566,
+      "price": 0.0002226952296224194,
+      "timestamp": "2025-10-04T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178116866-0.440676926729334",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 11999.144019799542,
+      "price": 0.0002226952296224194,
+      "timestamp": "2025-10-04T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178116866-0.38656311934469045",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 8999.358014849657,
+      "price": 0.0002226952296224194,
+      "timestamp": "2025-10-04T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178116866-0.5822313461265696",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 8999.358014849657,
+      "price": 0.0002226952296224194,
+      "timestamp": "2025-10-04T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178116866-0.40370220720374317",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4799.657607919817,
+      "price": 0.0002226952296224194,
+      "timestamp": "2025-10-04T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178117590-0.5924150226581008",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 19998.93537744629,
+      "price": 0.00022139805138147192,
+      "timestamp": "2025-10-05T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178117590-0.6070449853263069",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 19998.93537744629,
+      "price": 0.00022139805138147192,
+      "timestamp": "2025-10-05T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178117590-0.037687661785059334",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 11999.361226467772,
+      "price": 0.00022139805138147192,
+      "timestamp": "2025-10-05T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178117590-0.4177770578272394",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 8999.52091985083,
+      "price": 0.00022139805138147192,
+      "timestamp": "2025-10-05T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178117590-0.874327032138106",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 8999.52091985083,
+      "price": 0.00022139805138147192,
+      "timestamp": "2025-10-05T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178117590-0.5822252184960236",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4799.744490587109,
+      "price": 0.00022139805138147192,
+      "timestamp": "2025-10-05T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178118401-0.7977871330889562",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 19998.653974659093,
+      "price": 0.00021329799592046186,
+      "timestamp": "2025-10-06T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178118401-0.9575469103121373",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 19998.653974659093,
+      "price": 0.00021329799592046186,
+      "timestamp": "2025-10-06T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178118401-0.6698755707600963",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 11999.192384795455,
+      "price": 0.00021329799592046186,
+      "timestamp": "2025-10-06T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178118401-0.22162072680874945",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 8999.394288596592,
+      "price": 0.00021329799592046186,
+      "timestamp": "2025-10-06T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178118401-0.41970538752744313",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 8999.394288596592,
+      "price": 0.00021329799592046186,
+      "timestamp": "2025-10-06T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178118401-0.9958867641392686",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4799.676953918182,
+      "price": 0.00021329799592046186,
+      "timestamp": "2025-10-06T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178119090-0.8376585561547985",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 19996.53664280099,
+      "price": 0.00022463820917816845,
+      "timestamp": "2025-10-07T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178119090-0.8584867656599634",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 19996.53664280099,
+      "price": 0.00022463820917816845,
+      "timestamp": "2025-10-07T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178119090-0.720707381706709",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 11997.921985680594,
+      "price": 0.00022463820917816845,
+      "timestamp": "2025-10-07T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178119090-0.7607887543394032",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 8998.441489260445,
+      "price": 0.00022463820917816845,
+      "timestamp": "2025-10-07T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178119090-0.4292245021258557",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 8998.441489260445,
+      "price": 0.00022463820917816845,
+      "timestamp": "2025-10-07T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178119090-0.24154395748179347",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4799.168794272237,
+      "price": 0.00022463820917816845,
+      "timestamp": "2025-10-07T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178119835-0.4734888267753611",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 19999.747298804075,
+      "price": 0.0002208562134405229,
+      "timestamp": "2025-10-08T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178119835-0.5322165251058557",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 19999.747298804075,
+      "price": 0.0002208562134405229,
+      "timestamp": "2025-10-08T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178119835-0.45989960650743733",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 11999.848379282446,
+      "price": 0.0002208562134405229,
+      "timestamp": "2025-10-08T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178119835-0.8878677034801856",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 8999.886284461834,
+      "price": 0.0002208562134405229,
+      "timestamp": "2025-10-08T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178119835-0.9328548276088108",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 8999.886284461834,
+      "price": 0.0002208562134405229,
+      "timestamp": "2025-10-08T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178119835-0.7672285781842422",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4799.939351712978,
+      "price": 0.0002208562134405229,
+      "timestamp": "2025-10-08T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178120659-0.9859363840673984",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 19998.71686771046,
+      "price": 0.00022883400397750547,
+      "timestamp": "2025-10-09T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178120659-0.8499889232180619",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 19998.71686771046,
+      "price": 0.00022883400397750547,
+      "timestamp": "2025-10-09T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178120659-0.3053155447554903",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 11999.230120626273,
+      "price": 0.00022883400397750547,
+      "timestamp": "2025-10-09T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178120659-0.3334598256845094",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 8999.422590469705,
+      "price": 0.00022883400397750547,
+      "timestamp": "2025-10-09T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178120659-0.6528875512723965",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 8999.422590469705,
+      "price": 0.00022883400397750547,
+      "timestamp": "2025-10-09T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178120659-0.17322073790720316",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4799.692048250509,
+      "price": 0.00022883400397750547,
+      "timestamp": "2025-10-09T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178121371-0.5131320991339932",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20001.158517006585,
+      "price": 0.00026096002616130887,
+      "timestamp": "2025-10-10T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178121371-0.8959743130732576",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20001.158517006585,
+      "price": 0.00026096002616130887,
+      "timestamp": "2025-10-10T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178121371-0.9709758304886584",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12000.695110203951,
+      "price": 0.00026096002616130887,
+      "timestamp": "2025-10-10T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178121371-0.347796352941131",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9000.521332652963,
+      "price": 0.00026096002616130887,
+      "timestamp": "2025-10-10T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178121371-0.5836131819506606",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9000.521332652963,
+      "price": 0.00026096002616130887,
+      "timestamp": "2025-10-10T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178121371-0.279679125160171",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800.2780440815795,
+      "price": 0.00026096002616130887,
+      "timestamp": "2025-10-10T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178122088-0.6302333362144076",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20011.13442176456,
+      "price": 0.0002666370385604113,
+      "timestamp": "2025-10-11T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178122088-0.42529127055986937",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20011.13442176456,
+      "price": 0.0002666370385604113,
+      "timestamp": "2025-10-11T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178122088-0.012239075577582859",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12006.680653058735,
+      "price": 0.0002666370385604113,
+      "timestamp": "2025-10-11T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178122088-0.028393317350528857",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9005.01048979405,
+      "price": 0.0002666370385604113,
+      "timestamp": "2025-10-11T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178122088-0.477256118457543",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9005.01048979405,
+      "price": 0.0002666370385604113,
+      "timestamp": "2025-10-11T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178122088-0.8660726104270521",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4802.6722612234935,
+      "price": 0.0002666370385604113,
+      "timestamp": "2025-10-11T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178122908-0.6498535879782584",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20013.019883050205,
+      "price": 0.00024050319516829435,
+      "timestamp": "2025-10-12T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178122908-0.7526327051574946",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20013.019883050205,
+      "price": 0.00024050319516829435,
+      "timestamp": "2025-10-12T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178122908-0.6068073500206151",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12007.81192983012,
+      "price": 0.00024050319516829435,
+      "timestamp": "2025-10-12T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178122908-0.6679863859794374",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9005.85894737259,
+      "price": 0.00024050319516829435,
+      "timestamp": "2025-10-12T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178122908-0.6107303705327158",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9005.85894737259,
+      "price": 0.00024050319516829435,
+      "timestamp": "2025-10-12T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178122908-0.12826670313365518",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4803.124771932048,
+      "price": 0.00024050319516829435,
+      "timestamp": "2025-10-12T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178123591-0.38360188842694154",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20004.5107472953,
+      "price": 0.00023558061450675897,
+      "timestamp": "2025-10-13T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178123591-0.2999627656241791",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20004.5107472953,
+      "price": 0.00023558061450675897,
+      "timestamp": "2025-10-13T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178123591-0.3947978373190064",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12002.70644837718,
+      "price": 0.00023558061450675897,
+      "timestamp": "2025-10-13T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178123591-0.1716628084707883",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9002.029836282883,
+      "price": 0.00023558061450675897,
+      "timestamp": "2025-10-13T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178123591-0.1887416237479519",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9002.029836282883,
+      "price": 0.00023558061450675897,
+      "timestamp": "2025-10-13T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178123591-0.25632242590122845",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4801.082579350872,
+      "price": 0.00023558061450675897,
+      "timestamp": "2025-10-13T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178124443-0.23246101024720756",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20002.9181007952,
+      "price": 0.00024243109245212303,
+      "timestamp": "2025-10-14T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178124443-0.19239917926807737",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20002.9181007952,
+      "price": 0.00024243109245212303,
+      "timestamp": "2025-10-14T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178124443-0.6729006350518612",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12001.750860477121,
+      "price": 0.00024243109245212303,
+      "timestamp": "2025-10-14T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178124443-0.6596607220670669",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9001.313145357839,
+      "price": 0.00024243109245212303,
+      "timestamp": "2025-10-14T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178124443-0.021866679667690292",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9001.313145357839,
+      "price": 0.00024243109245212303,
+      "timestamp": "2025-10-14T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178124443-0.44909082338792994",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800.700344190848,
+      "price": 0.00024243109245212303,
+      "timestamp": "2025-10-14T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178125263-0.4290905123166917",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20005.384298249508,
+      "price": 0.0002507959526202577,
+      "timestamp": "2025-10-15T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178125263-0.4244292320365082",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20005.384298249508,
+      "price": 0.0002507959526202577,
+      "timestamp": "2025-10-15T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178125263-0.7800318928487966",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12003.230578949704,
+      "price": 0.0002507959526202577,
+      "timestamp": "2025-10-15T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178125263-0.9183246195321453",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9002.422934212278,
+      "price": 0.0002507959526202577,
+      "timestamp": "2025-10-15T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178125263-0.9945065761868701",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9002.422934212278,
+      "price": 0.0002507959526202577,
+      "timestamp": "2025-10-15T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178125263-0.4708284647360088",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4801.292231579881,
+      "price": 0.0002507959526202577,
+      "timestamp": "2025-10-15T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178126057-0.8060161211917388",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20008.468093069,
+      "price": 0.00025671206662428284,
+      "timestamp": "2025-10-16T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178126057-0.244271341871226",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20008.468093069,
+      "price": 0.00025671206662428284,
+      "timestamp": "2025-10-16T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178126057-0.37993449792810985",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12005.080855841401,
+      "price": 0.00025671206662428284,
+      "timestamp": "2025-10-16T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178126057-0.17713480562708495",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9003.810641881051,
+      "price": 0.00025671206662428284,
+      "timestamp": "2025-10-16T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178126057-0.00048676692693550017",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9003.810641881051,
+      "price": 0.00025671206662428284,
+      "timestamp": "2025-10-16T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178126057-0.7625228084870415",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4802.032342336561,
+      "price": 0.00025671206662428284,
+      "timestamp": "2025-10-16T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178126901-0.7045971710673203",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20010.737678361547,
+      "price": 0.00026084673945067204,
+      "timestamp": "2025-10-17T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178126901-0.6550624151256775",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20010.737678361547,
+      "price": 0.00026084673945067204,
+      "timestamp": "2025-10-17T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178126901-0.5645585671676481",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12006.44260701693,
+      "price": 0.00026084673945067204,
+      "timestamp": "2025-10-17T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178126901-0.25002914257710496",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9004.831955262698,
+      "price": 0.00026084673945067204,
+      "timestamp": "2025-10-17T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178126901-0.8206554663212539",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9004.831955262698,
+      "price": 0.00026084673945067204,
+      "timestamp": "2025-10-17T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178126901-0.472057571080029",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4802.577042806773,
+      "price": 0.00026084673945067204,
+      "timestamp": "2025-10-17T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178127618-0.13700229388719065",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20012.39587141177,
+      "price": 0.0002570322962235002,
+      "timestamp": "2025-10-18T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178127618-0.22309892011885724",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20012.39587141177,
+      "price": 0.0002570322962235002,
+      "timestamp": "2025-10-18T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178127618-0.5000656368426342",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12007.43752284706,
+      "price": 0.0002570322962235002,
+      "timestamp": "2025-10-18T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178127618-0.3750288305326487",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9005.578142135293,
+      "price": 0.0002570322962235002,
+      "timestamp": "2025-10-18T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178127618-0.5553075588204326",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9005.578142135293,
+      "price": 0.0002570322962235002,
+      "timestamp": "2025-10-18T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178127618-0.5932002635432714",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4802.975009138823,
+      "price": 0.0002570322962235002,
+      "timestamp": "2025-10-18T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178128437-0.8999962804763374",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20011.00349757501,
+      "price": 0.00025099510844358626,
+      "timestamp": "2025-10-19T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178128437-0.3597167942998687",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20011.00349757501,
+      "price": 0.00025099510844358626,
+      "timestamp": "2025-10-19T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178128437-0.6665765125451248",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12006.602098545003,
+      "price": 0.00025099510844358626,
+      "timestamp": "2025-10-19T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178128437-0.9771095572814734",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9004.951573908753,
+      "price": 0.00025099510844358626,
+      "timestamp": "2025-10-19T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178128437-0.7415467413687907",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9004.951573908753,
+      "price": 0.00025099510844358626,
+      "timestamp": "2025-10-19T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178128437-0.843609400099362",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4802.640839418002,
+      "price": 0.00025099510844358626,
+      "timestamp": "2025-10-19T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178129223-0.6553318267163936",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20008.684866420117,
+      "price": 0.00025118263167433065,
+      "timestamp": "2025-10-20T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178129223-0.6274283903949762",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20008.684866420117,
+      "price": 0.00025118263167433065,
+      "timestamp": "2025-10-20T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178129223-0.6730475030201639",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12005.21091985207,
+      "price": 0.00025118263167433065,
+      "timestamp": "2025-10-20T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178129223-0.442728458680579",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9003.90818988905,
+      "price": 0.00025118263167433065,
+      "timestamp": "2025-10-20T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178129223-0.9402535174420691",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9003.90818988905,
+      "price": 0.00025118263167433065,
+      "timestamp": "2025-10-20T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178129223-0.7513541289266422",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4802.084367940827,
+      "price": 0.00025118263167433065,
+      "timestamp": "2025-10-20T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178129973-0.600473721199647",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20008.856269793425,
+      "price": 0.00025810524944299145,
+      "timestamp": "2025-10-21T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178129973-0.9194522735216308",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20008.856269793425,
+      "price": 0.00025810524944299145,
+      "timestamp": "2025-10-21T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178129973-0.7165853705583267",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12005.313761876052,
+      "price": 0.00025810524944299145,
+      "timestamp": "2025-10-21T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178129973-0.031220121275044366",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9003.985321407039,
+      "price": 0.00025810524944299145,
+      "timestamp": "2025-10-21T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178129973-0.5540297956550804",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9003.985321407039,
+      "price": 0.00025810524944299145,
+      "timestamp": "2025-10-21T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178129973-0.798324820389333",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4802.12550475042,
+      "price": 0.00025810524944299145,
+      "timestamp": "2025-10-21T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178130645-0.4517733092301123",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20011.86121336282,
+      "price": 0.0002626847673403807,
+      "timestamp": "2025-10-22T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178130645-0.17425985047246195",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20011.86121336282,
+      "price": 0.0002626847673403807,
+      "timestamp": "2025-10-22T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178130645-0.874021709207098",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12007.116728017689,
+      "price": 0.0002626847673403807,
+      "timestamp": "2025-10-22T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178130645-0.4733102964401935",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9005.337546013267,
+      "price": 0.0002626847673403807,
+      "timestamp": "2025-10-22T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178130645-0.295578471032816",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9005.337546013267,
+      "price": 0.0002626847673403807,
+      "timestamp": "2025-10-22T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178130645-0.04118552433443712",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4802.846691207075,
+      "price": 0.0002626847673403807,
+      "timestamp": "2025-10-22T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178131407-0.34607149368117285",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20013.933629431227,
+      "price": 0.00025936104735398873,
+      "timestamp": "2025-10-23T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178131407-0.33664679724702273",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20013.933629431227,
+      "price": 0.00025936104735398873,
+      "timestamp": "2025-10-23T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178131407-0.9324569553193719",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12008.360177658735,
+      "price": 0.00025936104735398873,
+      "timestamp": "2025-10-23T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178131407-0.6442248953693729",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9006.27013324405,
+      "price": 0.00025936104735398873,
+      "timestamp": "2025-10-23T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178131407-0.7494568775924867",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9006.27013324405,
+      "price": 0.00025936104735398873,
+      "timestamp": "2025-10-23T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178131407-0.8983832592129459",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4803.344071063493,
+      "price": 0.00025936104735398873,
+      "timestamp": "2025-10-23T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178132217-0.3905465872283521",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20012.575768495117,
+      "price": 0.0002541173246104676,
+      "timestamp": "2025-10-24T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178132217-0.8342705162143473",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20012.575768495117,
+      "price": 0.0002541173246104676,
+      "timestamp": "2025-10-24T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178132217-0.32345412887960456",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12007.54546109707,
+      "price": 0.0002541173246104676,
+      "timestamp": "2025-10-24T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178132217-0.4158041389551034",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9005.659095822803,
+      "price": 0.0002541173246104676,
+      "timestamp": "2025-10-24T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178132217-0.4202257782093777",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9005.659095822803,
+      "price": 0.0002541173246104676,
+      "timestamp": "2025-10-24T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178132217-0.37253789545398175",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4803.018184438828,
+      "price": 0.0002541173246104676,
+      "timestamp": "2025-10-24T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178133045-0.9255639129489015",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20010.31962842554,
+      "price": 0.0002528719942907523,
+      "timestamp": "2025-10-25T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178133045-0.5797617620637018",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20010.31962842554,
+      "price": 0.0002528719942907523,
+      "timestamp": "2025-10-25T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178133045-0.731542201648836",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12006.191777055326,
+      "price": 0.0002528719942907523,
+      "timestamp": "2025-10-25T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178133045-0.8623965922362201",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9004.643832791493,
+      "price": 0.0002528719942907523,
+      "timestamp": "2025-10-25T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178133045-0.8619025625044605",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9004.643832791493,
+      "price": 0.0002528719942907523,
+      "timestamp": "2025-10-25T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178133045-0.2945664278433071",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4802.47671082213,
+      "price": 0.0002528719942907523,
+      "timestamp": "2025-10-25T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178133777-0.13187166585531052",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20009.85302469894,
+      "price": 0.0002404868724379853,
+      "timestamp": "2025-10-26T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178133777-0.06737404856126483",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20009.85302469894,
+      "price": 0.0002404868724379853,
+      "timestamp": "2025-10-26T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178133777-0.6487503754499556",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12005.911814819365,
+      "price": 0.0002404868724379853,
+      "timestamp": "2025-10-26T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178133777-0.048365084123482394",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9004.433861114523,
+      "price": 0.0002404868724379853,
+      "timestamp": "2025-10-26T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178133777-0.8700817175138094",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9004.433861114523,
+      "price": 0.0002404868724379853,
+      "timestamp": "2025-10-26T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178133777-0.8822121857752636",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4802.364725927745,
+      "price": 0.0002404868724379853,
+      "timestamp": "2025-10-26T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178134541-0.008645682281905098",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20004.126727937895,
+      "price": 0.00024270581860926074,
+      "timestamp": "2025-10-27T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178134541-0.24302111465819332",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20004.126727937895,
+      "price": 0.00024270581860926074,
+      "timestamp": "2025-10-27T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178134541-0.5252247724948",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12002.476036762739,
+      "price": 0.00024270581860926074,
+      "timestamp": "2025-10-27T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178134541-0.34736906023852787",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9001.857027572052,
+      "price": 0.00024270581860926074,
+      "timestamp": "2025-10-27T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178134541-0.847450736173271",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9001.857027572052,
+      "price": 0.00024270581860926074,
+      "timestamp": "2025-10-27T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178134541-0.01835364321089361",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4800.990414705095,
+      "price": 0.00024270581860926074,
+      "timestamp": "2025-10-27T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178135246-0.4004017984271848",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20005.30106184115,
+      "price": 0.0002511072467387691,
+      "timestamp": "2025-10-28T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178135246-0.7175279658362174",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20005.30106184115,
+      "price": 0.0002511072467387691,
+      "timestamp": "2025-10-28T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178135246-0.6377926405572971",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12003.180637104691,
+      "price": 0.0002511072467387691,
+      "timestamp": "2025-10-28T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178135246-0.7806645423118163",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9002.385477828517,
+      "price": 0.0002511072467387691,
+      "timestamp": "2025-10-28T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178135246-0.4287786527338765",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9002.385477828517,
+      "price": 0.0002511072467387691,
+      "timestamp": "2025-10-28T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178135247-0.10468693860690159",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4801.272254841876,
+      "price": 0.0002511072467387691,
+      "timestamp": "2025-10-28T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178135956-0.4486947086791202",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20009.541111117127,
+      "price": 0.00025621493959913764,
+      "timestamp": "2025-10-29T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178135956-0.03478352770399151",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20009.541111117127,
+      "price": 0.00025621493959913764,
+      "timestamp": "2025-10-29T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178135956-0.6952236647487826",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12005.724666670274,
+      "price": 0.00025621493959913764,
+      "timestamp": "2025-10-29T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178135956-0.971732885516072",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9004.293500002705,
+      "price": 0.00025621493959913764,
+      "timestamp": "2025-10-29T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178135956-0.08749024540286876",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9004.293500002705,
+      "price": 0.00025621493959913764,
+      "timestamp": "2025-10-29T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178135956-0.18816779486413415",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4802.289866668109,
+      "price": 0.00025621493959913764,
+      "timestamp": "2025-10-29T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178136731-0.9479197062988725",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20012.2202566703,
+      "price": 0.0002629512630097388,
+      "timestamp": "2025-10-30T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178136731-0.12272618614136954",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20012.2202566703,
+      "price": 0.0002629512630097388,
+      "timestamp": "2025-10-30T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178136731-0.21968422363972706",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12007.332154002179,
+      "price": 0.0002629512630097388,
+      "timestamp": "2025-10-30T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178136731-0.09678974727449785",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9005.499115501632,
+      "price": 0.0002629512630097388,
+      "timestamp": "2025-10-30T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178136731-0.14899993262727396",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9005.499115501632,
+      "price": 0.0002629512630097388,
+      "timestamp": "2025-10-30T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178136731-0.07386829519780713",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4802.932861600871,
+      "price": 0.0002629512630097388,
+      "timestamp": "2025-10-30T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178137480-0.17291046332333349",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20015.790795663594,
+      "price": 0.00025992319990351097,
+      "timestamp": "2025-10-31T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178137480-0.13907731938588375",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20015.790795663594,
+      "price": 0.00025992319990351097,
+      "timestamp": "2025-10-31T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178137480-0.7256190432733725",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12009.474477398157,
+      "price": 0.00025992319990351097,
+      "timestamp": "2025-10-31T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178137480-0.28962896042125374",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9007.105858048617,
+      "price": 0.00025992319990351097,
+      "timestamp": "2025-10-31T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178137480-0.5960453056925556",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9007.105858048617,
+      "price": 0.00025992319990351097,
+      "timestamp": "2025-10-31T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178137480-0.1678333246455137",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4803.789790959262,
+      "price": 0.00025992319990351097,
+      "timestamp": "2025-10-31T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178138268-0.7891260946144095",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20014.334417857146,
+      "price": 0.000258151339100794,
+      "timestamp": "2025-11-01T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178138268-0.049367418658353035",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20014.334417857146,
+      "price": 0.000258151339100794,
+      "timestamp": "2025-11-01T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178138268-0.36339052912409064",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12008.600650714288,
+      "price": 0.000258151339100794,
+      "timestamp": "2025-11-01T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178138268-0.31453214419197506",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9006.450488035716,
+      "price": 0.000258151339100794,
+      "timestamp": "2025-11-01T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178138268-0.5192695303937505",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9006.450488035716,
+      "price": 0.000258151339100794,
+      "timestamp": "2025-11-01T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178138268-0.4382516911043549",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4803.440260285715,
+      "price": 0.000258151339100794,
+      "timestamp": "2025-11-01T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178138959-0.5664790150970367",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20013.517120092303,
+      "price": 0.0002559030738878626,
+      "timestamp": "2025-11-02T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178138959-0.05582963651828887",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20013.517120092303,
+      "price": 0.0002559030738878626,
+      "timestamp": "2025-11-02T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178138959-0.3929395656341318",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12008.11027205538,
+      "price": 0.0002559030738878626,
+      "timestamp": "2025-11-02T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178138959-0.19332043622888695",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9006.082704041535,
+      "price": 0.0002559030738878626,
+      "timestamp": "2025-11-02T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178138959-0.8103444104059218",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9006.082704041535,
+      "price": 0.0002559030738878626,
+      "timestamp": "2025-11-02T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178138959-0.4148245548099653",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4803.244108822152,
+      "price": 0.0002559030738878626,
+      "timestamp": "2025-11-02T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178139701-0.6409266001153117",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20012.424373984402,
+      "price": 0.000277581916402977,
+      "timestamp": "2025-11-03T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178139701-0.26603633641325797",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20012.424373984402,
+      "price": 0.000277581916402977,
+      "timestamp": "2025-11-03T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178139701-0.5589964907033352",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12007.454624390639,
+      "price": 0.000277581916402977,
+      "timestamp": "2025-11-03T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178139701-0.8849315836743317",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9005.59096829298,
+      "price": 0.000277581916402977,
+      "timestamp": "2025-11-03T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178139701-0.1120300820306469",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9005.59096829298,
+      "price": 0.000277581916402977,
+      "timestamp": "2025-11-03T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178139701-0.9414606164920067",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4802.9818497562555,
+      "price": 0.000277581916402977,
+      "timestamp": "2025-11-03T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178140464-0.647951875023484",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20024.551021509385,
+      "price": 0.0003039882439919542,
+      "timestamp": "2025-11-04T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178140464-0.6412374902496737",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20024.551021509385,
+      "price": 0.0003039882439919542,
+      "timestamp": "2025-11-04T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178140464-0.7226807739527089",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12014.730612905632,
+      "price": 0.0003039882439919542,
+      "timestamp": "2025-11-04T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178140464-0.06898391829116823",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9011.047959679225,
+      "price": 0.0003039882439919542,
+      "timestamp": "2025-11-04T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178140464-0.6540030314456483",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9011.047959679225,
+      "price": 0.0003039882439919542,
+      "timestamp": "2025-11-04T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178140464-0.8175206666583357",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4805.892245162253,
+      "price": 0.0003039882439919542,
+      "timestamp": "2025-11-04T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178141134-0.576908933736833",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20039.5799882759,
+      "price": 0.0002920512370136298,
+      "timestamp": "2025-11-05T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178141134-0.8837123665791545",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20039.5799882759,
+      "price": 0.0002920512370136298,
+      "timestamp": "2025-11-05T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178141135-0.6358082086351247",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12023.747992965538,
+      "price": 0.0002920512370136298,
+      "timestamp": "2025-11-05T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178141135-0.34841431389057576",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9017.810994724154,
+      "price": 0.0002920512370136298,
+      "timestamp": "2025-11-05T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178141135-0.7372293804338664",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9017.810994724154,
+      "price": 0.0002920512370136298,
+      "timestamp": "2025-11-05T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178141135-0.08409213277221073",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4809.4991971862155,
+      "price": 0.0002920512370136298,
+      "timestamp": "2025-11-05T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178141954-0.7096865310201096",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20032.886971188975,
+      "price": 0.0003018505960715023,
+      "timestamp": "2025-11-06T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178141954-0.19216436943853488",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20032.886971188975,
+      "price": 0.0003018505960715023,
+      "timestamp": "2025-11-06T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178141954-0.28240118028151606",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12019.732182713384,
+      "price": 0.0003018505960715023,
+      "timestamp": "2025-11-06T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178141954-0.9535239401171157",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9014.799137035037,
+      "price": 0.0003018505960715023,
+      "timestamp": "2025-11-06T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178141954-0.6112091691052145",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9014.799137035037,
+      "price": 0.0003018505960715023,
+      "timestamp": "2025-11-06T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178141954-0.9590192576295952",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4807.892873085353,
+      "price": 0.0003018505960715023,
+      "timestamp": "2025-11-06T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178142773-0.052783774432934916",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20038.76987149309,
+      "price": 0.0002911439173621431,
+      "timestamp": "2025-11-07T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178142773-0.32849570182090315",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20038.76987149309,
+      "price": 0.0002911439173621431,
+      "timestamp": "2025-11-07T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178142773-0.6590418746594413",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12023.261922895856,
+      "price": 0.0002911439173621431,
+      "timestamp": "2025-11-07T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178142773-0.018852468807844525",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9017.446442171891,
+      "price": 0.0002911439173621431,
+      "timestamp": "2025-11-07T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178142773-0.42813822720078765",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9017.446442171891,
+      "price": 0.0002911439173621431,
+      "timestamp": "2025-11-07T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178142773-0.6796823463926761",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4809.3047691583415,
+      "price": 0.0002911439173621431,
+      "timestamp": "2025-11-07T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178143592-0.26835936533198246",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20032.565897413995,
+      "price": 0.0002940676140467665,
+      "timestamp": "2025-11-08T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178143592-0.12060749143131377",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20032.565897413995,
+      "price": 0.0002940676140467665,
+      "timestamp": "2025-11-08T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178143593-0.8576056369915135",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12019.539538448393,
+      "price": 0.0002940676140467665,
+      "timestamp": "2025-11-08T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178143593-0.3067765887328837",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9014.654653836295,
+      "price": 0.0002940676140467665,
+      "timestamp": "2025-11-08T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178143593-0.18286904498411571",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9014.654653836295,
+      "price": 0.0002940676140467665,
+      "timestamp": "2025-11-08T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178143593-0.9340258311786538",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4807.815815379357,
+      "price": 0.0002940676140467665,
+      "timestamp": "2025-11-08T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178144207-0.28208107220922074",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20034.496149323953,
+      "price": 0.000278979538757608,
+      "timestamp": "2025-11-09T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178144207-0.14631790033196912",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20034.496149323953,
+      "price": 0.000278979538757608,
+      "timestamp": "2025-11-09T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178144207-0.13140097860042588",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12020.697689594374,
+      "price": 0.000278979538757608,
+      "timestamp": "2025-11-09T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178144207-0.5094252260166381",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9015.52326719578,
+      "price": 0.000278979538757608,
+      "timestamp": "2025-11-09T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178144207-0.8610314725193623",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9015.52326719578,
+      "price": 0.000278979538757608,
+      "timestamp": "2025-11-09T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178144207-0.03330198978695198",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4808.27907583775,
+      "price": 0.000278979538757608,
+      "timestamp": "2025-11-09T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178145026-0.6656438701561231",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20025.37444126738,
+      "price": 0.00028023917738247345,
+      "timestamp": "2025-11-10T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178145026-0.09919604450510977",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20025.37444126738,
+      "price": 0.00028023917738247345,
+      "timestamp": "2025-11-10T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178145026-0.7821322061259008",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12015.224664760428,
+      "price": 0.00028023917738247345,
+      "timestamp": "2025-11-10T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178145026-0.6586617798373021",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9011.418498570321,
+      "price": 0.00028023917738247345,
+      "timestamp": "2025-11-10T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178145026-0.7462719528344035",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9011.418498570321,
+      "price": 0.00028023917738247345,
+      "timestamp": "2025-11-10T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178145026-0.714945510297212",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4806.089865904171,
+      "price": 0.00028023917738247345,
+      "timestamp": "2025-11-10T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178145743-0.39261834908325033",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20026.322367868383,
+      "price": 0.0002927949651332721,
+      "timestamp": "2025-11-11T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178145743-0.2846569546293797",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20026.322367868383,
+      "price": 0.0002927949651332721,
+      "timestamp": "2025-11-11T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178145743-0.4013162007929286",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12015.793420721027,
+      "price": 0.0002927949651332721,
+      "timestamp": "2025-11-11T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178145743-0.6240837209043939",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9011.84506554077,
+      "price": 0.0002927949651332721,
+      "timestamp": "2025-11-11T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178145743-0.9507991122531327",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9011.84506554077,
+      "price": 0.0002927949651332721,
+      "timestamp": "2025-11-11T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178145743-0.7192362345441174",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4806.317368288411,
+      "price": 0.0002927949651332721,
+      "timestamp": "2025-11-11T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178146562-0.01440869276264456",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20034.47455394562,
+      "price": 0.00029290674297559007,
+      "timestamp": "2025-11-12T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178146562-0.5551007069559049",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20034.47455394562,
+      "price": 0.00029290674297559007,
+      "timestamp": "2025-11-12T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178146562-0.9998013313631989",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12020.684732367372,
+      "price": 0.00029290674297559007,
+      "timestamp": "2025-11-12T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178146562-0.6185097618716889",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9015.513549275529,
+      "price": 0.00029290674297559007,
+      "timestamp": "2025-11-12T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178146562-0.15430608677882596",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9015.513549275529,
+      "price": 0.00029290674297559007,
+      "timestamp": "2025-11-12T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178146562-0.5910582759424438",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4808.273892946949,
+      "price": 0.00029290674297559007,
+      "timestamp": "2025-11-12T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178147381-0.29470085899601905",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20034.719754911057,
+      "price": 0.00030941991480909877,
+      "timestamp": "2025-11-13T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178147381-0.5071571310608726",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20034.719754911057,
+      "price": 0.00030941991480909877,
+      "timestamp": "2025-11-13T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178147381-0.9655173111401486",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12020.831852946634,
+      "price": 0.00030941991480909877,
+      "timestamp": "2025-11-13T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178147381-0.42914201093176774",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9015.623889709976,
+      "price": 0.00030941991480909877,
+      "timestamp": "2025-11-13T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178147381-0.19002862755882055",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9015.623889709976,
+      "price": 0.00030941991480909877,
+      "timestamp": "2025-11-13T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178147381-0.38691463994666486",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4808.332741178654,
+      "price": 0.00030941991480909877,
+      "timestamp": "2025-11-13T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178148200-0.15854996221595785",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20045.74674202272,
+      "price": 0.0003215968512491761,
+      "timestamp": "2025-11-14T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178148200-0.18314270929881726",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20045.74674202272,
+      "price": 0.0003215968512491761,
+      "timestamp": "2025-11-14T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178148200-0.924271573737818",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12027.448045213629,
+      "price": 0.0003215968512491761,
+      "timestamp": "2025-11-14T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178148200-0.9233936286120202",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9020.586033910222,
+      "price": 0.0003215968512491761,
+      "timestamp": "2025-11-14T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178148200-0.4791310403213431",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9020.586033910222,
+      "price": 0.0003215968512491761,
+      "timestamp": "2025-11-14T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178148200-0.942907500855619",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4810.979218085452,
+      "price": 0.0003215968512491761,
+      "timestamp": "2025-11-14T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178148961-0.09095962183223238",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "side": "buy",
+      "amount": 20054.064065416715,
+      "price": 0.00031572382043531887,
+      "timestamp": "2025-11-15T00:00:00.000Z"
+    },
+    {
+      "id": "volatile-1-1763178148961-0.6514551941926668",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 20054.064065416715,
+      "price": 0.00031572382043531887,
+      "timestamp": "2025-11-15T00:00:00.000Z"
+    },
+    {
+      "id": "options-1-1763178148961-0.9168161578578227",
+      "strategyId": "options-1",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 12032.438439250029,
+      "price": 0.00031572382043531887,
+      "timestamp": "2025-11-15T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178148961-0.28076029367818567",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "side": "buy",
+      "amount": 9024.32882943752,
+      "price": 0.00031572382043531887,
+      "timestamp": "2025-11-15T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-lp-1763178148961-0.40909979018223586",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "side": "buy",
+      "amount": 9024.32882943752,
+      "price": 0.00031572382043531887,
+      "timestamp": "2025-11-15T00:00:00.000Z"
+    },
+    {
+      "id": "iv-regime-1-options-1763178148961-0.3211230623130831",
+      "strategyId": "iv-regime-1-options",
+      "asset": "ETH-USDC-OPTIONS",
+      "side": "sell",
+      "amount": 4812.975375700011,
+      "price": 0.00031572382043531887,
+      "timestamp": "2025-11-15T00:00:00.000Z"
+    }
+  ],
+  "positions": [
+    {
+      "id": "pos-volatile-1-1763178098741-0.41129797453263806",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21546.470433135157,
+      "entryPrice": 0.00023208959386179632,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178098741-0.4134046287587808",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21546.470433135157,
+      "entryPrice": 0.00023208959386179632,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178098742-0.2193830148663446",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9000,
+      "entryPrice": 0.00023208959386179632,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178098742-0.24751893226243982",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9000,
+      "entryPrice": 0.00023208959386179632,
+      "currentPrice": 0.00023208959386179632
+    },
+    {
+      "id": "pos-volatile-1-1763178099561-0.18887420667711063",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21522.885900952926,
+      "entryPrice": 0.00022990363633636625,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178099561-0.49009334131114646",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21522.885900952926,
+      "entryPrice": 0.00022990363633636625,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178099561-0.9335498951196121",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9000.000915641138,
+      "entryPrice": 0.00022990363633636625,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178099561-0.8527156977826378",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9000.000915641138,
+      "entryPrice": 0.00022990363633636625,
+      "currentPrice": 0.00022990363633636625
+    },
+    {
+      "id": "pos-volatile-1-1763178100277-0.2917666205565732",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21499.306283672624,
+      "entryPrice": 0.00022412706890293253,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178100277-0.24418010301476645",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21499.306283672624,
+      "entryPrice": 0.00022412706890293253,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178100277-0.14188536467728452",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 8999.993081972654,
+      "entryPrice": 0.00022412706890293253,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178100277-0.6043179113166555",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 8999.993081972654,
+      "entryPrice": 0.00022412706890293253,
+      "currentPrice": 0.00022412706890293253
+    },
+    {
+      "id": "pos-volatile-1-1763178100993-0.3112438942791288",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21475.655790302066,
+      "entryPrice": 0.00021203920660890579,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178100994-0.5240482208863527",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21475.655790302066,
+      "entryPrice": 0.00021203920660890579,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178100994-0.8901474126143744",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 8999.944719840625,
+      "entryPrice": 0.00021203920660890579,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178100994-0.9468983116853843",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 8999.944719840625,
+      "entryPrice": 0.00021203920660890579,
+      "currentPrice": 0.00021203920660890579
+    },
+    {
+      "id": "pos-volatile-1-1763178101813-0.46735335881219464",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21451.77270615859,
+      "entryPrice": 0.00021413093613781674,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178101813-0.6421583042843323",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21451.77270615859,
+      "entryPrice": 0.00021413093613781674,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178101813-0.3408360603502445",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 8999.787862766154,
+      "entryPrice": 0.00021413093613781674,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178101813-0.88491730237331",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 8999.787862766154,
+      "entryPrice": 0.00021413093613781674,
+      "currentPrice": 0.00021413093613781674
+    },
+    {
+      "id": "pos-volatile-1-1763178102530-0.1255266343928484",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21428.387778257074,
+      "entryPrice": 0.00021700856868257977,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178102530-0.7640820274467883",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21428.387778257074,
+      "entryPrice": 0.00021700856868257977,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178102530-0.5737695438498888",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 8999.829076620857,
+      "entryPrice": 0.00021700856868257977,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178102530-0.14479210211816174",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 8999.829076620857,
+      "entryPrice": 0.00021700856868257977,
+      "currentPrice": 0.00021700856868257977
+    },
+    {
+      "id": "pos-volatile-1-1763178103348-0.5518743812424446",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21405.093887744537,
+      "entryPrice": 0.00022094548996588748,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178103348-0.8260354022816219",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21405.093887744537,
+      "entryPrice": 0.00022094548996588748,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178103349-0.3122859336265543",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 8999.89784948655,
+      "entryPrice": 0.00022094548996588748,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178103349-0.16050490624771407",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 8999.89784948655,
+      "entryPrice": 0.00022094548996588748,
+      "currentPrice": 0.00022094548996588748
+    },
+    {
+      "id": "pos-volatile-1-1763178104053-0.48651968037467297",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21381.924733547545,
+      "entryPrice": 0.0002220682611228496,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178104053-0.5952033192172999",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21381.924733547545,
+      "entryPrice": 0.0002220682611228496,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178104053-0.8516397363883867",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9000.008468104452,
+      "entryPrice": 0.0002220682611228496,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178104053-0.023253855436268456",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9000.008468104452,
+      "entryPrice": 0.0002220682611228496,
+      "currentPrice": 0.0002220682611228496
+    },
+    {
+      "id": "pos-volatile-1-1763178104718-0.7682545841125189",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21358.61738337314,
+      "entryPrice": 0.0002177375036919876,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178104718-0.7490364568415864",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21358.61738337314,
+      "entryPrice": 0.0002177375036919876,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178104718-0.3510802978556935",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9000.050287777802,
+      "entryPrice": 0.0002177375036919876,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178104718-0.31587041255984294",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9000.050287777802,
+      "entryPrice": 0.0002177375036919876,
+      "currentPrice": 0.0002177375036919876
+    },
+    {
+      "id": "pos-volatile-1-1763178105426-0.5915953406740045",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21334.891053988627,
+      "entryPrice": 0.00021783944112362266,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178105426-0.9781402065117566",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21334.891053988627,
+      "entryPrice": 0.00021783944112362266,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178105427-0.3750638087825596",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 8999.904648242164,
+      "entryPrice": 0.00021783944112362266,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178105427-0.8944877808885277",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 8999.904648242164,
+      "entryPrice": 0.00021783944112362266,
+      "currentPrice": 0.00021783944112362266
+    },
+    {
+      "id": "pos-volatile-1-1763178106216-0.9566970770503882",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21311.566020992435,
+      "entryPrice": 0.00022366165132929383,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178106216-0.1261121061322107",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21311.566020992435,
+      "entryPrice": 0.00022366165132929383,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178106216-0.6692154180461114",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 8999.917348928891,
+      "entryPrice": 0.00022366165132929383,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178106216-0.4091955098551906",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 8999.917348928891,
+      "entryPrice": 0.00022366165132929383,
+      "currentPrice": 0.00022366165132929383
+    },
+    {
+      "id": "pos-volatile-1-1763178106929-0.10770330766251957",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21288.86986020465,
+      "entryPrice": 0.00022304511024180467,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178106929-0.8425972962271832",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21288.86986020465,
+      "entryPrice": 0.00022304511024180467,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178106929-0.6500598528694944",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9000.185133828147,
+      "entryPrice": 0.00022304511024180467,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178106929-0.7936697401375028",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9000.185133828147,
+      "entryPrice": 0.00022304511024180467,
+      "currentPrice": 0.00022304511024180467
+    },
+    {
+      "id": "pos-volatile-1-1763178107536-0.31048404146804287",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21265.519184456214,
+      "entryPrice": 0.00022480584905181403,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178107536-0.5524932948646754",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21265.519184456214,
+      "entryPrice": 0.00022480584905181403,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178107536-0.3716700515413567",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9000.165687834564,
+      "entryPrice": 0.00022480584905181403,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178107536-0.8951401964102099",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9000.165687834564,
+      "entryPrice": 0.00022480584905181403,
+      "currentPrice": 0.00022480584905181403
+    },
+    {
+      "id": "pos-volatile-1-1763178108264-0.667155210690126",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21242.488612425936,
+      "entryPrice": 0.0002379024894606169,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178108264-0.677411050505853",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21242.488612425936,
+      "entryPrice": 0.0002379024894606169,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178108264-0.3722603056545519",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9000.271015577559,
+      "entryPrice": 0.0002379024894606169,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178108264-0.7082109298037936",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9000.271015577559,
+      "entryPrice": 0.0002379024894606169,
+      "currentPrice": 0.0002379024894606169
+    },
+    {
+      "id": "pos-volatile-1-1763178109055-0.85239992908273",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21221.047160730617,
+      "entryPrice": 0.00024004204797349496,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178109055-0.8674238575639942",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21221.047160730617,
+      "entryPrice": 0.00024004204797349496,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178109055-0.12848273714587521",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9001.039800517994,
+      "entryPrice": 0.00024004204797349496,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178109055-0.802857191573359",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9001.039800517994,
+      "entryPrice": 0.00024004204797349496,
+      "currentPrice": 0.00024004204797349496
+    },
+    {
+      "id": "pos-volatile-1-1763178109672-0.4001017555350037",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21198.163578092248,
+      "entryPrice": 0.00024070497141207765,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178109672-0.681430419190816",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21198.163578092248,
+      "entryPrice": 0.00024070497141207765,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178109673-0.8776251127107266",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9001.187102161084,
+      "entryPrice": 0.00024070497141207765,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178109673-0.5351534095009007",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9001.187102161084,
+      "entryPrice": 0.00024070497141207765,
+      "currentPrice": 0.00024070497141207765
+    },
+    {
+      "id": "pos-volatile-1-1763178110241-0.500155654432917",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21175.098087832594,
+      "entryPrice": 0.0002581749213852104,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178110241-0.658504199798891",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21175.098087832594,
+      "entryPrice": 0.0002581749213852104,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178110241-0.2528394649868101",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9001.246590167084,
+      "entryPrice": 0.0002581749213852104,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178110241-0.5195730948792452",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9001.246590167084,
+      "entryPrice": 0.0002581749213852104,
+      "currentPrice": 0.0002581749213852104
+    },
+    {
+      "id": "pos-volatile-1-1763178110926-0.07418068100628539",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21154.877803012183,
+      "entryPrice": 0.00024781572636817874,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178110926-0.06769444939705227",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21154.877803012183,
+      "entryPrice": 0.00024781572636817874,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178110926-0.2003710677933861",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9002.506181971314,
+      "entryPrice": 0.00024781572636817874,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178110926-0.9367893529621119",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9002.506181971314,
+      "entryPrice": 0.00024781572636817874,
+      "currentPrice": 0.00024781572636817874
+    },
+    {
+      "id": "pos-volatile-1-1763178111692-0.5353837944876183",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21129.923653855087,
+      "entryPrice": 0.0002487737538625768,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178111692-0.8137656411041927",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21129.923653855087,
+      "entryPrice": 0.0002487737538625768,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178111692-0.36612295565625663",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9001.741009872369,
+      "entryPrice": 0.0002487737538625768,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178111692-0.45497993392704217",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9001.741009872369,
+      "entryPrice": 0.0002487737538625768,
+      "currentPrice": 0.0002487737538625768
+    },
+    {
+      "id": "pos-volatile-1-1763178112462-0.1475726234228124",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21107.016927335175,
+      "entryPrice": 0.00024116473732393887,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178112462-0.3576801774764854",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21107.016927335175,
+      "entryPrice": 0.00024116473732393887,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178112462-0.17781279936597294",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9001.836544947098,
+      "entryPrice": 0.00024116473732393887,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178112462-0.26366374264129777",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9001.836544947098,
+      "entryPrice": 0.00024116473732393887,
+      "currentPrice": 0.00024116473732393887
+    },
+    {
+      "id": "pos-volatile-1-1763178113105-0.059216728545254727",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21082.44951692071,
+      "entryPrice": 0.0002370700003571221,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178113105-0.751784018805816",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21082.44951692071,
+      "entryPrice": 0.0002370700003571221,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178113105-0.4562658324935238",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9001.212444776578,
+      "entryPrice": 0.0002370700003571221,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178113105-0.40190047816850527",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9001.212444776578,
+      "entryPrice": 0.0002370700003571221,
+      "currentPrice": 0.0002370700003571221
+    },
+    {
+      "id": "pos-volatile-1-1763178113792-0.45048686632467494",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21058.564214076574,
+      "entryPrice": 0.00024117441519231744,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178113792-0.3783329414049601",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21058.564214076574,
+      "entryPrice": 0.00024117441519231744,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178113792-0.936628273096656",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9000.867712669839,
+      "entryPrice": 0.00024117441519231744,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178113792-0.3087163140529965",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9000.867712669839,
+      "entryPrice": 0.00024117441519231744,
+      "currentPrice": 0.00024117441519231744
+    },
+    {
+      "id": "pos-volatile-1-1763178114508-0.8424974824425696",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21036.458282956235,
+      "entryPrice": 0.000230018701586894,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178114508-0.9300675085222369",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21036.458282956235,
+      "entryPrice": 0.000230018701586894,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178114508-0.5704596336951473",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9001.272788647271,
+      "entryPrice": 0.000230018701586894,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178114508-0.6730759727693023",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9001.272788647271,
+      "entryPrice": 0.000230018701586894,
+      "currentPrice": 0.000230018701586894
+    },
+    {
+      "id": "pos-volatile-1-1763178115294-0.3480945940786563",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 21010.92615519234,
+      "entryPrice": 0.00022287097812295783,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178115294-0.03081508868496463",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 21010.92615519234,
+      "entryPrice": 0.00022287097812295783,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178115294-0.318975007557752",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9000.200303570648,
+      "entryPrice": 0.00022287097812295783,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178115294-0.6976345747874462",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9000.200303570648,
+      "entryPrice": 0.00022287097812295783,
+      "currentPrice": 0.00022287097812295783
+    },
+    {
+      "id": "pos-volatile-1-1763178116047-0.9436821990611282",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20986.266483550062,
+      "entryPrice": 0.0002214424685857134,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178116047-0.5839044063008731",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20986.266483550062,
+      "entryPrice": 0.0002214424685857134,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178116047-0.9778620672252241",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 8999.488790733545,
+      "entryPrice": 0.0002214424685857134,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178116047-0.5684670860071049",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 8999.488790733545,
+      "entryPrice": 0.0002214424685857134,
+      "currentPrice": 0.0002214424685857134
+    },
+    {
+      "id": "pos-volatile-1-1763178116866-0.8962453537809221",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20962.988384100656,
+      "entryPrice": 0.0002226952296224194,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178116866-0.42022121500395015",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20962.988384100656,
+      "entryPrice": 0.0002226952296224194,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178116866-0.38656311934469045",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 8999.358014849657,
+      "entryPrice": 0.0002226952296224194,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178116866-0.5822313461265696",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 8999.358014849657,
+      "entryPrice": 0.0002226952296224194,
+      "currentPrice": 0.0002226952296224194
+    },
+    {
+      "id": "pos-volatile-1-1763178117590-0.5924150226581008",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20940.41944803285,
+      "entryPrice": 0.00022139805138147192,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178117590-0.6070449853263069",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20940.41944803285,
+      "entryPrice": 0.00022139805138147192,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178117590-0.4177770578272394",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 8999.52091985083,
+      "entryPrice": 0.00022139805138147192,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178117590-0.874327032138106",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 8999.52091985083,
+      "entryPrice": 0.00022139805138147192,
+      "currentPrice": 0.00022139805138147192
+    },
+    {
+      "id": "pos-volatile-1-1763178118401-0.7977871330889562",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20917.20183681135,
+      "entryPrice": 0.00021329799592046186,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178118401-0.9575469103121373",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20917.20183681135,
+      "entryPrice": 0.00021329799592046186,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178118401-0.22162072680874945",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 8999.394288596592,
+      "entryPrice": 0.00021329799592046186,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178118401-0.41970538752744313",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 8999.394288596592,
+      "entryPrice": 0.00021329799592046186,
+      "currentPrice": 0.00021329799592046186
+    },
+    {
+      "id": "pos-volatile-1-1763178119090-0.8376585561547985",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20892.091811794195,
+      "entryPrice": 0.00022463820917816845,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178119090-0.8584867656599634",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20892.091811794195,
+      "entryPrice": 0.00022463820917816845,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178119090-0.7607887543394032",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 8998.441489260445,
+      "entryPrice": 0.00022463820917816845,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178119090-0.4292245021258557",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 8998.441489260445,
+      "entryPrice": 0.00022463820917816845,
+      "currentPrice": 0.00022463820917816845
+    },
+    {
+      "id": "pos-volatile-1-1763178119835-0.4734888267753611",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20872.572206942565,
+      "entryPrice": 0.0002208562134405229,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178119835-0.5322165251058557",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20872.572206942565,
+      "entryPrice": 0.0002208562134405229,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178119835-0.8878677034801856",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 8999.886284461834,
+      "entryPrice": 0.0002208562134405229,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178119835-0.9328548276088108",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 8999.886284461834,
+      "entryPrice": 0.0002208562134405229,
+      "currentPrice": 0.0002208562134405229
+    },
+    {
+      "id": "pos-volatile-1-1763178120659-0.9859363840673984",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20848.648971495204,
+      "entryPrice": 0.00022883400397750547,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178120659-0.8499889232180619",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20848.648971495204,
+      "entryPrice": 0.00022883400397750547,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178120659-0.3334598256845094",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 8999.422590469705,
+      "entryPrice": 0.00022883400397750547,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178120659-0.6528875512723965",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 8999.422590469705,
+      "entryPrice": 0.00022883400397750547,
+      "currentPrice": 0.00022883400397750547
+    },
+    {
+      "id": "pos-volatile-1-1763178121371-0.5131320991339932",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20828.368779633405,
+      "entryPrice": 0.00026096002616130887,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178121371-0.8959743130732576",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20828.368779633405,
+      "entryPrice": 0.00026096002616130887,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178121371-0.347796352941131",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9000.521332652963,
+      "entryPrice": 0.00026096002616130887,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178121371-0.5836131819506606",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9000.521332652963,
+      "entryPrice": 0.00026096002616130887,
+      "currentPrice": 0.00026096002616130887
+    },
+    {
+      "id": "pos-volatile-1-1763178122088-0.6302333362144076",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20815.94527421076,
+      "entryPrice": 0.0002666370385604113,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178122088-0.42529127055986937",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20815.94527421076,
+      "entryPrice": 0.0002666370385604113,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178122088-0.028393317350528857",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9005.01048979405,
+      "entryPrice": 0.0002666370385604113,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178122088-0.477256118457543",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9005.01048979405,
+      "entryPrice": 0.0002666370385604113,
+      "currentPrice": 0.0002666370385604113
+    },
+    {
+      "id": "pos-volatile-1-1763178122908-0.6498535879782584",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20795.11739551706,
+      "entryPrice": 0.00024050319516829435,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178122908-0.7526327051574946",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20795.11739551706,
+      "entryPrice": 0.00024050319516829435,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178122908-0.6679863859794374",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9005.85894737259,
+      "entryPrice": 0.00024050319516829435,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178122908-0.6107303705327158",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9005.85894737259,
+      "entryPrice": 0.00024050319516829435,
+      "currentPrice": 0.00024050319516829435
+    },
+    {
+      "id": "pos-volatile-1-1763178123591-0.38360188842694154",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20763.521183780285,
+      "entryPrice": 0.00023558061450675897,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178123591-0.2999627656241791",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20763.521183780285,
+      "entryPrice": 0.00023558061450675897,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178123591-0.1716628084707883",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9002.029836282883,
+      "entryPrice": 0.00023558061450675897,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178123591-0.1887416237479519",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9002.029836282883,
+      "entryPrice": 0.00023558061450675897,
+      "currentPrice": 0.00023558061450675897
+    },
+    {
+      "id": "pos-volatile-1-1763178124443-0.23246101024720756",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20739.140284174264,
+      "entryPrice": 0.00024243109245212303,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178124443-0.19239917926807737",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20739.140284174264,
+      "entryPrice": 0.00024243109245212303,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178124443-0.6596607220670669",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9001.313145357839,
+      "entryPrice": 0.00024243109245212303,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178124443-0.021866679667690292",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9001.313145357839,
+      "entryPrice": 0.00024243109245212303,
+      "currentPrice": 0.00024243109245212303
+    },
+    {
+      "id": "pos-volatile-1-1763178125263-0.4290905123166917",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20718.99150773038,
+      "entryPrice": 0.0002507959526202577,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178125263-0.4244292320365082",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20718.99150773038,
+      "entryPrice": 0.0002507959526202577,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178125263-0.9183246195321453",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9002.422934212278,
+      "entryPrice": 0.0002507959526202577,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178125263-0.9945065761868701",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9002.422934212278,
+      "entryPrice": 0.0002507959526202577,
+      "currentPrice": 0.0002507959526202577
+    },
+    {
+      "id": "pos-volatile-1-1763178126057-0.8060161211917388",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20699.500919277612,
+      "entryPrice": 0.00025671206662428284,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178126057-0.244271341871226",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20699.500919277612,
+      "entryPrice": 0.00025671206662428284,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178126057-0.17713480562708495",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9003.810641881051,
+      "entryPrice": 0.00025671206662428284,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178126057-0.00048676692693550017",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9003.810641881051,
+      "entryPrice": 0.00025671206662428284,
+      "currentPrice": 0.00025671206662428284
+    },
+    {
+      "id": "pos-volatile-1-1763178126901-0.7045971710673203",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20679.186766794515,
+      "entryPrice": 0.00026084673945067204,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178126901-0.6550624151256775",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20679.186766794515,
+      "entryPrice": 0.00026084673945067204,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178126901-0.25002914257710496",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9004.831955262698,
+      "entryPrice": 0.00026084673945067204,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178126901-0.8206554663212539",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9004.831955262698,
+      "entryPrice": 0.00026084673945067204,
+      "currentPrice": 0.00026084673945067204
+    },
+    {
+      "id": "pos-volatile-1-1763178127618-0.13700229388719065",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20658.261160674727,
+      "entryPrice": 0.0002570322962235002,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178127618-0.22309892011885724",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20658.261160674727,
+      "entryPrice": 0.0002570322962235002,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178127618-0.3750288305326487",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9005.578142135293,
+      "entryPrice": 0.0002570322962235002,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178127618-0.5553075588204326",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9005.578142135293,
+      "entryPrice": 0.0002570322962235002,
+      "currentPrice": 0.0002570322962235002
+    },
+    {
+      "id": "pos-volatile-1-1763178128437-0.8999962804763374",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20634.211016402132,
+      "entryPrice": 0.00025099510844358626,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178128437-0.3597167942998687",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20634.211016402132,
+      "entryPrice": 0.00025099510844358626,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178128437-0.9771095572814734",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9004.951573908753,
+      "entryPrice": 0.00025099510844358626,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178128437-0.7415467413687907",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9004.951573908753,
+      "entryPrice": 0.00025099510844358626,
+      "currentPrice": 0.00025099510844358626
+    },
+    {
+      "id": "pos-volatile-1-1763178129223-0.6553318267163936",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20609.234712857717,
+      "entryPrice": 0.00025118263167433065,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178129223-0.6274283903949762",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20609.234712857717,
+      "entryPrice": 0.00025118263167433065,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178129223-0.442728458680579",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9003.90818988905,
+      "entryPrice": 0.00025118263167433065,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178129223-0.9402535174420691",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9003.90818988905,
+      "entryPrice": 0.00025118263167433065,
+      "currentPrice": 0.00025118263167433065
+    },
+    {
+      "id": "pos-volatile-1-1763178129973-0.600473721199647",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20586.85032894319,
+      "entryPrice": 0.00025810524944299145,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178129973-0.9194522735216308",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20586.85032894319,
+      "entryPrice": 0.00025810524944299145,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178129973-0.031220121275044366",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9003.985321407039,
+      "entryPrice": 0.00025810524944299145,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178129973-0.5540297956550804",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9003.985321407039,
+      "entryPrice": 0.00025810524944299145,
+      "currentPrice": 0.00025810524944299145
+    },
+    {
+      "id": "pos-volatile-1-1763178130645-0.4517733092301123",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20567.40245692049,
+      "entryPrice": 0.0002626847673403807,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178130645-0.17425985047246195",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20567.40245692049,
+      "entryPrice": 0.0002626847673403807,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178130645-0.4733102964401935",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9005.337546013267,
+      "entryPrice": 0.0002626847673403807,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178130645-0.295578471032816",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9005.337546013267,
+      "entryPrice": 0.0002626847673403807,
+      "currentPrice": 0.0002626847673403807
+    },
+    {
+      "id": "pos-volatile-1-1763178131407-0.34607149368117285",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20547.01512764699,
+      "entryPrice": 0.00025936104735398873,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178131407-0.33664679724702273",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20547.01512764699,
+      "entryPrice": 0.00025936104735398873,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178131407-0.6442248953693729",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9006.27013324405,
+      "entryPrice": 0.00025936104735398873,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178131407-0.7494568775924867",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9006.27013324405,
+      "entryPrice": 0.00025936104735398873,
+      "currentPrice": 0.00025936104735398873
+    },
+    {
+      "id": "pos-volatile-1-1763178132217-0.3905465872283521",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20523.1299980132,
+      "entryPrice": 0.0002541173246104676,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178132217-0.8342705162143473",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20523.1299980132,
+      "entryPrice": 0.0002541173246104676,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178132217-0.4158041389551034",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9005.659095822803,
+      "entryPrice": 0.0002541173246104676,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178132217-0.4202257782093777",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9005.659095822803,
+      "entryPrice": 0.0002541173246104676,
+      "currentPrice": 0.0002541173246104676
+    },
+    {
+      "id": "pos-volatile-1-1763178133045-0.9255639129489015",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20498.352352259324,
+      "entryPrice": 0.0002528719942907523,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178133045-0.5797617620637018",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20498.352352259324,
+      "entryPrice": 0.0002528719942907523,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178133045-0.8623965922362201",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9004.643832791493,
+      "entryPrice": 0.0002528719942907523,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178133045-0.8619025625044605",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9004.643832791493,
+      "entryPrice": 0.0002528719942907523,
+      "currentPrice": 0.0002528719942907523
+    },
+    {
+      "id": "pos-volatile-1-1763178133777-0.13187166585531052",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20475.435535047145,
+      "entryPrice": 0.0002404868724379853,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178133777-0.06737404856126483",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20475.435535047145,
+      "entryPrice": 0.0002404868724379853,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178133777-0.048365084123482394",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9004.433861114523,
+      "entryPrice": 0.0002404868724379853,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178133777-0.8700817175138094",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9004.433861114523,
+      "entryPrice": 0.0002404868724379853,
+      "currentPrice": 0.0002404868724379853
+    },
+    {
+      "id": "pos-volatile-1-1763178134541-0.008645682281905098",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20447.168145243053,
+      "entryPrice": 0.00024270581860926074,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178134541-0.24302111465819332",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20447.168145243053,
+      "entryPrice": 0.00024270581860926074,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178134541-0.34736906023852787",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9001.857027572052,
+      "entryPrice": 0.00024270581860926074,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178134541-0.847450736173271",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9001.857027572052,
+      "entryPrice": 0.00024270581860926074,
+      "currentPrice": 0.00024270581860926074
+    },
+    {
+      "id": "pos-volatile-1-1763178135246-0.4004017984271848",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20425.98384787435,
+      "entryPrice": 0.0002511072467387691,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178135246-0.7175279658362174",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20425.98384787435,
+      "entryPrice": 0.0002511072467387691,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178135246-0.7806645423118163",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9002.385477828517,
+      "entryPrice": 0.0002511072467387691,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178135246-0.4287786527338765",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9002.385477828517,
+      "entryPrice": 0.0002511072467387691,
+      "currentPrice": 0.0002511072467387691
+    },
+    {
+      "id": "pos-volatile-1-1763178135956-0.4486947086791202",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20407.94818458191,
+      "entryPrice": 0.00025621493959913764,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178135956-0.03478352770399151",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20407.94818458191,
+      "entryPrice": 0.00025621493959913764,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178135956-0.971732885516072",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9004.293500002705,
+      "entryPrice": 0.00025621493959913764,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178135956-0.08749024540286876",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9004.293500002705,
+      "entryPrice": 0.00025621493959913764,
+      "currentPrice": 0.00025621493959913764
+    },
+    {
+      "id": "pos-volatile-1-1763178136731-0.9479197062988725",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20388.33729088149,
+      "entryPrice": 0.0002629512630097388,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178136731-0.12272618614136954",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20388.33729088149,
+      "entryPrice": 0.0002629512630097388,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178136731-0.09678974727449785",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9005.499115501632,
+      "entryPrice": 0.0002629512630097388,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178136731-0.14899993262727396",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9005.499115501632,
+      "entryPrice": 0.0002629512630097388,
+      "currentPrice": 0.0002629512630097388
+    },
+    {
+      "id": "pos-volatile-1-1763178137480-0.17291046332333349",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20369.652029565208,
+      "entryPrice": 0.00025992319990351097,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178137480-0.13907731938588375",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20369.652029565208,
+      "entryPrice": 0.00025992319990351097,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178137480-0.28962896042125374",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9007.105858048617,
+      "entryPrice": 0.00025992319990351097,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178137480-0.5960453056925556",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9007.105858048617,
+      "entryPrice": 0.00025992319990351097,
+      "currentPrice": 0.00025992319990351097
+    },
+    {
+      "id": "pos-volatile-1-1763178138268-0.7891260946144095",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20345.873057119137,
+      "entryPrice": 0.000258151339100794,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178138268-0.049367418658353035",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20345.873057119137,
+      "entryPrice": 0.000258151339100794,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178138268-0.31453214419197506",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9006.450488035716,
+      "entryPrice": 0.000258151339100794,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178138268-0.5192695303937505",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9006.450488035716,
+      "entryPrice": 0.000258151339100794,
+      "currentPrice": 0.000258151339100794
+    },
+    {
+      "id": "pos-volatile-1-1763178138959-0.5664790150970367",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20322.770691243586,
+      "entryPrice": 0.0002559030738878626,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178138959-0.05582963651828887",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20322.770691243586,
+      "entryPrice": 0.0002559030738878626,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178138959-0.19332043622888695",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9006.082704041535,
+      "entryPrice": 0.0002559030738878626,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178138959-0.8103444104059218",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9006.082704041535,
+      "entryPrice": 0.0002559030738878626,
+      "currentPrice": 0.0002559030738878626
+    },
+    {
+      "id": "pos-volatile-1-1763178139701-0.6409266001153117",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20299.415125381973,
+      "entryPrice": 0.000277581916402977,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178139701-0.26603633641325797",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20299.415125381973,
+      "entryPrice": 0.000277581916402977,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178139701-0.8849315836743317",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9005.59096829298,
+      "entryPrice": 0.000277581916402977,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178139701-0.1120300820306469",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9005.59096829298,
+      "entryPrice": 0.000277581916402977,
+      "currentPrice": 0.000277581916402977
+    },
+    {
+      "id": "pos-volatile-1-1763178140464-0.647951875023484",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20289.480629393853,
+      "entryPrice": 0.0003039882439919542,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178140464-0.6412374902496737",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20289.480629393853,
+      "entryPrice": 0.0003039882439919542,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178140464-0.06898391829116823",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9011.047959679225,
+      "entryPrice": 0.0003039882439919542,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178140464-0.6540030314456483",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9011.047959679225,
+      "entryPrice": 0.0003039882439919542,
+      "currentPrice": 0.0003039882439919542
+    },
+    {
+      "id": "pos-volatile-1-1763178141134-0.576908933736833",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20282.481056491364,
+      "entryPrice": 0.0002920512370136298,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178141134-0.8837123665791545",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20282.481056491364,
+      "entryPrice": 0.0002920512370136298,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178141135-0.34841431389057576",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9017.810994724154,
+      "entryPrice": 0.0002920512370136298,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178141135-0.7372293804338664",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9017.810994724154,
+      "entryPrice": 0.0002920512370136298,
+      "currentPrice": 0.0002920512370136298
+    },
+    {
+      "id": "pos-volatile-1-1763178141954-0.7096865310201096",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20253.511284099237,
+      "entryPrice": 0.0003018505960715023,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178141954-0.19216436943853488",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20253.511284099237,
+      "entryPrice": 0.0003018505960715023,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178141954-0.9535239401171157",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9014.799137035037,
+      "entryPrice": 0.0003018505960715023,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178141954-0.6112091691052145",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9014.799137035037,
+      "entryPrice": 0.0003018505960715023,
+      "currentPrice": 0.0003018505960715023
+    },
+    {
+      "id": "pos-volatile-1-1763178142773-0.052783774432934916",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20237.28113107411,
+      "entryPrice": 0.0002911439173621431,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178142773-0.32849570182090315",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20237.28113107411,
+      "entryPrice": 0.0002911439173621431,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178142773-0.018852468807844525",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9017.446442171891,
+      "entryPrice": 0.0002911439173621431,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178142773-0.42813822720078765",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9017.446442171891,
+      "entryPrice": 0.0002911439173621431,
+      "currentPrice": 0.0002911439173621431
+    },
+    {
+      "id": "pos-volatile-1-1763178143592-0.26835936533198246",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20208.86899245192,
+      "entryPrice": 0.0002940676140467665,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178143592-0.12060749143131377",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20208.86899245192,
+      "entryPrice": 0.0002940676140467665,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178143593-0.3067765887328837",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9014.654653836295,
+      "entryPrice": 0.0002940676140467665,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178143593-0.18286904498411571",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9014.654653836295,
+      "entryPrice": 0.0002940676140467665,
+      "currentPrice": 0.0002940676140467665
+    },
+    {
+      "id": "pos-volatile-1-1763178144207-0.28208107220922074",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20188.691638593456,
+      "entryPrice": 0.000278979538757608,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178144207-0.14631790033196912",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20188.691638593456,
+      "entryPrice": 0.000278979538757608,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178144207-0.5094252260166381",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9015.52326719578,
+      "entryPrice": 0.000278979538757608,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178144207-0.8610314725193623",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9015.52326719578,
+      "entryPrice": 0.000278979538757608,
+      "currentPrice": 0.000278979538757608
+    },
+    {
+      "id": "pos-volatile-1-1763178145026-0.6656438701561231",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20157.409413629353,
+      "entryPrice": 0.00028023917738247345,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178145026-0.09919604450510977",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20157.409413629353,
+      "entryPrice": 0.00028023917738247345,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178145026-0.6586617798373021",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9011.418498570321,
+      "entryPrice": 0.00028023917738247345,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178145026-0.7462719528344035",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9011.418498570321,
+      "entryPrice": 0.00028023917738247345,
+      "currentPrice": 0.00028023917738247345
+    },
+    {
+      "id": "pos-volatile-1-1763178145743-0.39261834908325033",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20136.296416119276,
+      "entryPrice": 0.0002927949651332721,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178145743-0.2846569546293797",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20136.296416119276,
+      "entryPrice": 0.0002927949651332721,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178145743-0.6240837209043939",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9011.84506554077,
+      "entryPrice": 0.0002927949651332721,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178145743-0.9507991122531327",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9011.84506554077,
+      "entryPrice": 0.0002927949651332721,
+      "currentPrice": 0.0002927949651332721
+    },
+    {
+      "id": "pos-volatile-1-1763178146562-0.01440869276264456",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20122.44137916988,
+      "entryPrice": 0.00029290674297559007,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178146562-0.5551007069559049",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20122.44137916988,
+      "entryPrice": 0.00029290674297559007,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178146562-0.6185097618716889",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9015.513549275529,
+      "entryPrice": 0.00029290674297559007,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178146562-0.15430608677882596",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9015.513549275529,
+      "entryPrice": 0.00029290674297559007,
+      "currentPrice": 0.00029290674297559007
+    },
+    {
+      "id": "pos-volatile-1-1763178147381-0.29470085899601905",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20100.65953671681,
+      "entryPrice": 0.00030941991480909877,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178147381-0.5071571310608726",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20100.65953671681,
+      "entryPrice": 0.00030941991480909877,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178147381-0.42914201093176774",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9015.623889709976,
+      "entryPrice": 0.00030941991480909877,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178147381-0.19002862755882055",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9015.623889709976,
+      "entryPrice": 0.00030941991480909877,
+      "currentPrice": 0.00030941991480909877
+    },
+    {
+      "id": "pos-volatile-1-1763178148200-0.15854996221595785",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20089.706699749488,
+      "entryPrice": 0.0003215968512491761,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178148200-0.18314270929881726",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20089.706699749488,
+      "entryPrice": 0.0003215968512491761,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178148200-0.9233936286120202",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9020.586033910222,
+      "entryPrice": 0.0003215968512491761,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178148200-0.4791310403213431",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9020.586033910222,
+      "entryPrice": 0.0003215968512491761,
+      "currentPrice": 0.0003215968512491761
+    },
+    {
+      "id": "pos-volatile-1-1763178148961-0.09095962183223238",
+      "strategyId": "volatile-1",
+      "asset": "ETH",
+      "amount": 20076.041121926763,
+      "entryPrice": 0.00031572382043531887,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-volatile-1-1763178148961-0.6514551941926668",
+      "strategyId": "volatile-1",
+      "asset": "USDC",
+      "amount": 20076.041121926763,
+      "entryPrice": 0.00031572382043531887,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178148961-0.28076029367818567",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDC",
+      "amount": 9024.32882943752,
+      "entryPrice": 0.00031572382043531887,
+      "currentPrice": 0.00031572382043531887
+    },
+    {
+      "id": "pos-iv-regime-1-lp-1763178148961-0.40909979018223586",
+      "strategyId": "iv-regime-1-lp",
+      "asset": "USDT",
+      "amount": 9024.32882943752,
+      "entryPrice": 0.00031572382043531887,
+      "currentPrice": 0.00031572382043531887
+    }
+  ],
+  "historicalValues": [
+    100000,
+    100000.01017379043,
+    99999.92313302949,
+    99999.38577600697,
+    99997.64291962393,
+    99998.10085134285,
+    99998.864994295,
+    100000.09409004945,
+    100000.55875308668,
+    99998.94053602405,
+    99999.08165476547,
+    100002.05704253494,
+    100001.8409759396,
+    100003.01128419508,
+    100011.55333908883,
+    100013.19002401206,
+    100013.8510018565,
+    100027.84646634792,
+    100019.34455413744,
+    100020.40605496775,
+    100013.47160862864,
+    100009.64125188708,
+    100014.14209608079,
+    100002.22559522942,
+    99994.3198970394,
+    99992.86683166283,
+    99994.67688723144,
+    99993.26987329546,
+    99982.68321400495,
+    99998.73649402037,
+    99993.58433855229,
+    100005.79258503292,
+    100055.6721088228,
+    100065.09941525102,
+    100022.55373647649,
+    100014.590503976,
+    100026.92149124753,
+    100042.340465345,
+    100053.68839180774,
+    100061.97935705884,
+    100055.01748787504,
+    100043.42433210058,
+    100044.28134896711,
+    100059.30606681408,
+    100069.66814715613,
+    100062.87884247558,
+    100051.5981421277,
+    100049.26512349468,
+    100020.63363968948,
+    100026.50530920575,
+    100047.70555558562,
+    100061.1012833515,
+    100078.95397831796,
+    100071.67208928573,
+    100067.5856004615,
+    100062.121869922,
+    100122.75510754692,
+    100197.89994137948,
+    100164.43485594487,
+    100193.84935746544,
+    100162.82948706996,
+    100172.48074661977,
+    100126.87220633689,
+    100131.6118393419,
+    100172.3727697281,
+    100173.59877455528,
+    100228.73371011358,
+    100270.32032708357,
+    100251.40608650132
+  ],
+  "historicalReturns": [
+    1.0173790433327667e-7,
+    -8.704075209193126e-7,
+    -0.000005373574355705362,
+    -0.00001742867088140453,
+    0.0000045794251299311574,
+    0.00000764157464632586,
+    0.000012291097049117333,
+    0.000004646626000286413,
+    -0.000016182080208398166,
+    0.0000014112023653770088,
+    0.000029754150940574882,
+    -0.000002160621508511997,
+    0.000011702867107773134,
+    0.00008541797675951147,
+    0.000016364958533139327,
+    0.0000066089067280147665,
+    0.00013993526247844704,
+    -0.00008499545387439858,
+    0.000010612955274260281,
+    -0.00006933031580881804,
+    -0.00003829840800393169,
+    0.000045004102978170165,
+    -0.00011914815846661553,
+    -0.00007905522245095265,
+    -0.000014531479168665499,
+    0.000018101846921318542,
+    -0.000014070888369083741,
+    -0.0001058737183404678,
+    0.0001605606040903811,
+    -0.00005152220566695253,
+    0.0001220902977064603,
+    0.0004987663464340065,
+    0.00009422060968195968,
+    -0.0004251799980528552,
+    -0.00007961436898995236,
+    0.00012329188380811739,
+    0.00015414824196921894,
+    0.00011343123731366022,
+    0.00008286516353733511,
+    -0.00006957556934741651,
+    -0.00011586781018620475,
+    0.000008566448742168191,
+    0.00015018067644031064,
+    0.00010355938642158668,
+    -0.00006784577990776242,
+    -0.00011273611631382061,
+    -0.00002331815459558147,
+    -0.0002861738541494017,
+    0.000058704582270742634,
+    0.0002119462867800469,
+    0.00013389340306694823,
+    0.0001784179340172514,
+    -0.00007276144226902521,
+    -0.00004083562049982804,
+    -0.000054600403384526464,
+    0.0006059559450852023,
+    0.000750527028065102,
+    -0.0003339898885524509,
+    0.0002936621323015077,
+    -0.0003095985491565489,
+    0.00009635570000597886,
+    -0.000455300097820676,
+    0.00004733627347554937,
+    0.0004070735468794505,
+    0.000012238951651907265,
+    0.0005503938785545357,
+    0.0004149171143902342,
+    -0.0001886324938481386
+  ]
+}

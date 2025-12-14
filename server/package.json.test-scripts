@@ -1,0 +1,14 @@
+{
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:cov": "jest --coverage",
+    "test:edge": "jest BotService.edge-cases.spec.ts",
+    "test:integration": "jest BotService.integration.spec.ts",
+    "test:all": "jest --maxWorkers=4",
+    "test:ci": "jest --ci --coverage --maxWorkers=2"
+  }
+}
+
+// Add these to your package.json scripts section!
+
