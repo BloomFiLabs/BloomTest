@@ -3131,15 +3131,15 @@ export class FundingArbitrageStrategy {
     const currentSpread = await this.getCurrentSpreadForPosition(symbol, longExchange, shortExchange);
     const positionAgeHours = this.getPositionAgeHours(symbol, longExchange, shortExchange);
     
-    // Use defaultMinSpread as close threshold (typically 0.01%)
-    const closeThreshold = this.strategyConfig.defaultMinSpread.toDecimal();
-    const minHoldHours = 1; // Minimum 1 hour hold before considering close
-    const churnCostMultiplier = 1.5; // Require 50% more improvement than churn cost to replace
+    // Default values for position management (not configurable via StrategyConfig yet)
+    const closeThreshold = -0.0005; // Close if spread drops below -0.05%
+    const minHoldHours = 4; // Minimum 4 hours before considering close
+    const churnCostMultiplier = 2.0; // Require 2x the churn cost to justify switching
     
-    // Calculate churn cost (fees to close current + open new position)
+    // Calculate churn cost for this position pair (fees to close + open)
     const longFeeRate = this.strategyConfig.getExchangeFeeRate(longExchange);
     const shortFeeRate = this.strategyConfig.getExchangeFeeRate(shortExchange);
-    const churnCost = (longFeeRate + shortFeeRate) * 2; // Entry + exit fees on both sides
+    const churnCost = (longFeeRate + shortFeeRate) * 2; // Close both + open both
     
     this.logger.debug(
       `🔍 Evaluating position ${symbol} (${longExchange}/${shortExchange}): ` +

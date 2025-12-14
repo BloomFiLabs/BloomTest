@@ -165,3 +165,4 @@ export interface IOptimalLeverageService {
     currentLeverage: number,
   ): Promise<{ shouldAdjust: boolean; reason: string; recommendedLeverage: number }>;
 }
+
