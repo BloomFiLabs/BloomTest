@@ -11,6 +11,8 @@ import { Contract, JsonRpcProvider, Wallet, formatUnits } from 'ethers';
 import * as cliProgress from 'cli-progress';
 import type { IOptimalLeverageService, LeverageAlert } from '../../domain/ports/IOptimalLeverageService';
 import { DiagnosticsService } from '../../infrastructure/services/DiagnosticsService';
+import { WithdrawalFulfiller } from '../../infrastructure/adapters/blockchain/WithdrawalFulfiller';
+import { NAVReporter } from '../../infrastructure/adapters/blockchain/NAVReporter';
 
 /**
  * PerpKeeperScheduler - Scheduled execution for funding rate arbitrage
@@ -51,6 +53,8 @@ export class PerpKeeperScheduler implements OnModuleInit {
     @Optional() @Inject('IOptimalLeverageService')
     private readonly optimalLeverageService?: IOptimalLeverageService,
     @Optional() private readonly diagnosticsService?: DiagnosticsService,
+    @Optional() private readonly withdrawalFulfiller?: WithdrawalFulfiller,
+    @Optional() private readonly navReporter?: NAVReporter,
   ) {
     // Initialize orchestrator with exchange adapters
     const adapters = this.keeperService.getExchangeAdapters();
@@ -1138,6 +1142,98 @@ export class PerpKeeperScheduler implements OnModuleInit {
     } catch (error: any) {
       this.logger.debug(`Error in stale order cleanup: ${error.message}`);
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // KEEPER STRATEGY INTEGRATION
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Process pending withdrawal requests from KeeperStrategyManager
+   * Runs every 5 minutes to ensure timely fulfillment (1 hour deadline)
+   */
+  @Interval(300000) // Every 5 minutes (300000 ms)
+  async processKeeperWithdrawals(): Promise<void> {
+    if (!this.withdrawalFulfiller) {
+      return; // Not configured
+    }
+
+    try {
+      const pendingList = this.withdrawalFulfiller.getPendingWithdrawalsList();
+      
+      if (pendingList.length === 0) {
+        return; // Nothing to process
+      }
+
+      this.logger.log(`📤 Processing ${pendingList.length} pending withdrawal request(s)...`);
+
+      const results = await this.withdrawalFulfiller.processPendingWithdrawals();
+
+      if (results.processed > 0) {
+        this.logger.log(
+          `Withdrawal processing complete: ${results.fulfilled}/${results.processed} fulfilled, ${results.failed} failed`,
+        );
+      }
+
+      // If there are still pending withdrawals with deadlines approaching, log warning
+      const urgentWithdrawals = pendingList.filter(w => {
+        const timeUntilDeadline = w.deadline.getTime() - Date.now();
+        return timeUntilDeadline < 30 * 60 * 1000; // Less than 30 minutes
+      });
+
+      if (urgentWithdrawals.length > 0) {
+        this.logger.warn(
+          `⚠️ ${urgentWithdrawals.length} withdrawal(s) have deadlines in < 30 minutes!`,
+        );
+      }
+    } catch (error: any) {
+      this.logger.error(`Error processing keeper withdrawals: ${error.message}`);
+    }
+  }
+
+  /**
+   * Check if NAV needs to be reported (e.g., after significant changes)
+   * NAVReporter has its own hourly interval, but we can trigger extra reports here
+   */
+  async checkAndReportNAV(): Promise<void> {
+    if (!this.navReporter) {
+      return; // Not configured
+    }
+
+    try {
+      // Check if NAV is stale
+      if (this.navReporter.isNAVStale()) {
+        this.logger.warn('NAV is stale, forcing report...');
+        await this.navReporter.forceReportNAV();
+      }
+    } catch (error: any) {
+      this.logger.error(`Error checking NAV: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get keeper strategy status for diagnostics
+   */
+  async getKeeperStrategyStatus(): Promise<{
+    pendingWithdrawals: number;
+    pendingAmount: string;
+    lastNAV: string;
+    lastNAVTime: Date | null;
+    isNAVStale: boolean;
+    emergencyMode: boolean;
+  }> {
+    return {
+      pendingWithdrawals: this.withdrawalFulfiller?.getPendingWithdrawalsList().length || 0,
+      pendingAmount: this.withdrawalFulfiller 
+        ? formatUnits(this.withdrawalFulfiller.getTotalPendingAmount(), 6)
+        : '0',
+      lastNAV: this.navReporter 
+        ? formatUnits(this.navReporter.getLastReportedNAV().nav, 6)
+        : '0',
+      lastNAVTime: this.navReporter?.getLastReportedNAV().timestamp || null,
+      isNAVStale: this.navReporter?.isNAVStale() || false,
+      emergencyMode: this.withdrawalFulfiller?.isEmergencyMode() || false,
+    };
   }
 
   /**

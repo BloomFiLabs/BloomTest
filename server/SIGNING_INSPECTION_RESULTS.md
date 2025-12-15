@@ -123,3 +123,4 @@ this.logger.debug(`🔍 SDK Order Result: ${JSON.stringify(result, null, 2)}`);
 The Go SDK at https://github.com/elliottech/lighter-go is your best resource for understanding the exact EIP712 domain, types, and message structure used for order signing.
 
 
+

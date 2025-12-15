@@ -16,6 +16,20 @@ import { HyperliquidExchangeAdapter } from '../hyperliquid/HyperliquidExchangeAd
 import { ExtendedExchangeAdapter } from '../extended/ExtendedExchangeAdapter';
 
 /**
+ * Pending limit order awaiting price threshold
+ */
+interface PendingLimitOrder {
+  orderId: string;
+  request: PerpOrderRequest;
+  status: OrderStatus;
+  createdAt: Date;
+  expiresAt: Date;
+  fillPrice?: number;
+  filledSize?: number;
+  filledAt?: Date;
+}
+
+/**
  * MockExchangeAdapter - Wraps real exchange adapters for testing
  * 
  * In test mode, this adapter:
@@ -23,6 +37,8 @@ import { ExtendedExchangeAdapter } from '../extended/ExtendedExchangeAdapter';
  * - Tracks FAKE positions and balances internally
  * - Simulates order execution without placing real orders
  * - Calculates realistic slippage based on real order book depth
+ * - LIMIT ORDERS: Only fill when price crosses the limit threshold (realistic mode)
+ *   Set MOCK_INSTANT_FILL=true to fill all orders immediately (fast test mode)
  */
 @Injectable()
 export class MockExchangeAdapter implements IPerpExchangeAdapter {
@@ -33,6 +49,15 @@ export class MockExchangeAdapter implements IPerpExchangeAdapter {
   private orderCounter: number = 0;
   private readonly exchangeType: ExchangeType;
   private readonly realAdapter: IPerpExchangeAdapter; // Delegate to real adapter for market data
+
+  // Pending limit orders queue
+  private pendingOrders: Map<string, PendingLimitOrder> = new Map();
+  
+  // Price polling interval (ms)
+  private readonly PRICE_POLL_INTERVAL = 2000; // Poll every 2 seconds
+  private readonly ORDER_EXPIRY_MS = 60 * 60 * 1000; // Orders expire after 1 hour
+  private pricePollingInterval: NodeJS.Timeout | null = null;
+  private readonly instantFill: boolean;
 
   constructor(
     private readonly configService: ConfigService,
@@ -76,10 +101,185 @@ export class MockExchangeAdapter implements IPerpExchangeAdapter {
     // Use the real adapter's config (it has all the necessary credentials)
     this.config = this.realAdapter.getConfig();
 
+    // Check if instant fill mode is enabled (default: false = realistic limit orders)
+    this.instantFill = this.configService.get<string>('MOCK_INSTANT_FILL') === 'true';
+
     this.logger.log(
       `🧪 MockExchangeAdapter initialized for ${exchangeType} with mock balance: $${this.mockBalance.toFixed(2)} ` +
       `(using REAL market data from exchange)`
     );
+    
+    if (!this.instantFill) {
+      this.logger.log(
+        `📊 Limit order mode: REALISTIC (orders fill when price crosses threshold)`
+      );
+      // Start price polling for limit orders
+      this.startPricePolling();
+    } else {
+      this.logger.log(`⚡ Limit order mode: INSTANT FILL (for fast testing)`);
+    }
+  }
+
+  /**
+   * Start polling prices to check if pending limit orders should fill
+   */
+  private startPricePolling(): void {
+    if (this.pricePollingInterval) {
+      clearInterval(this.pricePollingInterval);
+    }
+
+    this.pricePollingInterval = setInterval(async () => {
+      await this.checkPendingOrders();
+    }, this.PRICE_POLL_INTERVAL);
+  }
+
+  /**
+   * Stop price polling (cleanup)
+   */
+  public stopPricePolling(): void {
+    if (this.pricePollingInterval) {
+      clearInterval(this.pricePollingInterval);
+      this.pricePollingInterval = null;
+    }
+  }
+
+  /**
+   * Check all pending limit orders and fill those where price crossed threshold
+   */
+  private async checkPendingOrders(): Promise<void> {
+    const now = new Date();
+
+    for (const [orderId, order] of this.pendingOrders.entries()) {
+      // Check expiry
+      if (now > order.expiresAt) {
+        order.status = OrderStatus.EXPIRED;
+        this.pendingOrders.delete(orderId);
+        this.logger.debug(`[MOCK] Order ${orderId} expired`);
+        continue;
+      }
+
+      // Check if price crossed threshold
+      try {
+        const currentPrice = await this.realAdapter.getMarkPrice(order.request.symbol);
+        const limitPrice = order.request.price || currentPrice;
+
+        let shouldFill = false;
+
+        if (order.request.side === OrderSide.LONG) {
+          // Buy limit: fill when price <= limit price
+          shouldFill = currentPrice <= limitPrice;
+        } else {
+          // Sell limit: fill when price >= limit price
+          shouldFill = currentPrice >= limitPrice;
+        }
+
+        if (shouldFill) {
+          this.logger.log(
+            `[MOCK] 📈 Limit order ${orderId} triggered: ${order.request.symbol} ` +
+            `price ${currentPrice.toFixed(2)} crossed limit ${limitPrice.toFixed(2)}`
+          );
+          await this.executeLimitOrderFill(order, currentPrice);
+        }
+      } catch (error: any) {
+        this.logger.debug(`[MOCK] Error checking price for ${order.request.symbol}: ${error.message}`);
+      }
+    }
+  }
+
+  /**
+   * Execute a limit order fill
+   */
+  private async executeLimitOrderFill(order: PendingLimitOrder, currentPrice: number): Promise<void> {
+    const request = order.request;
+    const fillPrice = request.price || currentPrice;
+
+    // Update order status
+    order.status = OrderStatus.FILLED;
+    order.fillPrice = fillPrice;
+    order.filledSize = request.size;
+    order.filledAt = new Date();
+
+    // Update position (same logic as market order fill)
+    await this.updatePositionOnFill(request, fillPrice);
+
+    // Remove from pending
+    this.pendingOrders.delete(order.orderId);
+
+    this.logger.log(
+      `[MOCK] ✅ Limit order ${order.orderId} filled: ${request.side} ${request.size} ${request.symbol} @ $${fillPrice.toFixed(2)}`
+    );
+  }
+
+  /**
+   * Update position when an order fills
+   */
+  private async updatePositionOnFill(request: PerpOrderRequest, fillPrice: number): Promise<void> {
+    const existingPosition = this.mockPositions.get(request.symbol);
+    
+    if (existingPosition) {
+      if (request.reduceOnly) {
+        // Closing position
+        const closeSize = Math.min(request.size, existingPosition.size);
+        const newSize = existingPosition.size - closeSize;
+        
+        if (newSize <= 0.001) {
+          this.mockPositions.delete(request.symbol);
+        } else {
+          const newPosition = new PerpPosition(
+            this.exchangeType,
+            request.symbol,
+            existingPosition.side,
+            newSize,
+            existingPosition.entryPrice,
+            fillPrice,
+            (fillPrice - existingPosition.entryPrice) * newSize * (existingPosition.side === OrderSide.LONG ? 1 : -1),
+            1,
+            undefined,
+            undefined,
+            undefined,
+            new Date(),
+          );
+          this.mockPositions.set(request.symbol, newPosition);
+        }
+      } else {
+        // Increasing position
+        const totalSize = existingPosition.size + request.size;
+        const avgEntryPrice = (existingPosition.entryPrice * existingPosition.size + fillPrice * request.size) / totalSize;
+        
+        const newPosition = new PerpPosition(
+          this.exchangeType,
+          request.symbol,
+          existingPosition.side,
+          totalSize,
+          avgEntryPrice,
+          fillPrice,
+          (fillPrice - avgEntryPrice) * totalSize * (existingPosition.side === OrderSide.LONG ? 1 : -1),
+          1,
+          undefined,
+          undefined,
+          undefined,
+          new Date(),
+        );
+        this.mockPositions.set(request.symbol, newPosition);
+      }
+    } else {
+      // New position
+      const newPosition = new PerpPosition(
+        this.exchangeType,
+        request.symbol,
+        request.side,
+        request.size,
+        fillPrice,
+        fillPrice,
+        0,
+        1,
+        undefined,
+        undefined,
+        undefined,
+        new Date(),
+      );
+      this.mockPositions.set(request.symbol, newPosition);
+    }
   }
 
   getConfig(): ExchangeConfig {
@@ -161,8 +361,7 @@ export class MockExchangeAdapter implements IPerpExchangeAdapter {
 
   async placeOrder(request: PerpOrderRequest): Promise<PerpOrderResponse> {
     this.logger.debug(
-      `[MOCK] Placing ${request.side} order: ${request.size} ${request.symbol} ` +
-      `(${request.type})`
+      `[MOCK] Placing ${request.side} ${request.type} order: ${request.size} ${request.symbol}`
     );
 
     // Simulate order processing delay
@@ -176,6 +375,114 @@ export class MockExchangeAdapter implements IPerpExchangeAdapter {
     // Calculate order value for slippage calculation
     const orderValue = request.size * markPrice;
     
+    // Check if we have enough balance (margin check)
+    const positionValue = request.size * (request.price || markPrice);
+    if (positionValue > this.mockBalance * 10 && !request.reduceOnly) {
+      throw new ExchangeError(
+        `Insufficient balance for order: need $${positionValue.toFixed(2)}, have $${this.mockBalance.toFixed(2)}`,
+        this.exchangeType,
+        'INSUFFICIENT_BALANCE',
+      );
+    }
+
+    // MARKET ORDERS: Always fill immediately
+    if (request.type === OrderType.MARKET) {
+      return this.executeMarketOrder(request, orderId, markPrice, orderValue);
+    }
+
+    // LIMIT ORDERS: Check fill mode
+    if (this.instantFill) {
+      // Instant fill mode: fill immediately at limit price
+      const fillPrice = request.price || markPrice;
+      await this.updatePositionOnFill(request, fillPrice);
+      
+      return new PerpOrderResponse(
+        orderId,
+        OrderStatus.FILLED,
+        request.symbol,
+        request.side,
+        request.clientOrderId,
+        request.size,
+        fillPrice,
+        undefined,
+        new Date(),
+      );
+    }
+
+    // REALISTIC LIMIT ORDER: Check if it should fill immediately or go pending
+    const limitPrice = request.price || markPrice;
+    let shouldFillNow = false;
+
+    if (request.side === OrderSide.LONG) {
+      // Buy limit fills if current price <= limit price
+      shouldFillNow = markPrice <= limitPrice;
+    } else {
+      // Sell limit fills if current price >= limit price
+      shouldFillNow = markPrice >= limitPrice;
+    }
+
+    if (shouldFillNow) {
+      // Price already favorable - fill immediately
+      this.logger.log(
+        `[MOCK] Limit order fills immediately: price $${markPrice.toFixed(2)} is ` +
+        `${request.side === OrderSide.LONG ? '<=' : '>='} limit $${limitPrice.toFixed(2)}`
+      );
+      
+      await this.updatePositionOnFill(request, limitPrice);
+      
+      return new PerpOrderResponse(
+        orderId,
+        OrderStatus.FILLED,
+        request.symbol,
+        request.side,
+        request.clientOrderId,
+        request.size,
+        limitPrice,
+        undefined,
+        new Date(),
+      );
+    }
+
+    // Price not favorable yet - add to pending queue
+    const now = new Date();
+    const pendingOrder: PendingLimitOrder = {
+      orderId,
+      request,
+      status: OrderStatus.PENDING,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + this.ORDER_EXPIRY_MS),
+    };
+
+    this.pendingOrders.set(orderId, pendingOrder);
+
+    this.logger.log(
+      `[MOCK] 🕐 Limit order ${orderId} queued: ${request.side} ${request.size} ${request.symbol} ` +
+      `@ $${limitPrice.toFixed(2)} (current: $${markPrice.toFixed(2)}, ` +
+      `waiting for price to ${request.side === OrderSide.LONG ? 'drop' : 'rise'})`
+    );
+
+    return new PerpOrderResponse(
+      orderId,
+      OrderStatus.PENDING,
+      request.symbol,
+      request.side,
+      request.clientOrderId,
+      undefined, // Not filled yet
+      undefined, // No fill price yet
+      undefined,
+      new Date(),
+    );
+  }
+
+  /**
+   * Execute a market order immediately
+   */
+  private async executeMarketOrder(
+    request: PerpOrderRequest,
+    orderId: string,
+    markPrice: number,
+    orderValue: number,
+  ): Promise<PerpOrderResponse> {
     // Calculate realistic slippage and market impact using REAL order book data
     const { slippage, priceImpact } = await this.calculateSlippageAndImpact(
       request.symbol,
@@ -187,22 +494,16 @@ export class MockExchangeAdapter implements IPerpExchangeAdapter {
     
     // Apply slippage and price impact to fill price
     let fillPrice: number;
-    if (request.type === OrderType.MARKET) {
-      // Market orders: pay slippage + price impact based on real order book
-      if (request.side === OrderSide.LONG) {
-        // Buying: price moves up (pay more)
-        fillPrice = markPrice * (1 + slippage + priceImpact);
-      } else {
-        // Selling: price moves down (get less)
-        fillPrice = markPrice * (1 - slippage - priceImpact);
-      }
+    if (request.side === OrderSide.LONG) {
+      // Buying: price moves up (pay more)
+      fillPrice = markPrice * (1 + slippage + priceImpact);
     } else {
-      // Limit orders: use requested price
-      fillPrice = request.price || markPrice;
+      // Selling: price moves down (get less)
+      fillPrice = markPrice * (1 - slippage - priceImpact);
     }
     
     // Log slippage for large orders
-    if (orderValue > 100000) { // Orders > $100k
+    if (orderValue > 100000) {
       this.logger.debug(
         `[MOCK] Large order (using REAL market data): ` +
         `slippage: ${(slippage * 100).toFixed(3)}%, ` +
@@ -212,87 +513,8 @@ export class MockExchangeAdapter implements IPerpExchangeAdapter {
       );
     }
 
-    // Calculate position value (using fill price which includes slippage)
-    const positionValue = request.size * fillPrice;
-
-    // Check if we have enough balance
-    if (positionValue > this.mockBalance * 10) {
-      // Require 10% margin
-      throw new ExchangeError(
-        `Insufficient balance for order: need $${positionValue.toFixed(2)}, have $${this.mockBalance.toFixed(2)}`,
-        this.exchangeType,
-        'INSUFFICIENT_BALANCE',
-      );
-    }
-
-    // Update or create position
-    const existingPosition = this.mockPositions.get(request.symbol);
-    if (existingPosition) {
-      if (request.reduceOnly) {
-        // Closing position
-        const closeSize = Math.min(request.size, existingPosition.size);
-        const newSize = existingPosition.size - closeSize;
-        
-        if (newSize <= 0.001) {
-          // Position fully closed
-          this.mockPositions.delete(request.symbol);
-        } else {
-          // Partial close - update position
-          const newPosition = new PerpPosition(
-            this.exchangeType,
-            request.symbol,
-            existingPosition.side,
-            newSize,
-            existingPosition.entryPrice,
-            fillPrice,
-            (fillPrice - existingPosition.entryPrice) * newSize * (existingPosition.side === OrderSide.LONG ? 1 : -1),
-            1,
-            undefined,
-            undefined,
-            undefined,
-            new Date(),
-          );
-          this.mockPositions.set(request.symbol, newPosition);
-        }
-      } else {
-        // Increasing position
-        const totalSize = existingPosition.size + request.size;
-        const avgEntryPrice = (existingPosition.entryPrice * existingPosition.size + fillPrice * request.size) / totalSize;
-        
-        const newPosition = new PerpPosition(
-          this.exchangeType,
-          request.symbol,
-          existingPosition.side,
-          totalSize,
-          avgEntryPrice,
-          fillPrice,
-          (fillPrice - avgEntryPrice) * totalSize * (existingPosition.side === OrderSide.LONG ? 1 : -1),
-          1,
-          undefined,
-          undefined,
-          undefined,
-          new Date(),
-        );
-        this.mockPositions.set(request.symbol, newPosition);
-      }
-    } else {
-      // New position
-      const newPosition = new PerpPosition(
-        this.exchangeType,
-        request.symbol,
-        request.side,
-        request.size,
-        fillPrice,
-        fillPrice,
-        0,
-        1,
-        undefined,
-        undefined,
-        undefined,
-        new Date(),
-      );
-      this.mockPositions.set(request.symbol, newPosition);
-    }
+    // Update position
+    await this.updatePositionOnFill(request, fillPrice);
 
     return new PerpOrderResponse(
       orderId,
@@ -347,16 +569,55 @@ export class MockExchangeAdapter implements IPerpExchangeAdapter {
 
   async cancelOrder(orderId: string, symbol?: string): Promise<boolean> {
     this.logger.debug(`[MOCK] Cancelling order ${orderId}`);
-    return true;
+    
+    const pendingOrder = this.pendingOrders.get(orderId);
+    if (pendingOrder) {
+      pendingOrder.status = OrderStatus.CANCELLED;
+      this.pendingOrders.delete(orderId);
+      this.logger.log(`[MOCK] ❌ Order ${orderId} cancelled`);
+      return true;
+    }
+    
+    return true; // Order might have already filled
   }
 
   async cancelAllOrders(symbol: string): Promise<number> {
     this.logger.debug(`[MOCK] Cancelling all orders for ${symbol}`);
-    return 0;
+    
+    let cancelledCount = 0;
+    for (const [orderId, order] of this.pendingOrders.entries()) {
+      if (order.request.symbol === symbol) {
+        order.status = OrderStatus.CANCELLED;
+        this.pendingOrders.delete(orderId);
+        cancelledCount++;
+      }
+    }
+    
+    if (cancelledCount > 0) {
+      this.logger.log(`[MOCK] ❌ Cancelled ${cancelledCount} orders for ${symbol}`);
+    }
+    
+    return cancelledCount;
   }
 
   async getOrderStatus(orderId: string, symbol?: string): Promise<PerpOrderResponse> {
-    // Mock orders are always filled immediately
+    // Check pending orders first
+    const pendingOrder = this.pendingOrders.get(orderId);
+    if (pendingOrder) {
+      return new PerpOrderResponse(
+        orderId,
+        pendingOrder.status,
+        pendingOrder.request.symbol,
+        pendingOrder.request.side,
+        pendingOrder.request.clientOrderId,
+        pendingOrder.filledSize,
+        pendingOrder.fillPrice,
+        undefined,
+        pendingOrder.filledAt || pendingOrder.createdAt,
+      );
+    }
+    
+    // If not in pending, assume it was filled
     return new PerpOrderResponse(
       orderId,
       OrderStatus.FILLED,
@@ -368,6 +629,29 @@ export class MockExchangeAdapter implements IPerpExchangeAdapter {
       undefined,
       new Date(),
     );
+  }
+
+  /**
+   * Get all pending limit orders
+   */
+  getPendingOrders(): PendingLimitOrder[] {
+    return Array.from(this.pendingOrders.values());
+  }
+
+  /**
+   * Get pending orders for a specific symbol
+   */
+  getPendingOrdersForSymbol(symbol: string): PendingLimitOrder[] {
+    return Array.from(this.pendingOrders.values()).filter(
+      order => order.request.symbol === symbol
+    );
+  }
+
+  /**
+   * Manually trigger price check (useful for testing)
+   */
+  async triggerPriceCheck(): Promise<void> {
+    await this.checkPendingOrders();
   }
 
   async getMarkPrice(symbol: string): Promise<number> {

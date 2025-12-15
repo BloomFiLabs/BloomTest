@@ -28,6 +28,9 @@ import { OptimalLeverageService } from '../services/OptimalLeverageService';
 import { DiagnosticsService } from '../services/DiagnosticsService';
 import { PerpKeeperController } from '../controllers/PerpKeeperController';
 import { FundingRateController } from '../controllers/FundingRateController';
+import { KeeperStrategyEventListener } from '../adapters/blockchain/KeeperStrategyEventListener';
+import { WithdrawalFulfiller } from '../adapters/blockchain/WithdrawalFulfiller';
+import { NAVReporter } from '../adapters/blockchain/NAVReporter';
 import { PortfolioOptimizer } from '../../domain/services/strategy-rules/PortfolioOptimizer';
 import { OrderExecutor } from '../../domain/services/strategy-rules/OrderExecutor';
 import { PositionManager } from '../../domain/services/strategy-rules/PositionManager';
@@ -293,6 +296,31 @@ import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTrack
     // Diagnostics service (must be before PerformanceLogger due to dependency)
     DiagnosticsService,
     
+    // Keeper Strategy Integration (on-chain vault/strategy interaction)
+    KeeperStrategyEventListener,
+    {
+      provide: WithdrawalFulfiller,
+      useFactory: (
+        configService: ConfigService, 
+        eventListener: KeeperStrategyEventListener,
+        hyperliquidAdapter: HyperliquidExchangeAdapter,
+        perpKeeperService: PerpKeeperService,
+      ) => {
+        return new WithdrawalFulfiller(configService, eventListener, hyperliquidAdapter, perpKeeperService);
+      },
+      inject: [ConfigService, KeeperStrategyEventListener, HyperliquidExchangeAdapter, PerpKeeperService],
+    },
+    {
+      provide: NAVReporter,
+      useFactory: (
+        configService: ConfigService,
+        keeperService: PerpKeeperService,
+      ) => {
+        return new NAVReporter(configService, keeperService);
+      },
+      inject: [ConfigService, PerpKeeperService],
+    },
+    
     // Performance logging
     {
       provide: PerpKeeperPerformanceLogger,
@@ -314,6 +342,9 @@ import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTrack
     RealFundingPaymentsService,
     OptimalLeverageService,
     DiagnosticsService,
+    KeeperStrategyEventListener,
+    WithdrawalFulfiller,
+    NAVReporter,
   ],
 })
 export class PerpKeeperModule {}
