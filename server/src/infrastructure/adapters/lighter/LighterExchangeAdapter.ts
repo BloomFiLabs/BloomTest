@@ -32,6 +32,11 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
   private marketIndexCache: Map<string, number> = new Map();
   private marketIndexCacheTimestamp: number = 0;
   private readonly MARKET_INDEX_CACHE_TTL = 3600000; // 1 hour cache
+  
+  // Mutex for order placement to prevent concurrent nonce conflicts
+  // Lighter uses sequential nonces - concurrent orders cause "invalid nonce" errors
+  private orderMutex: Promise<void> = Promise.resolve();
+  private orderMutexRelease: (() => void) | null = null;
 
   constructor(private readonly configService: ConfigService) {
     const baseUrl = this.configService.get<string>('LIGHTER_API_BASE_URL') || 'https://mainnet.zklighter.elliot.ai';
@@ -81,6 +86,24 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
       const apiClient = new ApiClient({ host: this.config.baseUrl });
       this.orderApi = new OrderApi(apiClient);
     }
+  }
+
+  /**
+   * Acquire the order mutex to prevent concurrent order placements
+   * Lighter uses sequential nonces - concurrent orders cause "invalid nonce" errors
+   * Returns a release function that MUST be called when done
+   */
+  private async acquireOrderMutex(): Promise<() => void> {
+    // Wait for any pending order to complete
+    await this.orderMutex;
+    
+    // Create a new promise that will be resolved when we release
+    let release: () => void;
+    this.orderMutex = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    
+    return release!;
   }
 
   /**
@@ -291,6 +314,22 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
       `@ ${request.price || 'market'} (type: ${request.type}, reduceOnly: ${request.reduceOnly})`
     );
     
+    // Acquire mutex to prevent concurrent order placements
+    // Lighter uses sequential nonces - concurrent orders cause "invalid nonce" errors
+    const releaseMutex = await this.acquireOrderMutex();
+    
+    try {
+      return await this.placeOrderInternal(request);
+    } finally {
+      // Always release the mutex when done
+      releaseMutex();
+    }
+  }
+
+  /**
+   * Internal order placement logic - must only be called while holding the order mutex
+   */
+  private async placeOrderInternal(request: PerpOrderRequest): Promise<PerpOrderResponse> {
     // Add retry logic with exponential backoff for order placement (rate limiting)
     // For market orders, limit to 5 retries with progressive price improvement
     const maxRetries = request.type === OrderType.MARKET ? 5 : 6;
