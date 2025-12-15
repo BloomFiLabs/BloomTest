@@ -117,7 +117,7 @@ export class PerpKeeperPerformanceLogger implements IPerpKeeperPerformanceLogger
     private readonly diagnosticsService?: DiagnosticsService,
   ) {
     // Initialize exchange metrics
-    for (const exchangeType of [ExchangeType.ASTER, ExchangeType.LIGHTER, ExchangeType.HYPERLIQUID]) {
+    for (const exchangeType of [ExchangeType.ASTER, ExchangeType.LIGHTER, ExchangeType.HYPERLIQUID, ExchangeType.EXTENDED]) {
       this.exchangeMetrics.set(exchangeType, {
         exchangeType,
         totalFundingCaptured: 0,
@@ -131,6 +131,53 @@ export class PerpKeeperPerformanceLogger implements IPerpKeeperPerformanceLogger
         ordersFailed: 0,
         lastUpdateTime: new Date(),
       });
+    }
+    
+    // Sync historical funding payments on startup (async, don't block)
+    this.syncHistoricalFundingPayments().catch(err => {
+      this.logger.warn(`Failed to sync historical funding payments on startup: ${err.message}`);
+    });
+  }
+
+  /**
+   * Sync historical funding payments from RealFundingPaymentsService
+   * This ensures the performance logger has all historical data on startup
+   * Resets funding totals first to avoid double-counting
+   */
+  private async syncHistoricalFundingPayments(): Promise<void> {
+    if (!this.realFundingService) {
+      return; // Service not available
+    }
+
+    try {
+      // Reset funding totals to avoid double-counting
+      for (const metrics of this.exchangeMetrics.values()) {
+        metrics.totalFundingCaptured = 0;
+        metrics.totalFundingPaid = 0;
+        metrics.netFundingCaptured = 0;
+      }
+      this.realizedFundingPayments = [];
+      
+      // Fetch all historical funding payments (last 30 days)
+      const payments = await this.realFundingService.fetchAllFundingPayments(30);
+      
+      // Record each payment in the performance logger
+      for (const payment of payments) {
+        this.recordFundingPayment(payment.exchange, payment.amount);
+      }
+      
+      // Also sync trading costs
+      const totalCosts = this.realFundingService.getTotalTradingCosts();
+      if (totalCosts > 0) {
+        this.totalTradingCosts = totalCosts;
+      }
+      
+      this.logger.log(
+        `📊 Synced ${payments.length} historical funding payments and $${totalCosts.toFixed(4)} trading costs to performance logger`
+      );
+    } catch (error: any) {
+      this.logger.warn(`Failed to sync historical funding payments: ${error.message}`);
+      // Don't throw - this is a background sync
     }
   }
 

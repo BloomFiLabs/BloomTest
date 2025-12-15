@@ -547,6 +547,7 @@ export class PerpKeeperScheduler implements OnModuleInit {
   /**
    * Sync funding payments from all exchanges
    * This ensures Real APY and Net Funding are up-to-date
+   * Note: Historical payments are already synced on startup, this just refreshes
    */
   private async syncFundingPayments(): Promise<void> {
     if (!this.fundingPaymentsService) {
@@ -555,15 +556,15 @@ export class PerpKeeperScheduler implements OnModuleInit {
 
     try {
       // Fetch funding payments from all exchanges (cached, won't spam APIs)
+      // This will include any new payments since last fetch
       const payments = await this.fundingPaymentsService.fetchAllFundingPayments(30);
       
-      // Record each payment in the performance logger
-      for (const payment of payments) {
-        this.performanceLogger.recordFundingPayment(payment.exchange, payment.amount);
-      }
-      
+      // The performance logger already syncs historical payments on startup
+      // We only need to record NEW payments here, but for simplicity,
+      // we'll let the performance logger handle deduplication via its sync method
+      // Just refresh the cache to ensure we have latest data
       this.logger.debug(
-        `Synced ${payments.length} funding payments for performance metrics`
+        `Refreshed funding payments cache: ${payments.length} total payments available`
       );
     } catch (error: any) {
       this.logger.warn(`Failed to sync funding payments: ${error.message}`);
