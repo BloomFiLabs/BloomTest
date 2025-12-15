@@ -939,12 +939,27 @@ export class FundingArbitrageStrategy {
       }
 
       // Calculate optimal portfolio allocation across all opportunities
+      // Include opportunities with valid execution plans OR good break-even times
+      // (even if not instantly profitable, as long as they break even within threshold)
+      const maxBreakEvenHours = this.strategyConfig.maxWorstCaseBreakEvenDays * 24;
       const portfolioOptimizationData = allEvaluatedOpportunities
         .filter(
-          (item) =>
-            item.maxPortfolioFor35APY !== null &&
-            item.longBidAsk !== null &&
-            item.shortBidAsk !== null,
+          (item) => {
+            // Must have valid execution plan OR acceptable break-even time
+            const hasValidPlan = item.plan !== null;
+            const hasAcceptableBreakEven =
+              item.breakEvenHours !== null &&
+              isFinite(item.breakEvenHours) &&
+              item.breakEvenHours <= maxBreakEvenHours &&
+              item.netReturn > -Infinity; // Must have calculated metrics
+            
+            return (
+              (hasValidPlan || hasAcceptableBreakEven) &&
+              item.maxPortfolioFor35APY !== null &&
+              item.longBidAsk !== null &&
+              item.shortBidAsk !== null
+            );
+          },
         )
         .map((item) => ({
           opportunity: item.opportunity,
@@ -1177,8 +1192,18 @@ export class FundingArbitrageStrategy {
             return false;
           }
           
-          // Must have a valid execution plan (maxPortfolioFor35APY can be null - we'll use available capital)
-          if (item.plan === null) {
+          // Must have a valid execution plan OR acceptable break-even time
+          // (even if not instantly profitable, as long as they break even within threshold)
+          const maxBreakEvenHours = this.strategyConfig.maxWorstCaseBreakEvenDays * 24;
+          const hasValidPlan = item.plan !== null;
+          const hasAcceptableBreakEven =
+            item.plan === null && // Only check break-even if no plan exists
+            item.breakEvenHours !== null &&
+            isFinite(item.breakEvenHours) &&
+            item.breakEvenHours <= maxBreakEvenHours &&
+            item.netReturn > -Infinity; // Must have calculated metrics
+          
+          if (!hasValidPlan && !hasAcceptableBreakEven) {
             return false;
           }
 
@@ -1670,6 +1695,54 @@ export class FundingArbitrageStrategy {
         }
       }
 
+      // Create execution plans for opportunities that don't have one but have acceptable break-even times
+      const maxBreakEvenHours = this.strategyConfig.maxWorstCaseBreakEvenDays * 24;
+      for (const opp of selectedOpportunities) {
+        if (!opp.plan && opp.opportunity && opp.maxPortfolioFor35APY) {
+          // Check if this opportunity has acceptable break-even time
+          const oppData = allEvaluatedOpportunities.find(
+            (item) =>
+              item.opportunity.symbol === opp.opportunity.symbol &&
+              item.opportunity.longExchange === opp.opportunity.longExchange &&
+              item.opportunity.shortExchange === opp.opportunity.shortExchange,
+          );
+          
+          if (
+            oppData &&
+            oppData.breakEvenHours !== null &&
+            isFinite(oppData.breakEvenHours) &&
+            oppData.breakEvenHours <= maxBreakEvenHours
+          ) {
+            // Create execution plan with the allocated position size
+            const longBalance =
+              exchangeBalances.get(opp.opportunity.longExchange) ?? 0;
+            const shortBalance =
+              exchangeBalances.get(opp.opportunity.shortExchange) ?? 0;
+            
+            const planResult = await this.executionPlanBuilder.buildPlan(
+              opp.opportunity,
+              adapters,
+              { longBalance, shortBalance },
+              this.strategyConfig,
+              opp.opportunity.longMarkPrice,
+              opp.opportunity.shortMarkPrice,
+              opp.maxPortfolioFor35APY, // Use allocated position size
+            );
+            
+            if (planResult.isSuccess()) {
+              opp.plan = planResult.value;
+              this.logger.log(
+                `✅ Created execution plan for ${opp.opportunity.symbol} (break-even: ${oppData.breakEvenHours.toFixed(1)}h)`,
+              );
+            } else {
+              this.logger.warn(
+                `⚠️ Failed to create execution plan for ${opp.opportunity.symbol}: ${planResult.error.message}`,
+              );
+            }
+          }
+        }
+      }
+      
       // Store opportunities for retry tracking before execution
       for (const opp of selectedOpportunities) {
         if (opp.plan && opp.opportunity) {

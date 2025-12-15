@@ -486,8 +486,17 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
         expectedNetReturn = -totalCosts;
       }
 
-      // Only proceed if net return is positive
-      if (expectedNetReturn <= 0) {
+      // Accept if either:
+      // 1. Net return is positive (instantly profitable), OR
+      // 2. Break-even time is within acceptable threshold (good time to break-even)
+      const maxBreakEvenHours = config.maxWorstCaseBreakEvenDays * 24; // Convert days to hours
+      const isAcceptableBreakEven =
+        breakEvenHours !== null &&
+        isFinite(breakEvenHours) &&
+        breakEvenHours <= maxBreakEvenHours &&
+        expectedReturnPerPeriod > 0; // Must have positive expected return (even if not instantly profitable)
+      
+      if (expectedNetReturn <= 0 && !isAcceptableBreakEven) {
         const amortizedCosts =
           breakEvenHours !== null && isFinite(breakEvenHours)
             ? totalCostsWithExit /
@@ -501,30 +510,46 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
             `Exit fees: $${totalExitFees.toFixed(4)}, ` +
             `Slippage: $${totalSlippageCost.toFixed(4)}, ` +
             `Total costs: $${totalCostsWithExit.toFixed(4)}, ` +
-            `Break-even: ${breakEvenHours !== null ? breakEvenHours.toFixed(1) : 'N/A'}h, ` +
+            `Break-even: ${breakEvenHours !== null ? breakEvenHours.toFixed(1) : 'N/A'}h (max: ${maxBreakEvenHours.toFixed(1)}h), ` +
             `Amortized costs/hour: $${amortizedCosts.toFixed(4)}, ` +
             `Net return/hour: $${expectedNetReturn.toFixed(4)}`,
         );
         return Result.failure(
           new ValidationException(
-            `Opportunity not profitable: net return ${expectedNetReturn.toFixed(4)}`,
+            `Opportunity not acceptable: net return ${expectedNetReturn.toFixed(4)}, break-even ${breakEvenHours !== null ? breakEvenHours.toFixed(1) : 'N/A'}h (max: ${maxBreakEvenHours.toFixed(1)}h)`,
             'UNPROFITABLE_OPPORTUNITY',
             {
               symbol: opportunity.symbol,
               expectedNetReturn,
               breakEvenHours,
+              maxBreakEvenHours,
               totalCosts: totalCostsWithExit,
             },
           ),
         );
       }
+      
+      // Log if accepted based on break-even time (not instant profitability)
+      if (expectedNetReturn <= 0 && isAcceptableBreakEven) {
+        this.logger.log(
+          `✅ Execution plan created for ${opportunity.symbol} (break-even acceptable): ` +
+            `Position size: $${positionSizeUsd.toFixed(2)}, ` +
+            `Break-even: ${breakEvenHours!.toFixed(1)}h (within ${maxBreakEvenHours.toFixed(1)}h threshold), ` +
+            `Expected return per period: $${expectedReturnPerPeriod.toFixed(4)}, ` +
+            `Net return per period: $${expectedNetReturn.toFixed(4)} (will be profitable after break-even)`,
+        );
+      }
 
-      this.logger.log(
-        `✅ Execution plan created for ${opportunity.symbol}: ` +
-          `Position size: $${positionSizeUsd.toFixed(2)}, ` +
-          `Expected net return per period: $${expectedNetReturn.toFixed(4)}, ` +
-          `Spread: ${(opportunity.spread?.toPercent() || 0).toFixed(4)}%`,
-      );
+      // Only log if it wasn't already logged above (for break-even based acceptance)
+      if (expectedNetReturn > 0) {
+        this.logger.log(
+          `✅ Execution plan created for ${opportunity.symbol} (instantly profitable): ` +
+            `Position size: $${positionSizeUsd.toFixed(2)}, ` +
+            `Expected net return per period: $${expectedNetReturn.toFixed(4)}, ` +
+            `Break-even: ${breakEvenHours !== null ? breakEvenHours.toFixed(1) : 'N/A'}h, ` +
+            `Spread: ${(opportunity.spread?.toPercent() || 0).toFixed(4)}%`,
+        );
+      }
 
       // Calculate limit prices: use mark price directly for Hyperliquid and Lighter
       // This ensures orders are close to mark price and fill quickly, avoiding "price too high" rejections
