@@ -627,11 +627,9 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
 
       const signature = await this.signingService.signTransfer(transferData);
 
-      const response = await this.client.post('/v1/transfers', {
+      const response = await this.client.post('/api/v1/user/transfer', {
         ...transferData,
         signature,
-      }, {
-        headers: this.getAuthHeaders(),
       });
 
       if (response.data && response.data.transferId) {
@@ -753,12 +751,10 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
       const signature = await this.signingService.signWithdrawal(withdrawalData);
 
       // Submit withdrawal request
-      const response = await this.client.post('/v1/withdrawals', {
+      const response = await this.client.post('/api/v1/user/withdrawal', {
         ...withdrawalData,
         signature,
         vaultNumber: this.vaultNumber,
-      }, {
-        headers: this.getAuthHeaders(),
       });
 
       if (response.data && response.data.withdrawalId) {

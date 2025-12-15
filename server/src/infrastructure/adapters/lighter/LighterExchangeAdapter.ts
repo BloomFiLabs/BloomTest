@@ -1017,17 +1017,10 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
    * Get all open orders for this account
    * Uses Lighter API: /api/v1/accountActiveOrders (requires auth token)
    * 
-   * Returns orders with: orderId, symbol, side, price, size, timestamp
+   * Returns orders with: orderId, symbol, side, price, size, filledSize, timestamp
    * Used for deduplication checks to prevent placing multiple orders for single-leg hedging
    */
-  async getOpenOrders(): Promise<Array<{
-    orderId: string;
-    symbol: string;
-    side: string;
-    price: number;
-    size: number;
-    timestamp: Date;
-  }>> {
+  async getOpenOrders(): Promise<import('../../../domain/ports/IPerpExchangeAdapter').OpenOrder[]> {
     try {
       await this.ensureInitialized();
       
@@ -1054,14 +1047,7 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
         return [];
       }
 
-      const orders: Array<{
-        orderId: string;
-        symbol: string;
-        side: string;
-        price: number;
-        size: number;
-        timestamp: Date;
-      }> = [];
+      const orders: import('../../../domain/ports/IPerpExchangeAdapter').OpenOrder[] = [];
 
       for (const orderData of ordersData) {
         try {
@@ -1081,13 +1067,14 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
           }
 
           // Parse side - Lighter uses is_ask: true=sell(SHORT), false=buy(LONG)
-          let side = 'LONG';
+          // The OpenOrder interface expects 'buy' | 'sell' format
+          let side: 'buy' | 'sell' = 'buy';
           if (orderData.is_ask !== undefined) {
-            side = orderData.is_ask ? 'SHORT' : 'LONG';
+            side = orderData.is_ask ? 'sell' : 'buy';
           } else if (orderData.side !== undefined) {
             const sideValue = String(orderData.side).toLowerCase();
             if (sideValue === 'short' || sideValue === 'sell' || sideValue === 'ask' || sideValue === '1') {
-              side = 'SHORT';
+              side = 'sell';
             }
           }
 
@@ -1107,12 +1094,18 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
             }
           }
 
+          // Calculate filled size from original size minus remaining size
+          const remainingSize = Math.abs(parseFloat(String(orderData.remaining_size || orderData.size || '0')));
+          const originalSize = Math.abs(parseFloat(String(orderData.original_size || orderData.size || '0')));
+          const filledSize = originalSize > remainingSize ? originalSize - remainingSize : 0;
+
           orders.push({
             orderId,
             symbol,
             side,
             price,
             size,
+            filledSize,
             timestamp,
           });
         } catch (parseError: any) {
