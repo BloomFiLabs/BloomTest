@@ -1191,9 +1191,12 @@ export class PerpKeeperScheduler implements OnModuleInit {
       // This prevents duplicate orders when the single-leg check runs multiple times
       const PENDING_ORDER_GRACE_PERIOD_MS = 5 * 60 * 1000; // 5 minutes - give orders time to fill
       
+      this.logger.log(`🔍 Checking for existing pending orders on ${missingExchange} for ${position.symbol} ${missingSide}...`);
+      
       if (typeof (adapter as any).getOpenOrders === 'function') {
         try {
           const openOrders = await (adapter as any).getOpenOrders();
+          this.logger.debug(`🔍 Retrieved ${openOrders.length} open order(s) from ${missingExchange}`);
           const pendingOrdersForSymbol = openOrders.filter((order: any) => {
             // Match by symbol (handle different formats: YZY, YZY-USD, YZYUSD)
             const normalizedOrderSymbol = order.symbol?.toUpperCase()?.replace('-USD', '')?.replace('USD', '');

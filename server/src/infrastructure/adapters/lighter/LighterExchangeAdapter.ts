@@ -1024,102 +1024,110 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
     try {
       await this.ensureInitialized();
       
+      this.logger.debug('🔍 Fetching open orders from Lighter...');
+      
       // Create auth token for authenticated endpoint
       const authToken = await this.signerClient!.createAuthTokenWithExpiry(600); // 10 minutes
       
-      const response = await axios.get(`${this.config.baseUrl}/api/v1/accountActiveOrders`, {
+      // Note: accountActiveOrders requires market_id, so we need to query each market
+      // For now, query all markets we care about (0-100) or use a different endpoint
+      // Actually, let's try the account endpoint which includes open_order_count per position
+      const accountResponse = await axios.get(`${this.config.baseUrl}/api/v1/account`, {
         params: {
-          auth: authToken,
+          by: 'index',
+          value: String(this.config.accountIndex),
         },
         timeout: 10000,
         headers: { accept: 'application/json' },
       });
 
-      if (!response.data || response.data.code !== 200) {
-        this.logger.debug(`Lighter accountActiveOrders returned: ${JSON.stringify(response.data).substring(0, 200)}`);
+      if (!accountResponse.data || accountResponse.data.code !== 200) {
+        this.logger.debug(`Lighter account API returned: ${JSON.stringify(accountResponse.data).substring(0, 200)}`);
         return [];
       }
 
-      // Response structure: { code: 200, orders: [...] }
-      const ordersData = response.data.orders || [];
-      if (!Array.isArray(ordersData)) {
-        this.logger.debug('Lighter accountActiveOrders returned unexpected format');
+      // Find markets with open orders from account data
+      const positions = accountResponse.data.accounts?.[0]?.positions || [];
+      const marketsWithOrders = positions
+        .filter((p: any) => (p.open_order_count || 0) > 0 || (p.pending_order_count || 0) > 0)
+        .map((p: any) => p.market_id);
+
+      if (marketsWithOrders.length === 0) {
+        this.logger.debug('🔍 No markets with open orders found in account data');
         return [];
       }
 
-      const orders: import('../../../domain/ports/IPerpExchangeAdapter').OpenOrder[] = [];
+      this.logger.log(`🔍 Found ${marketsWithOrders.length} market(s) with open orders: ${marketsWithOrders.join(', ')}`);
 
-      for (const orderData of ordersData) {
+      // Query each market with open orders
+      const allOrders: import('../../../domain/ports/IPerpExchangeAdapter').OpenOrder[] = [];
+      
+      for (const marketId of marketsWithOrders) {
         try {
-          // Parse order data - expected fields from Lighter:
-          // { order_id, market_index, is_ask (true=sell/short, false=buy/long), price, size, created_time }
-          const orderId = String(orderData.order_id || orderData.id || orderData.orderId || '');
-          const marketIndex = orderData.market_index ?? orderData.marketIndex ?? null;
-          
-          if (!orderId || marketIndex === null) {
-            continue;
-          }
-
-          // Get symbol from market index
-          const symbol = await this.getSymbolFromMarketIndex(marketIndex);
-          if (!symbol) {
-            continue;
-          }
-
-          // Parse side - Lighter uses is_ask: true=sell(SHORT), false=buy(LONG)
-          // The OpenOrder interface expects 'buy' | 'sell' format
-          let side: 'buy' | 'sell' = 'buy';
-          if (orderData.is_ask !== undefined) {
-            side = orderData.is_ask ? 'sell' : 'buy';
-          } else if (orderData.side !== undefined) {
-            const sideValue = String(orderData.side).toLowerCase();
-            if (sideValue === 'short' || sideValue === 'sell' || sideValue === 'ask' || sideValue === '1') {
-              side = 'sell';
-            }
-          }
-
-          // Parse price and size
-          const price = parseFloat(String(orderData.price || orderData.limit_price || '0'));
-          const size = Math.abs(parseFloat(String(orderData.size || orderData.amount || orderData.remaining_size || '0')));
-          
-          // Parse timestamp - Lighter uses created_time (unix timestamp in seconds)
-          let timestamp = new Date();
-          const tsValue = orderData.created_time || orderData.created_at || orderData.createdAt || orderData.timestamp;
-          if (tsValue !== undefined) {
-            if (typeof tsValue === 'number') {
-              // Unix timestamp - check if seconds or milliseconds
-              timestamp = new Date(tsValue > 1e12 ? tsValue : tsValue * 1000);
-            } else {
-              timestamp = new Date(tsValue);
-            }
-          }
-
-          // Calculate filled size from original size minus remaining size
-          const remainingSize = Math.abs(parseFloat(String(orderData.remaining_size || orderData.size || '0')));
-          const originalSize = Math.abs(parseFloat(String(orderData.original_size || orderData.size || '0')));
-          const filledSize = originalSize > remainingSize ? originalSize - remainingSize : 0;
-
-          orders.push({
-            orderId,
-            symbol,
-            side,
-            price,
-            size,
-            filledSize,
-            timestamp,
+          const response = await axios.get(`${this.config.baseUrl}/api/v1/accountActiveOrders`, {
+            params: {
+              auth: authToken,
+              market_id: marketId,
+              account_index: this.config.accountIndex,  // Required parameter!
+            },
+            timeout: 10000,
+            headers: { accept: 'application/json' },
           });
-        } catch (parseError: any) {
-          this.logger.debug(`Failed to parse open order: ${parseError.message}`);
+
+          if (!response.data || response.data.code !== 200) {
+            this.logger.debug(`Lighter accountActiveOrders for market ${marketId} returned: ${JSON.stringify(response.data).substring(0, 200)}`);
+            continue;
+          }
+
+          const ordersData = response.data.orders || [];
+          this.logger.debug(`🔍 Market ${marketId}: Found ${ordersData.length} order(s)`);
+          
+          for (const orderData of ordersData) {
+            try {
+              // API returns: order_id, initial_base_amount, remaining_base_amount, price, is_ask, filled_base_amount
+              const orderId = String(orderData.order_id || orderData.order_index || '');
+              const symbol = await this.getSymbolFromMarketIndex(marketId);
+              if (!symbol || !orderId) continue;
+
+              // is_ask: false = buy/long, true = sell/short
+              const side: 'buy' | 'sell' = orderData.is_ask ? 'sell' : 'buy';
+
+              const price = parseFloat(String(orderData.price || '0'));
+              // Use remaining_base_amount for current size
+              const size = Math.abs(parseFloat(String(orderData.remaining_base_amount || orderData.initial_base_amount || '0')));
+              const initialSize = Math.abs(parseFloat(String(orderData.initial_base_amount || '0')));
+              const filledSize = Math.abs(parseFloat(String(orderData.filled_base_amount || '0')));
+
+              // Parse timestamp from nonce or created_time
+              let timestamp = new Date();
+              if (orderData.created_time) {
+                timestamp = new Date(orderData.created_time < 1e12 ? orderData.created_time * 1000 : orderData.created_time);
+              } else if (orderData.nonce) {
+                // Nonce includes timestamp in high bits - extract rough timestamp
+                // This is a fallback; actual created_time should be preferred
+                const nonceTimestamp = Math.floor(orderData.nonce / (2 ** 32));
+                if (nonceTimestamp > 0 && nonceTimestamp < 2e9) {
+                  timestamp = new Date(nonceTimestamp * 1000);
+                }
+              }
+
+              allOrders.push({ orderId, symbol, side, price, size, filledSize, timestamp });
+              this.logger.debug(`  Order: ${orderId} ${side} ${size} ${symbol} @ ${price}`);
+            } catch (e: any) {
+              this.logger.debug(`Failed to parse order: ${e.message}`);
+            }
+          }
+        } catch (marketError: any) {
+          this.logger.debug(`Failed to get orders for market ${marketId}: ${marketError.message}`);
         }
       }
 
-      if (orders.length > 0) {
-        this.logger.debug(`Found ${orders.length} open order(s) on Lighter: ${orders.map(o => `${o.symbol} ${o.side} ${o.size}@${o.price}`).join(', ')}`);
+      if (allOrders.length > 0) {
+        this.logger.log(`🔍 Total open orders on Lighter: ${allOrders.length} - ${allOrders.map(o => `${o.symbol} ${o.side} ${o.size}@${o.price}`).join(', ')}`);
       }
-      return orders;
+      return allOrders;
     } catch (error: any) {
-      // Don't throw - return empty array so deduplication check can continue
-      this.logger.debug(`Failed to get open orders from Lighter: ${error.message}`);
+      this.logger.warn(`⚠️ Failed to get open orders from Lighter: ${error.message}`);
       return [];
     }
   }
