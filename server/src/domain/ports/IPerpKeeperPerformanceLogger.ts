@@ -74,6 +74,11 @@ export interface IPerpKeeperPerformanceLogger {
   recordFundingPayment(exchange: ExchangeType, amount: number): void;
 
   /**
+   * Record trading costs (fees, slippage, etc.) for break-even calculation
+   */
+  recordTradingCosts(amount: number): void;
+
+  /**
    * Record realized P&L from closed positions
    */
   recordRealizedPnl(amount: number): void;

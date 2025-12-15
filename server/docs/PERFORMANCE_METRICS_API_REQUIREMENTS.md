@@ -120,3 +120,4 @@ This will verify:
 - **No funding payments**: May need to wait for funding periods (typically hourly)
 - **No positions**: Bot may not have opened any positions yet
 - **Trading costs = 0**: Costs may not be recorded when orders are placed
+

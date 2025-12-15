@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, Optional } from '@nestjs/common';
 import { IOrderExecutor } from './IOrderExecutor';
 import type { IPositionManager } from './IPositionManager';
 import type { AsymmetricFill } from './IPositionManager';
@@ -6,6 +6,7 @@ import { PositionManager } from './PositionManager';
 import { CostCalculator } from './CostCalculator';
 import { ExecutionPlanBuilder } from './ExecutionPlanBuilder';
 import { StrategyConfig } from '../../value-objects/StrategyConfig';
+import type { IPerpKeeperPerformanceLogger } from '../../ports/IPerpKeeperPerformanceLogger';
 import {
   ArbitrageExecutionPlan,
   ArbitrageExecutionResult,
@@ -42,6 +43,8 @@ export class OrderExecutor implements IOrderExecutor {
     private readonly costCalculator: CostCalculator,
     private readonly executionPlanBuilder: ExecutionPlanBuilder,
     private readonly config: StrategyConfig,
+    @Optional() @Inject('IPerpKeeperPerformanceLogger')
+    private readonly performanceLogger?: IPerpKeeperPerformanceLogger,
   ) {}
 
   async waitForOrderFill(
@@ -477,6 +480,13 @@ export class OrderExecutor implements IOrderExecutor {
         result.ordersPlaced = 2;
         result.totalExpectedReturn = plan.expectedNetReturn;
 
+        // Record trading costs (entry fees + slippage, exit fees will be recorded on close)
+        if (this.performanceLogger && plan.estimatedCosts) {
+          const totalCosts = plan.estimatedCosts.total || 
+            (plan.estimatedCosts.fees || 0) + (plan.estimatedCosts.slippage || 0);
+          this.performanceLogger.recordTradingCosts(totalCosts);
+        }
+
         this.logger.log(
           `✅ Successfully executed arbitrage for ${opportunity.symbol}: ` +
             `Expected return: $${plan.expectedNetReturn.toFixed(4)} per period`,
@@ -818,6 +828,13 @@ export class OrderExecutor implements IOrderExecutor {
             successfulExecutions++;
             totalOrders += 2;
             totalExpectedReturn += plan.expectedNetReturn;
+
+            // Record trading costs (entry fees + slippage, exit fees will be recorded on close)
+            if (this.performanceLogger && plan.estimatedCosts) {
+              const totalCosts = plan.estimatedCosts.total || 
+                (plan.estimatedCosts.fees || 0) + (plan.estimatedCosts.slippage || 0);
+              this.performanceLogger.recordTradingCosts(totalCosts);
+            }
 
             this.logger.log(
               `✅ [${i + 1}/${opportunities.length}] ${opportunity.symbol}: ` +
