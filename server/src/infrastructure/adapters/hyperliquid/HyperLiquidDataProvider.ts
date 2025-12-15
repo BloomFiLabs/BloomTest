@@ -237,6 +237,21 @@ export class HyperLiquidDataProvider implements IFundingDataProvider, OnModuleIn
     };
   }
 
+  /**
+   * Get 24-hour trading volume in USD
+   */
+  async get24hVolume(asset: string): Promise<number> {
+    const data = await this.fetchMetaAndAssetCtxs();
+    const index = await this.getAssetIndex(asset, data.meta);
+    
+    if (index === -1) {
+      throw new Error(`Asset ${asset} not found on HyperLiquid`);
+    }
+
+    const ctx = data.assetCtxs[index];
+    return parseFloat(ctx.dayNtlVlm);
+  }
+
   // --- Private Methods ---
 
   private async fetchMetaAndAssetCtxs(retries: number = 3): Promise<HyperLiquidMetaAndAssetCtxs> {

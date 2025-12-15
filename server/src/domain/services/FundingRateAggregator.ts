@@ -18,6 +18,7 @@ export interface ExchangeFundingRate {
   predictedRate: number;
   markPrice: number;
   openInterest: number | undefined; // undefined when OI is unavailable
+  volume24h: number | undefined; // undefined when volume is unavailable
   timestamp: Date;
 }
 
@@ -48,6 +49,8 @@ export interface ArbitrageOpportunity {
   shortMarkPrice?: number; // Mark price for short exchange (from funding rate data)
   longOpenInterest?: number; // Open interest for long exchange (USD)
   shortOpenInterest?: number; // Open interest for short exchange (USD)
+  long24hVolume?: number; // 24h trading volume for long exchange (USD)
+  short24hVolume?: number; // 24h trading volume for short exchange (USD)
   timestamp: Date;
 }
 
@@ -269,6 +272,7 @@ export class FundingRateAggregator {
           predictedRate: asterPredicted,
           markPrice: asterMarkPrice,
           openInterest: asterOI,
+          volume24h: undefined, // Aster volume not yet implemented
           timestamp: new Date(),
         });
         } catch (oiError: any) {
@@ -305,6 +309,14 @@ export class FundingRateAggregator {
             const { openInterest: lighterOI, markPrice: lighterMarkPrice } = 
               await this.lighterProvider.getOpenInterestAndMarkPrice(marketIndex);
 
+            // Try to get 24h volume
+            let lighterVolume: number | undefined;
+            try {
+              lighterVolume = await this.lighterProvider.get24hVolume(marketIndex);
+            } catch (volumeError) {
+              lighterVolume = undefined; // Volume is optional, don't fail on error
+            }
+
             rates.push({
               exchange: ExchangeType.LIGHTER,
               symbol,
@@ -312,6 +324,7 @@ export class FundingRateAggregator {
               predictedRate: lighterPredicted,
               markPrice: lighterMarkPrice,
               openInterest: lighterOI,
+              volume24h: lighterVolume,
               timestamp: new Date(),
             });
         } catch (dataError: any) {
@@ -335,6 +348,7 @@ export class FundingRateAggregator {
               predictedRate: lighterRate, // Use current as predicted if we can't get predicted
               markPrice: 0, // Will be skipped in execution if needed
                 openInterest: undefined, // Explicitly undefined so it shows as N/A
+              volume24h: undefined, // Volume unavailable in fallback mode
               timestamp: new Date(),
             });
             }
@@ -365,6 +379,14 @@ export class FundingRateAggregator {
         try {
         const hlOI = await this.hyperliquidProvider.getOpenInterest(hlSymbol);
 
+        // Try to get 24h volume
+        let hlVolume: number | undefined;
+        try {
+          hlVolume = await this.hyperliquidProvider.get24hVolume(hlSymbol);
+        } catch (volumeError) {
+          hlVolume = undefined; // Volume is optional, don't fail on error
+        }
+
         rates.push({
           exchange: ExchangeType.HYPERLIQUID,
           symbol,
@@ -372,6 +394,7 @@ export class FundingRateAggregator {
           predictedRate: hlPredicted,
           markPrice: hlMarkPrice,
           openInterest: hlOI,
+          volume24h: hlVolume,
           timestamp: new Date(),
         });
         } catch (oiError: any) {
@@ -410,6 +433,7 @@ export class FundingRateAggregator {
             predictedRate: extendedPredicted,
             markPrice: extendedMarkPrice,
             openInterest: extendedOI,
+            volume24h: undefined, // Extended volume not yet implemented
             timestamp: new Date(),
           });
         } catch (oiError: any) {
@@ -578,6 +602,8 @@ export class FundingRateAggregator {
                   shortMarkPrice: bestShort.markPrice > 0 ? bestShort.markPrice : undefined,
                   longOpenInterest: bestLong.openInterest !== undefined && bestLong.openInterest > 0 ? bestLong.openInterest : undefined,
                   shortOpenInterest: bestShort.openInterest !== undefined && bestShort.openInterest > 0 ? bestShort.openInterest : undefined,
+                  long24hVolume: bestLong.volume24h !== undefined && bestLong.volume24h > 0 ? bestLong.volume24h : undefined,
+                  short24hVolume: bestShort.volume24h !== undefined && bestShort.volume24h > 0 ? bestShort.volume24h : undefined,
                   timestamp: new Date(),
                 });
               }
@@ -634,6 +660,8 @@ export class FundingRateAggregator {
                   shortMarkPrice: lowestMarkPrice,
                   longOpenInterest: highestRate.openInterest !== undefined && highestRate.openInterest > 0 ? highestRate.openInterest : undefined,
                   shortOpenInterest: lowestRate.openInterest !== undefined && lowestRate.openInterest > 0 ? lowestRate.openInterest : undefined,
+                  long24hVolume: highestRate.volume24h !== undefined && highestRate.volume24h > 0 ? highestRate.volume24h : undefined,
+                  short24hVolume: lowestRate.volume24h !== undefined && lowestRate.volume24h > 0 ? lowestRate.volume24h : undefined,
                   timestamp: new Date(),
                 });
               }

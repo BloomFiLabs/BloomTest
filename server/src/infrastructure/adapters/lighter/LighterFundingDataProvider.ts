@@ -573,5 +573,50 @@ export class LighterFundingDataProvider implements OnModuleInit {
       ];
     }
   }
+
+  /**
+   * Get 24-hour trading volume in USD for a market
+   * Uses the orderBookDetails API which includes daily_quote_token_volume
+   * @param marketIndex Market index
+   * @returns 24h volume in USD
+   */
+  async get24hVolume(marketIndex: number): Promise<number> {
+    try {
+      // First try WebSocket provider if available (cached data)
+      if (this.wsProvider) {
+        const wsVolume = this.wsProvider.get24hVolume(marketIndex);
+        if (wsVolume !== undefined && wsVolume > 0) {
+          return wsVolume;
+        }
+      }
+
+      // Fall back to REST API - orderBookDetails endpoint has volume
+      const orderBookUrl = `${this.baseUrl}/api/v1/orderBookDetails`;
+      const response = await axios.get(orderBookUrl, {
+        timeout: 10000,
+        params: { market_id: marketIndex },
+      });
+
+      if (response.data?.code !== 200 || !response.data?.order_book_details?.length) {
+        this.logger.warn(`No volume data available for Lighter market ${marketIndex}`);
+        return 0;
+      }
+
+      const orderBookDetail = response.data.order_book_details[0];
+      
+      // daily_quote_token_volume is already in USD (quote token = USDC)
+      const volume = parseFloat(orderBookDetail.daily_quote_token_volume || '0');
+      
+      if (isNaN(volume) || volume < 0) {
+        this.logger.warn(`Invalid volume data for Lighter market ${marketIndex}: ${orderBookDetail.daily_quote_token_volume}`);
+        return 0;
+      }
+
+      return volume;
+    } catch (error: any) {
+      this.logger.debug(`Failed to get 24h volume for Lighter market ${marketIndex}: ${error.message}`);
+      return 0;
+    }
+  }
 }
 

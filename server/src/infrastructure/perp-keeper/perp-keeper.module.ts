@@ -25,6 +25,7 @@ import { PositionLossTracker } from '../services/PositionLossTracker';
 import { PortfolioRiskAnalyzer } from '../services/PortfolioRiskAnalyzer';
 import { RealFundingPaymentsService } from '../services/RealFundingPaymentsService';
 import { OptimalLeverageService } from '../services/OptimalLeverageService';
+import { DiagnosticsService } from '../services/DiagnosticsService';
 import { PerpKeeperController } from '../controllers/PerpKeeperController';
 import { FundingRateController } from '../controllers/FundingRateController';
 import { PortfolioOptimizer } from '../../domain/services/strategy-rules/PortfolioOptimizer';
@@ -289,13 +290,16 @@ import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTrack
       useExisting: OptimalLeverageService,
     },
     
+    // Diagnostics service (must be before PerformanceLogger due to dependency)
+    DiagnosticsService,
+    
     // Performance logging
     {
       provide: PerpKeeperPerformanceLogger,
-      useFactory: (realFundingService: RealFundingPaymentsService) => {
-        return new PerpKeeperPerformanceLogger(realFundingService);
+      useFactory: (realFundingService: RealFundingPaymentsService, diagnosticsService: DiagnosticsService) => {
+        return new PerpKeeperPerformanceLogger(realFundingService, diagnosticsService);
       },
-      inject: [RealFundingPaymentsService],
+      inject: [RealFundingPaymentsService, DiagnosticsService],
     },
     {
       provide: 'IPerpKeeperPerformanceLogger',
@@ -309,6 +313,7 @@ import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTrack
     PerpKeeperOrchestrator,
     RealFundingPaymentsService,
     OptimalLeverageService,
+    DiagnosticsService,
   ],
 })
 export class PerpKeeperModule {}

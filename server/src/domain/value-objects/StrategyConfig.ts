@@ -36,6 +36,10 @@ export class StrategyConfig {
     public readonly maxLeverage: number = 10,
     public readonly volatilityLookbackHours: number = 24,
     leverageOverrides: Map<string, number> = new Map(),
+    // Volume-based liquidity filter (prevents trading illiquid pairs)
+    // Dynamic scaling: required_volume = position_size * (100 / maxPositionToVolumePercent)
+    public readonly min24hVolumeUsd: number = 0, // Absolute floor (0 = use dynamic only)
+    public readonly maxPositionToVolumePercent: number = 5, // Position can't exceed 5% of 24h volume
   ) {
     this._exchangeFeeRates = new Map(exchangeFeeRates);
     this._takerFeeRates = new Map(takerFeeRates);
@@ -155,6 +159,10 @@ export class StrategyConfig {
     const maxLeverage = parseFloat(configService.get<string>('LEVERAGE_MAX') || '10');
     const volatilityLookbackHours = parseInt(configService.get<string>('LEVERAGE_LOOKBACK_HOURS') || '24');
 
+    // Volume-based liquidity filters (prevents trading illiquid pairs)
+    const min24hVolumeUsd = parseFloat(configService.get<string>('MIN_24H_VOLUME_USD') || '500000');
+    const maxPositionToVolumePercent = parseFloat(configService.get<string>('MAX_POSITION_TO_VOLUME_PERCENT') || '5');
+
     // Parse leverage overrides from env (format: "BTC:5,ETH:3,DOGE:2")
     const leverageOverrides = new Map<string, number>();
     const overridesStr = configService.get<string>('LEVERAGE_OVERRIDES') || '';
@@ -174,6 +182,8 @@ export class StrategyConfig {
       maxLeverage,
       volatilityLookbackHours,
       leverageOverrides,
+      min24hVolumeUsd,
+      maxPositionToVolumePercent,
     );
   }
 
@@ -187,6 +197,8 @@ export class StrategyConfig {
     maxLeverage: number = 10,
     volatilityLookbackHours: number = 24,
     leverageOverrides: Map<string, number> = new Map(),
+    min24hVolumeUsd: number = 500000,
+    maxPositionToVolumePercent: number = 5,
   ): StrategyConfig {
     const exchangeFeeRates = new Map<ExchangeType, Percentage>([
       [ExchangeType.HYPERLIQUID, Percentage.fromDecimal(0.00015)], // 0.0150% maker fee (tier 0)
@@ -226,6 +238,8 @@ export class StrategyConfig {
       maxLeverage,
       volatilityLookbackHours,
       leverageOverrides,
+      min24hVolumeUsd, // Minimum 24h volume to trade a pair
+      maxPositionToVolumePercent, // Position can't exceed X% of 24h volume
     );
   }
 }

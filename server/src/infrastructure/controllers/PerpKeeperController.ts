@@ -1,9 +1,10 @@
-import { Controller, Get, Post, Body } from '@nestjs/common';
+import { Controller, Get, Post, Body, Optional } from '@nestjs/common';
 import { PerpKeeperOrchestrator } from '../../domain/services/PerpKeeperOrchestrator';
 import { FundingArbitrageStrategy } from '../../domain/services/FundingArbitrageStrategy';
 import { ExchangeType } from '../../domain/value-objects/ExchangeConfig';
 import { PerpKeeperService } from '../../application/services/PerpKeeperService';
 import { PerpKeeperPerformanceLogger } from '../logging/PerpKeeperPerformanceLogger';
+import { DiagnosticsService } from '../services/DiagnosticsService';
 
 @Controller('keeper')
 export class PerpKeeperController {
@@ -12,6 +13,7 @@ export class PerpKeeperController {
     private readonly arbitrageStrategy: FundingArbitrageStrategy,
     private readonly keeperService: PerpKeeperService,
     private readonly performanceLogger: PerpKeeperPerformanceLogger,
+    @Optional() private readonly diagnosticsService?: DiagnosticsService,
   ) {}
 
   /**
@@ -142,6 +144,75 @@ export class PerpKeeperController {
         ]),
       ),
     };
+  }
+
+  /**
+   * Get condensed diagnostics for bot health monitoring
+   * GET /keeper/diagnostics
+   * 
+   * Returns a condensed, actionable summary of bot health and performance.
+   * Designed to remain small (<10KB) even after days of operation.
+   * Ideal for AI context windows and quick health checks.
+   */
+  @Get('diagnostics')
+  async getDiagnostics() {
+    if (!this.diagnosticsService) {
+      return {
+        error: 'DiagnosticsService not available',
+        timestamp: new Date(),
+      };
+    }
+
+    // Update position data before generating diagnostics
+    try {
+      const positionMetrics = await this.orchestrator.getAllPositionsWithMetrics();
+      const positionsByExchange: Record<string, number> = {};
+      for (const [exchange, positions] of positionMetrics.positionsByExchange) {
+        positionsByExchange[exchange] = positions.length;
+      }
+      
+      this.diagnosticsService.updatePositionData({
+        count: positionMetrics.positions.length,
+        totalValue: positionMetrics.totalPositionValue,
+        unrealizedPnl: positionMetrics.totalUnrealizedPnl,
+        byExchange: positionsByExchange,
+      });
+    } catch (error) {
+      // Continue with stale position data if we can't fetch fresh
+    }
+
+    // Update APY data from performance logger
+    try {
+      let totalCapital = 0;
+      for (const exchangeType of [ExchangeType.ASTER, ExchangeType.LIGHTER, ExchangeType.HYPERLIQUID]) {
+        try {
+          const balance = await this.keeperService.getBalance(exchangeType);
+          totalCapital += balance;
+        } catch {
+          // Skip
+        }
+      }
+
+      const perfMetrics = this.performanceLogger.getPerformanceMetrics(totalCapital);
+      const byExchange: Record<string, number> = {};
+      for (const [exchange, metrics] of perfMetrics.exchangeMetrics) {
+        // Calculate per-exchange APY approximation based on funding captured
+        if (metrics.totalPositionValue > 0) {
+          const dailyReturn = metrics.netFundingCaptured / (perfMetrics.runtimeDays || 1);
+          byExchange[exchange] = (dailyReturn / metrics.totalPositionValue) * 365 * 100;
+        }
+      }
+
+      this.diagnosticsService.updateApyData({
+        estimated: perfMetrics.estimatedAPY,
+        realized: perfMetrics.realizedAPY,
+        byExchange,
+      });
+    } catch (error) {
+      // Continue with stale APY data
+    }
+
+    return this.diagnosticsService.getDiagnostics();
   }
 }
 

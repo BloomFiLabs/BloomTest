@@ -1,10 +1,11 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
 import { ExchangeType } from '../../domain/value-objects/ExchangeConfig';
 import { PerpPosition } from '../../domain/entities/PerpPosition';
 import { FundingRateComparison, ArbitrageOpportunity } from '../../domain/services/FundingRateAggregator';
 import { ArbitrageExecutionResult } from '../../domain/services/FundingArbitrageStrategy';
 import { IPerpKeeperPerformanceLogger } from '../../domain/ports/IPerpKeeperPerformanceLogger';
 import { RealFundingPaymentsService, CombinedFundingSummary } from '../services/RealFundingPaymentsService';
+import { DiagnosticsService } from '../services/DiagnosticsService';
 
 /**
  * Performance metrics for a single exchange
@@ -112,6 +113,8 @@ export class PerpKeeperPerformanceLogger implements IPerpKeeperPerformanceLogger
   
   constructor(
     @Optional() private readonly realFundingService?: RealFundingPaymentsService,
+    @Optional() @Inject(forwardRef(() => DiagnosticsService))
+    private readonly diagnosticsService?: DiagnosticsService,
   ) {
     // Initialize exchange metrics
     for (const exchangeType of [ExchangeType.ASTER, ExchangeType.LIGHTER, ExchangeType.HYPERLIQUID]) {
@@ -343,6 +346,113 @@ export class PerpKeeperPerformanceLogger implements IPerpKeeperPerformanceLogger
     }
 
     metrics.lastUpdateTime = new Date();
+    
+    // Feed DiagnosticsService
+    this.diagnosticsService?.recordOrder({
+      orderId: `${Date.now()}`, // Placeholder since we don't have actual ID here
+      symbol: 'UNKNOWN',
+      exchange,
+      side: 'LONG',
+      placedAt: new Date(),
+      filledAt: filled ? new Date() : undefined,
+      status: filled ? 'FILLED' : failed ? 'FAILED' : 'PLACED',
+    });
+  }
+
+  /**
+   * Record order with full details (enhanced version for diagnostics)
+   */
+  recordOrderWithDetails(
+    orderId: string,
+    symbol: string,
+    exchange: ExchangeType,
+    side: 'LONG' | 'SHORT',
+    status: 'PLACED' | 'FILLED' | 'FAILED' | 'CANCELLED',
+    placedAt: Date,
+    filledAt?: Date,
+    fillTimeMs?: number,
+    failReason?: string,
+  ): void {
+    // Update internal metrics
+    const metrics = this.exchangeMetrics.get(exchange);
+    if (metrics) {
+      if (status === 'PLACED') {
+        this.totalOrdersPlaced++;
+        metrics.ordersExecuted++;
+      } else if (status === 'FILLED') {
+        this.totalOrdersFilled++;
+        metrics.ordersFilled++;
+      } else if (status === 'FAILED') {
+        this.totalOrdersFailed++;
+        metrics.ordersFailed++;
+      }
+      metrics.lastUpdateTime = new Date();
+    }
+
+    // Feed DiagnosticsService with full details
+    this.diagnosticsService?.recordOrder({
+      orderId,
+      symbol,
+      exchange,
+      side,
+      placedAt,
+      filledAt,
+      status,
+      fillTimeMs,
+      failReason,
+    });
+  }
+
+  /**
+   * Record an error event for diagnostics
+   */
+  recordError(
+    type: string,
+    message: string,
+    exchange?: ExchangeType,
+    symbol?: string,
+    context?: Record<string, any>,
+  ): void {
+    this.diagnosticsService?.recordError({
+      type,
+      message,
+      exchange,
+      symbol,
+      timestamp: new Date(),
+      context,
+    });
+  }
+
+  /**
+   * Record a connection event for diagnostics
+   */
+  recordConnectionEvent(
+    exchange: ExchangeType,
+    event: 'CONNECTED' | 'DISCONNECTED' | 'RECONNECT' | 'ERROR',
+    errorMessage?: string,
+  ): void {
+    this.diagnosticsService?.recordConnectionEvent({
+      exchange,
+      event,
+      timestamp: new Date(),
+      errorMessage,
+    });
+  }
+
+  /**
+   * Record a liquidity filter event for diagnostics
+   */
+  recordLiquidityFilter(
+    symbol: string,
+    reason: 'LOW_VOLUME' | 'LOW_OI' | 'MISSING_DATA',
+    details?: Record<string, any>,
+  ): void {
+    this.diagnosticsService?.recordLiquidityFilter({
+      symbol,
+      reason,
+      timestamp: new Date(),
+      details,
+    });
   }
 
   /**

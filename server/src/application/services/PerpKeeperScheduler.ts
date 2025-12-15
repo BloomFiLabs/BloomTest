@@ -10,6 +10,7 @@ import { PerpPosition } from '../../domain/entities/PerpPosition';
 import { Contract, JsonRpcProvider, Wallet, formatUnits } from 'ethers';
 import * as cliProgress from 'cli-progress';
 import type { IOptimalLeverageService, LeverageAlert } from '../../domain/ports/IOptimalLeverageService';
+import { DiagnosticsService } from '../../infrastructure/services/DiagnosticsService';
 
 /**
  * PerpKeeperScheduler - Scheduled execution for funding rate arbitrage
@@ -49,6 +50,7 @@ export class PerpKeeperScheduler implements OnModuleInit {
     private readonly keeperService: PerpKeeperService,
     @Optional() @Inject('IOptimalLeverageService')
     private readonly optimalLeverageService?: IOptimalLeverageService,
+    @Optional() private readonly diagnosticsService?: DiagnosticsService,
   ) {
     // Initialize orchestrator with exchange adapters
     const adapters = this.keeperService.getExchangeAdapters();
@@ -634,9 +636,23 @@ export class PerpKeeperScheduler implements OnModuleInit {
         
         // Try to open missing side for each single-leg position
         for (const position of singleLegPositions) {
+          // Track single-leg start in diagnostics
+          const singleLegId = `${position.symbol}-${position.exchangeType}-${position.side}`;
+          this.diagnosticsService?.recordSingleLegStart({
+            id: singleLegId,
+            symbol: position.symbol,
+            exchange: position.exchangeType,
+            side: position.side as 'LONG' | 'SHORT',
+            startedAt: new Date(),
+            retryCount: 0,
+          });
+          
           const retrySuccess = await this.tryOpenMissingSide(position);
           
-          if (!retrySuccess) {
+          if (retrySuccess) {
+            // Single-leg resolved via fill
+            this.diagnosticsService?.recordSingleLegResolved(singleLegId, 'FILLED');
+          } else {
             // Retries exhausted - close the single leg position
             this.logger.error(
               `🚨 Closing single-leg position ${position.symbol} (${position.side}) on ${position.exchangeType} ` +
@@ -644,6 +660,9 @@ export class PerpKeeperScheduler implements OnModuleInit {
             );
             await this.closeSingleLegPosition(position);
             anyClosed = true;
+            
+            // Track single-leg resolved via close
+            this.diagnosticsService?.recordSingleLegResolved(singleLegId, 'CLOSED');
           }
         }
         

@@ -47,8 +47,8 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
   private readonly MAX_RECONNECT_ATTEMPTS = 10;
   private readonly RECONNECT_DELAY = 5000; // 5 seconds
   
-  // Cache for market stats data (key: marketIndex, value: { openInterest: number, markPrice: number })
-  private marketStatsCache: Map<number, { openInterest: number; markPrice: number }> = new Map();
+  // Cache for market stats data (key: marketIndex, value: { openInterest: number, markPrice: number, volume24h: number })
+  private marketStatsCache: Map<number, { openInterest: number; markPrice: number; volume24h: number }> = new Map();
   private subscribedMarkets: Set<number> = new Set();
   
   // Track if we've received initial data for each market
@@ -200,8 +200,10 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
       try {
         const openInterestRaw = marketStats.open_interest || '0';
         const markPriceRaw = marketStats.mark_price || '0';
+        const volume24hRaw = marketStats.daily_quote_token_volume || 0; // Already in USD (quote = USDC)
         const openInterest = parseFloat(openInterestRaw);
         const markPrice = parseFloat(markPriceRaw);
+        const volume24h = typeof volume24hRaw === 'string' ? parseFloat(volume24hRaw) : volume24hRaw;
         
         // Log parsing results for debugging
         if (isNaN(openInterest) || isNaN(markPrice)) {
@@ -224,6 +226,7 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
           this.marketStatsCache.set(marketIndex, {
             openInterest: oiUsd,
             markPrice: markPrice,
+            volume24h: isNaN(volume24h) ? 0 : volume24h,
           });
           
           if (!this.hasInitialData.has(marketIndex)) {
@@ -410,6 +413,15 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
   getMarkPrice(marketIndex: number): number | undefined {
     const stats = this.marketStatsCache.get(marketIndex);
     return stats?.markPrice;
+  }
+
+  /**
+   * Get 24-hour trading volume in USD for a market from WebSocket cache
+   * Returns undefined if not available
+   */
+  get24hVolume(marketIndex: number): number | undefined {
+    const stats = this.marketStatsCache.get(marketIndex);
+    return stats?.volume24h;
   }
 
   /**

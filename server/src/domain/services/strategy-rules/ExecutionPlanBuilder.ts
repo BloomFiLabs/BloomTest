@@ -273,6 +273,86 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
         }
       }
 
+      // ========== DYNAMIC VOLUME FILTER: Auto-scales with position size ==========
+      // This prevents single-leg positions from unfilled orders on low-volume pairs
+      // Key insight: We want position to be ≤ X% of 24h volume for quick fills
+      // So required_volume = position_size / (max_percent / 100)
+      const long24hVolume = opportunity.long24hVolume || 0;
+      const short24hVolume = opportunity.short24hVolume || 0;
+      const min24hVolume = Math.min(
+        long24hVolume || Infinity,
+        short24hVolume || Infinity,
+      );
+
+      // Dynamic threshold: Calculate required volume based on position size
+      // Formula: required_volume = position_size * (100 / max_position_percent)
+      // Example: $15k position with 5% max → needs $300k volume
+      const volumeMultiplier = 100 / config.maxPositionToVolumePercent; // e.g., 20x for 5%
+      const requiredVolumeForPosition = positionSizeUsd * volumeMultiplier;
+      
+      // Also enforce absolute minimum if configured (safety floor)
+      const effectiveMinVolume = Math.max(
+        config.min24hVolumeUsd, // Absolute floor (can be 0 to disable)
+        requiredVolumeForPosition, // Dynamic requirement based on position
+      );
+
+      // Check if volume is sufficient for our position size
+      if (min24hVolume < Infinity && min24hVolume > 0) {
+        if (min24hVolume < effectiveMinVolume) {
+          // Calculate what position size WOULD work with this volume
+          const maxViablePosition = min24hVolume * (config.maxPositionToVolumePercent / 100);
+          
+          if (maxViablePosition < config.minPositionSizeUsd) {
+            // Volume is so low that even minimum position won't fill quickly
+            return Result.failure(
+              new ValidationException(
+                `Insufficient 24h volume for quick fills: $${min24hVolume.toLocaleString()} ` +
+                `(need $${effectiveMinVolume.toLocaleString()} for $${positionSizeUsd.toFixed(0)} position at ${config.maxPositionToVolumePercent}% max)`,
+                'INSUFFICIENT_VOLUME',
+                {
+                  symbol: opportunity.symbol,
+                  long24hVolume,
+                  short24hVolume,
+                  requiredVolume: effectiveMinVolume,
+                  actualVolume: min24hVolume,
+                  positionSize: positionSizeUsd,
+                  maxPositionPercent: config.maxPositionToVolumePercent,
+                },
+              ),
+            );
+          }
+          
+          // Cap position to what volume supports
+          this.logger.debug(
+            `📊 Reducing position for ${opportunity.symbol} from $${positionSizeUsd.toFixed(0)} to $${maxViablePosition.toFixed(0)} ` +
+            `(${config.maxPositionToVolumePercent}% of 24h volume $${min24hVolume.toLocaleString()}) - prioritizing quick fills`,
+          );
+          positionSizeUsd = maxViablePosition;
+          positionSizeBaseAsset = positionSizeUsd / avgMarkPrice;
+        }
+      } else if (min24hVolume === 0 || !isFinite(min24hVolume)) {
+        // No volume data available - fall back to absolute minimum if set
+        if (config.min24hVolumeUsd > 0) {
+          this.logger.warn(
+            `⚠️ No volume data for ${opportunity.symbol} - skipping (min volume requirement: $${config.min24hVolumeUsd.toLocaleString()})`,
+          );
+          return Result.failure(
+            new ValidationException(
+              `No volume data available for ${opportunity.symbol}`,
+              'MISSING_VOLUME_DATA',
+              {
+                symbol: opportunity.symbol,
+                long24hVolume,
+                short24hVolume,
+              },
+            ),
+          );
+        }
+        // If no minimum configured and no data, proceed with caution (OI filter still applies)
+        this.logger.debug(`⚠️ No volume data for ${opportunity.symbol} - proceeding (no min volume configured)`);
+      }
+      // =========================================================================
+
       // Get exchange-specific symbol formats
       const longExchangeSymbol = this.aggregator.getExchangeSymbol(
         opportunity.symbol,
