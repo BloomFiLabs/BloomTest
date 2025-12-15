@@ -1,5 +1,6 @@
-import { Module, forwardRef, Logger } from '@nestjs/common';
+import { Module, forwardRef, Logger, OnModuleInit, Inject, Optional } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ModuleRef } from '@nestjs/core';
 import { PerpKeeperService } from '../../application/services/PerpKeeperService';
 import { PerpKeeperScheduler } from '../../application/services/PerpKeeperScheduler';
 import { PerpKeeperPerformanceLogger } from '../logging/PerpKeeperPerformanceLogger';
@@ -26,6 +27,8 @@ import { PortfolioRiskAnalyzer } from '../services/PortfolioRiskAnalyzer';
 import { RealFundingPaymentsService } from '../services/RealFundingPaymentsService';
 import { OptimalLeverageService } from '../services/OptimalLeverageService';
 import { DiagnosticsService } from '../services/DiagnosticsService';
+import { ProfitTracker } from '../services/ProfitTracker';
+import { RewardHarvester } from '../services/RewardHarvester';
 import { PerpKeeperController } from '../controllers/PerpKeeperController';
 import { FundingRateController } from '../controllers/FundingRateController';
 import { KeeperStrategyEventListener } from '../adapters/blockchain/KeeperStrategyEventListener';
@@ -296,6 +299,27 @@ import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTrack
     // Diagnostics service (must be before PerformanceLogger due to dependency)
     DiagnosticsService,
     
+    // Profit tracking and reward harvesting
+    {
+      provide: ProfitTracker,
+      useFactory: (configService: ConfigService, keeperService: PerpKeeperService) => {
+        return new ProfitTracker(configService, keeperService);
+      },
+      inject: [ConfigService, PerpKeeperService],
+    },
+    {
+      provide: RewardHarvester,
+      useFactory: (
+        configService: ConfigService,
+        keeperService: PerpKeeperService,
+        profitTracker: ProfitTracker,
+        diagnosticsService: DiagnosticsService,
+      ) => {
+        return new RewardHarvester(configService, keeperService, profitTracker, diagnosticsService);
+      },
+      inject: [ConfigService, PerpKeeperService, ProfitTracker, DiagnosticsService],
+    },
+    
     // Keeper Strategy Integration (on-chain vault/strategy interaction)
     KeeperStrategyEventListener,
     {
@@ -342,9 +366,29 @@ import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTrack
     RealFundingPaymentsService,
     OptimalLeverageService,
     DiagnosticsService,
+    ProfitTracker,
+    RewardHarvester,
     KeeperStrategyEventListener,
     WithdrawalFulfiller,
     NAVReporter,
   ],
 })
-export class PerpKeeperModule {}
+export class PerpKeeperModule implements OnModuleInit {
+  private readonly logger = new Logger(PerpKeeperModule.name);
+
+  constructor(
+    @Optional() private readonly balanceManager?: BalanceManager,
+    @Optional() private readonly profitTracker?: ProfitTracker,
+  ) {}
+
+  /**
+   * Wire up services after module initialization to avoid circular dependencies
+   */
+  async onModuleInit() {
+    // Wire ProfitTracker into BalanceManager for deployable capital calculations
+    if (this.balanceManager && this.profitTracker) {
+      this.balanceManager.setProfitTracker(this.profitTracker);
+      this.logger.log('Wired ProfitTracker into BalanceManager for profit-excluded position sizing');
+    }
+  }
+}

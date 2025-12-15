@@ -636,15 +636,16 @@ export class FundingArbitrageStrategy {
               (adapter as any).clearBalanceCache();
             }
             
-            const totalBalance = await adapter.getBalance();
+            // Use deployable capital (excludes accrued profits that will be harvested)
+            const deployableBalance = await this.balanceManager.getDeployableCapital(adapter, exchange);
             const marginUsed = marginUsedPerExchange.get(exchange) ?? 0;
-            // Available balance = total balance - margin already used in existing positions
-            const availableBalance = Math.max(0, totalBalance - marginUsed);
+            // Available balance = deployable balance - margin already used in existing positions
+            const availableBalance = Math.max(0, deployableBalance - marginUsed);
             exchangeBalances.set(exchange, availableBalance);
 
             if (marginUsed > 0) {
               this.logger.debug(
-                `${exchange}: Total balance: $${totalBalance.toFixed(2)}, ` +
+                `${exchange}: Deployable balance: $${deployableBalance.toFixed(2)}, ` +
                   `Margin used: $${marginUsed.toFixed(2)}, ` +
                   `Available: $${availableBalance.toFixed(2)}`,
               );
@@ -1121,9 +1122,9 @@ export class FundingArbitrageStrategy {
         exchangeBalances.values(),
       ).reduce((sum, balance) => sum + balance, 0);
 
-      // Get opportunities with maxPortfolioFor35APY and sort by maxPortfolio (best opportunities first)
-      // Filter to only include opportunities where we have sufficient balance on BOTH exchanges
-      // Sort by expected return first, then by maxPortfolio as tiebreaker
+      // Get opportunities with maxPortfolioFor35APY and sort by expected return (best first)
+      // The ladder will allocate whatever capital is available, up to maxPortfolioFor35APY per position
+      // We only filter out failed/invalid opportunities, NOT based on affordability
       const opportunitiesWithMaxPortfolio = allEvaluatedOpportunities
         .filter((item) => {
           // Filter out opportunities that are marked as filtered (failed after 5 retries)
@@ -1149,17 +1150,18 @@ export class FundingArbitrageStrategy {
             return false;
           }
 
-          // Check if we have sufficient balance on BOTH exchanges for this opportunity
-          const requiredCollateral = item.maxPortfolioFor35APY / this.leverage;
+          // Check if we have ANY balance on BOTH exchanges (minimum viable position)
+          // The ladder will allocate whatever capital is available, not the full maxPortfolioFor35APY
+          const minPositionCollateral = this.strategyConfig.minPositionSizeUsd / this.leverage;
           const longBalance =
             exchangeBalances.get(item.opportunity.longExchange) ?? 0;
           const shortBalance =
             exchangeBalances.get(item.opportunity.shortExchange) ?? 0;
 
-          // Both exchanges must have sufficient balance
+          // Both exchanges must have at least minimum position collateral
           return (
-            longBalance >= requiredCollateral &&
-            shortBalance >= requiredCollateral
+            longBalance >= minPositionCollateral &&
+            shortBalance >= minPositionCollateral
           );
         })
         .sort((a, b) => {
@@ -1627,6 +1629,7 @@ export class FundingArbitrageStrategy {
 
       // Refresh balances after closing positions (they may have changed)
       // This accounts for positions that failed to close (their margin is still locked)
+      // Uses deployable capital (excludes accrued profits)
       for (const [exchange, adapter] of adapters) {
         try {
           const allPositions = await adapter.getPositions();
@@ -1634,13 +1637,14 @@ export class FundingArbitrageStrategy {
             const posValue = pos.getPositionValue();
             return sum + (pos.marginUsed ?? posValue / this.leverage);
           }, 0);
-          const totalBalance = await adapter.getBalance();
-          const availableBalance = Math.max(0, totalBalance - marginUsed);
+          // Use deployable capital (excludes accrued profits that will be harvested)
+          const deployableBalance = await this.balanceManager.getDeployableCapital(adapter, exchange);
+          const availableBalance = Math.max(0, deployableBalance - marginUsed);
           exchangeBalances.set(exchange, availableBalance);
 
           if (marginUsed > 0) {
             this.logger.debug(
-              `${exchange}: Total: $${totalBalance.toFixed(2)}, ` +
+              `${exchange}: Deployable: $${deployableBalance.toFixed(2)}, ` +
                 `Margin locked: $${marginUsed.toFixed(2)}, ` +
                 `Available: $${availableBalance.toFixed(2)}`,
             );

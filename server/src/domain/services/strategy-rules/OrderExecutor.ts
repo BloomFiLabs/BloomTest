@@ -14,6 +14,7 @@ import { ArbitrageOpportunity } from '../FundingRateAggregator';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
 import {
+  PerpOrderRequest,
   PerpOrderResponse,
   OrderStatus,
   OrderSide,
@@ -532,37 +533,93 @@ export class OrderExecutor implements IOrderExecutor {
             shortAdapter.getBalance(),
           ]);
           const avgPrice = ((plan.longOrder.price || 0) + (plan.shortOrder.price || 0)) / 2;
-          const requiredMargin = avgPrice > 0 
-            ? plan.positionSize.toUSD(avgPrice) / (this.config?.leverage || 2)
-            : plan.positionSize.toBaseAsset() * 10; // Fallback estimate
           
-          if (longBalance < requiredMargin || shortBalance < requiredMargin) {
-            const insufficientExchange = longBalance < requiredMargin 
-              ? opportunity.longExchange 
-              : opportunity.shortExchange;
-            const availableBalance = Math.min(longBalance, shortBalance);
-            this.logger.warn(
-              `⚠️ Insufficient margin for ${opportunity.symbol} on ${insufficientExchange}: ` +
-              `need $${requiredMargin.toFixed(2)}, have $${availableBalance.toFixed(2)}`
+          // Use the SCALED maxPortfolioFor35APY from ladder allocation if available
+          // This is the actual amount we want to deploy, not the original plan size
+          const scaledPositionUsd = item.maxPortfolioFor35APY || plan.positionSize.toUSD(avgPrice);
+          const leverage = this.config?.leverage || 2;
+          const requiredMargin = scaledPositionUsd / leverage;
+          
+          // Check if we have sufficient balance (allow small buffer for fees)
+          const minBalance = Math.min(longBalance, shortBalance);
+          if (minBalance < requiredMargin * 0.95) {
+            // Not enough for the scaled position - scale down to what we can afford
+            const actualCollateral = minBalance * 0.9; // Use 90% of available
+            const actualPositionUsd = actualCollateral * leverage;
+            
+            if (actualPositionUsd < this.config.minPositionSizeUsd) {
+              const insufficientExchange = longBalance < shortBalance 
+                ? opportunity.longExchange 
+                : opportunity.shortExchange;
+              this.logger.warn(
+                `⚠️ Insufficient margin for ${opportunity.symbol} on ${insufficientExchange}: ` +
+                `need $${requiredMargin.toFixed(2)}, have $${minBalance.toFixed(2)} (min position: $${this.config.minPositionSizeUsd})`
+              );
+              result.errors.push(
+                `Insufficient margin for ${opportunity.symbol}: need $${requiredMargin.toFixed(2)}, have $${minBalance.toFixed(2)}`
+              );
+              break; // Skip this opportunity, move to next
+            }
+            
+            // Scale down the position to fit available capital
+            this.logger.log(
+              `📉 Scaling ${opportunity.symbol} from $${scaledPositionUsd.toFixed(2)} to $${actualPositionUsd.toFixed(2)} ` +
+              `(available collateral: $${actualCollateral.toFixed(2)})`
             );
-            result.errors.push(
-              `Insufficient margin for ${opportunity.symbol}: need $${requiredMargin.toFixed(2)}, have $${availableBalance.toFixed(2)}`
+            
+            // Update the maxPortfolioFor35APY to reflect actual size
+            item.maxPortfolioFor35APY = actualPositionUsd;
+          }
+
+          // Calculate the actual position size to use
+          // Use scaled maxPortfolioFor35APY from ladder allocation
+          const actualPositionUsd = item.maxPortfolioFor35APY || scaledPositionUsd;
+          const actualPositionBaseAsset = actualPositionUsd / avgPrice;
+          
+          // Scale the orders if the position size differs from the original plan
+          const originalPositionBaseAsset = plan.positionSize.toBaseAsset();
+          const scaleFactor = actualPositionBaseAsset / originalPositionBaseAsset;
+          
+          // Create scaled orders if needed
+          let longOrder = plan.longOrder;
+          let shortOrder = plan.shortOrder;
+          
+          if (Math.abs(scaleFactor - 1) > 0.01) {
+            // Need to scale the orders
+            const scaledSize = actualPositionBaseAsset;
+            longOrder = new PerpOrderRequest(
+              plan.longOrder.symbol,
+              plan.longOrder.side,
+              plan.longOrder.type,
+              scaledSize,
+              plan.longOrder.price,
+              plan.longOrder.timeInForce,
+              plan.longOrder.reduceOnly,
             );
-            break; // Skip this opportunity, move to next
+            shortOrder = new PerpOrderRequest(
+              plan.shortOrder.symbol,
+              plan.shortOrder.side,
+              plan.shortOrder.type,
+              scaledSize,
+              plan.shortOrder.price,
+              plan.shortOrder.timeInForce,
+              plan.shortOrder.reduceOnly,
+            );
           }
 
           // Place orders
           this.logger.log(
             `📤 [${i + 1}/${opportunities.length}] Opening ${opportunity.symbol}: ` +
-              `${plan.positionSize.toBaseAsset().toFixed(4)} size` +
+              `$${actualPositionUsd.toFixed(2)} (${actualPositionBaseAsset.toFixed(4)} size)` +
+              (Math.abs(scaleFactor - 1) > 0.01 ? ` [scaled ${(scaleFactor * 100).toFixed(0)}%]` : '') +
               (executionAttempt > 1
                 ? ` [Attempt ${executionAttempt}/${this.config.maxExecutionRetries}]`
                 : ''),
           );
 
           const [longResponse, shortResponse] = await Promise.all([
-            longAdapter.placeOrder(plan.longOrder),
-            shortAdapter.placeOrder(plan.shortOrder),
+            longAdapter.placeOrder(longOrder),
+            shortAdapter.placeOrder(shortOrder),
           ]);
 
           // Wait for orders to fill if they're not immediately filled
@@ -581,7 +638,7 @@ export class OrderExecutor implements IOrderExecutor {
               longResponse.orderId,
               opportunity.symbol,
               opportunity.longExchange,
-              plan.positionSize.toBaseAsset(),
+              actualPositionBaseAsset,
               this.config.maxOrderWaitRetries,
               this.config.orderWaitBaseInterval,
               false,
@@ -594,7 +651,7 @@ export class OrderExecutor implements IOrderExecutor {
               shortResponse.orderId,
               opportunity.symbol,
               opportunity.shortExchange,
-              plan.positionSize.toBaseAsset(),
+              actualPositionBaseAsset,
               this.config.maxOrderWaitRetries,
               this.config.orderWaitBaseInterval,
               false,

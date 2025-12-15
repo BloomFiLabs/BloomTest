@@ -9,6 +9,7 @@ import { ArbitrageOpportunity } from '../FundingRateAggregator';
 import { Contract, JsonRpcProvider, Wallet } from 'ethers';
 import { Result } from '../../common/Result';
 import { Percentage } from '../../value-objects/Percentage';
+import type { ProfitTracker } from '../../../infrastructure/services/ProfitTracker';
 
 // Mock ethers
 jest.mock('ethers', () => {
@@ -378,6 +379,180 @@ describe('BalanceManager', () => {
       if (result.isFailure) {
         expect(result.error.code).toBe('EXCHANGE_ERROR');
       }
+    });
+  });
+
+  describe('Profit Exclusion', () => {
+    let mockProfitTracker: jest.Mocked<ProfitTracker>;
+
+    beforeEach(() => {
+      mockProfitTracker = {
+        getDeployableCapital: jest.fn(),
+        getAccruedProfits: jest.fn(),
+        getProfitSummary: jest.fn(),
+      } as any;
+    });
+
+    describe('setProfitTracker', () => {
+      it('should set ProfitTracker instance', () => {
+        expect(() => manager.setProfitTracker(mockProfitTracker)).not.toThrow();
+      });
+    });
+
+    describe('getDeployableCapital', () => {
+      it('should use full balance when ProfitTracker not set', async () => {
+        const mockAdapter = {
+          getBalance: jest.fn().mockResolvedValue(100),
+        } as any;
+
+        const deployable = await manager.getDeployableCapital(
+          mockAdapter,
+          ExchangeType.HYPERLIQUID,
+        );
+
+        expect(deployable).toBe(100);
+        expect(mockAdapter.getBalance).toHaveBeenCalled();
+      });
+
+      it('should exclude accrued profits when ProfitTracker is set', async () => {
+        manager.setProfitTracker(mockProfitTracker);
+
+        const mockAdapter = {
+          getBalance: jest.fn().mockResolvedValue(100),
+        } as any;
+
+        // ProfitTracker says only $80 is deployable (excluding $20 profit)
+        mockProfitTracker.getDeployableCapital.mockResolvedValue(80);
+
+        const deployable = await manager.getDeployableCapital(
+          mockAdapter,
+          ExchangeType.HYPERLIQUID,
+        );
+
+        expect(deployable).toBe(80);
+        expect(mockProfitTracker.getDeployableCapital).toHaveBeenCalledWith(
+          ExchangeType.HYPERLIQUID,
+        );
+      });
+
+      it('should return minimum of balance and deployable capital', async () => {
+        manager.setProfitTracker(mockProfitTracker);
+
+        const mockAdapter = {
+          getBalance: jest.fn().mockResolvedValue(50), // Lower than ProfitTracker says
+        } as any;
+
+        // ProfitTracker thinks we have more deployable capital than we actually do
+        mockProfitTracker.getDeployableCapital.mockResolvedValue(100);
+
+        const deployable = await manager.getDeployableCapital(
+          mockAdapter,
+          ExchangeType.HYPERLIQUID,
+        );
+
+        // Should use actual balance (lower)
+        expect(deployable).toBe(50);
+      });
+
+      it('should fallback to full balance if ProfitTracker throws', async () => {
+        manager.setProfitTracker(mockProfitTracker);
+
+        const mockAdapter = {
+          getBalance: jest.fn().mockResolvedValue(100),
+        } as any;
+
+        mockProfitTracker.getDeployableCapital.mockRejectedValue(
+          new Error('Contract not available'),
+        );
+
+        const deployable = await manager.getDeployableCapital(
+          mockAdapter,
+          ExchangeType.HYPERLIQUID,
+        );
+
+        // Should fallback to full balance
+        expect(deployable).toBe(100);
+      });
+
+      it('should never return more than available balance', async () => {
+        manager.setProfitTracker(mockProfitTracker);
+
+        const mockAdapter = {
+          getBalance: jest.fn().mockResolvedValue(75),
+        } as any;
+
+        // ProfitTracker says $100 is deployable
+        mockProfitTracker.getDeployableCapital.mockResolvedValue(100);
+
+        const deployable = await manager.getDeployableCapital(
+          mockAdapter,
+          ExchangeType.LIGHTER,
+        );
+
+        // Should cap at actual balance
+        expect(deployable).toBeLessThanOrEqual(75);
+      });
+    });
+
+    describe('getDeployableBalances', () => {
+      it('should get deployable balances for multiple exchanges', async () => {
+        const adapter1 = { getBalance: jest.fn().mockResolvedValue(100) } as any;
+        const adapter2 = { getBalance: jest.fn().mockResolvedValue(200) } as any;
+        const adapter3 = { getBalance: jest.fn().mockResolvedValue(150) } as any;
+
+        const adapters = new Map<ExchangeType, IPerpExchangeAdapter>([
+          [ExchangeType.HYPERLIQUID, adapter1],
+          [ExchangeType.LIGHTER, adapter2],
+          [ExchangeType.ASTER, adapter3],
+        ]);
+
+        const balances = await manager.getDeployableBalances(adapters);
+
+        expect(balances.size).toBe(3);
+        expect(balances.get(ExchangeType.HYPERLIQUID)).toBe(100);
+        expect(balances.get(ExchangeType.LIGHTER)).toBe(200);
+        expect(balances.get(ExchangeType.ASTER)).toBe(150);
+      });
+
+      it('should handle exchange errors gracefully', async () => {
+        const adapter1 = { getBalance: jest.fn().mockResolvedValue(100) } as any;
+        const adapter2 = { getBalance: jest.fn().mockRejectedValue(new Error('API error')) } as any;
+
+        const adapters = new Map<ExchangeType, IPerpExchangeAdapter>([
+          [ExchangeType.HYPERLIQUID, adapter1],
+          [ExchangeType.LIGHTER, adapter2],
+        ]);
+
+        const balances = await manager.getDeployableBalances(adapters);
+
+        expect(balances.get(ExchangeType.HYPERLIQUID)).toBe(100);
+        expect(balances.get(ExchangeType.LIGHTER)).toBe(0); // Error results in 0
+      });
+
+      it('should exclude profits when ProfitTracker is set', async () => {
+        manager.setProfitTracker(mockProfitTracker);
+
+        mockProfitTracker.getDeployableCapital
+          .mockResolvedValueOnce(80)  // HL: 100 - 20 profit
+          .mockResolvedValueOnce(180) // LI: 200 - 20 profit
+          .mockResolvedValueOnce(140); // AS: 150 - 10 profit
+
+        const adapter1 = { getBalance: jest.fn().mockResolvedValue(100) } as any;
+        const adapter2 = { getBalance: jest.fn().mockResolvedValue(200) } as any;
+        const adapter3 = { getBalance: jest.fn().mockResolvedValue(150) } as any;
+
+        const adapters = new Map<ExchangeType, IPerpExchangeAdapter>([
+          [ExchangeType.HYPERLIQUID, adapter1],
+          [ExchangeType.LIGHTER, adapter2],
+          [ExchangeType.ASTER, adapter3],
+        ]);
+
+        const balances = await manager.getDeployableBalances(adapters);
+
+        expect(balances.get(ExchangeType.HYPERLIQUID)).toBe(80);
+        expect(balances.get(ExchangeType.LIGHTER)).toBe(180);
+        expect(balances.get(ExchangeType.ASTER)).toBe(140);
+      });
     });
   });
 });

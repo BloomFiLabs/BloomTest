@@ -1,0 +1,9 @@
+{
+  "chain": "arbitrum",
+  "chainId": 42161,
+  "BloomStrategyVault": "0xb401ff818d0b1DACcFe94929c3A09Ab5a6ec7033",
+  "KeeperStrategyManager": "0x3E67817526F65C8D21b3242B2C284b64CC555C58",
+  "keeper": "0xa90714a15D6e5C0EB3096462De8dc4B22E01589A",
+  "USDC": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+  "version": "v3-two-step-withdrawals"
+}

@@ -1087,5 +1087,104 @@ export class WithdrawalFulfiller implements OnModuleInit {
       }
     }
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // REWARD DEPOSIT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Deposit rewards (profits) to the strategy contract
+   * Called by RewardHarvester after withdrawing profits from exchanges
+   * 
+   * The funds are sent to the strategy contract where they become available
+   * for the vault to call claimRewards()
+   * 
+   * @param amount Amount in USDC to deposit (as number, will be converted to 6 decimals)
+   * @returns true if successful, false otherwise
+   */
+  async depositRewardsToStrategy(amount: number): Promise<boolean> {
+    if (!this.wallet || !this.provider) {
+      this.logger.error('Wallet not initialized, cannot deposit rewards');
+      return false;
+    }
+
+    if (amount < 1) {
+      this.logger.debug('Amount too small to deposit');
+      return false;
+    }
+
+    try {
+      const usdcAddress = this.configService.get<string>(
+        'USDC_ADDRESS',
+        '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', // Arbitrum native USDC
+      );
+
+      // USDC contract
+      const usdcAbi = [
+        'function transfer(address to, uint256 amount) external returns (bool)',
+        'function balanceOf(address account) external view returns (uint256)',
+      ];
+      const usdcContract = new Contract(usdcAddress, usdcAbi, this.wallet);
+
+      // Check keeper wallet balance
+      const balance = await usdcContract.balanceOf(this.wallet.address);
+      const balanceUsdc = Number(formatUnits(balance, 6));
+
+      if (balanceUsdc < amount) {
+        this.logger.warn(
+          `Insufficient balance to deposit rewards: have $${balanceUsdc.toFixed(2)}, need $${amount.toFixed(2)}`,
+        );
+        // Deposit what we have
+        if (balanceUsdc < 1) {
+          return false;
+        }
+        amount = balanceUsdc;
+      }
+
+      const amountWei = parseUnits(amount.toFixed(6), 6);
+
+      this.logger.log(
+        `💰 Depositing $${amount.toFixed(2)} rewards to strategy contract ${this.strategyAddress}...`,
+      );
+
+      // Transfer USDC to strategy contract
+      const tx = await usdcContract.transfer(this.strategyAddress, amountWei);
+      const receipt = await tx.wait();
+
+      this.logger.log(
+        `✅ Rewards deposited successfully in block ${receipt.blockNumber}`,
+      );
+
+      return true;
+    } catch (error: any) {
+      this.logger.error(`Failed to deposit rewards: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Get the current balance of rewards available in the strategy contract
+   * This is the idle balance that can be claimed by the vault via claimRewards()
+   */
+  async getRewardsAvailable(): Promise<number> {
+    if (!this.contract) {
+      return 0;
+    }
+
+    try {
+      const [, lastReportedNAV, , idleBalance, pnl] = await this.contract.getStrategySummary();
+      
+      // Available rewards = min(idle balance, profit)
+      // We can only send profits that are actually sitting in the contract
+      const idleUsdc = Number(formatUnits(idleBalance, 6));
+      const pnlUsdc = Number(formatUnits(pnl, 6));
+      
+      // If PnL is positive and we have idle funds, that's the available reward
+      return pnlUsdc > 0 ? Math.min(idleUsdc, pnlUsdc) : 0;
+    } catch (error: any) {
+      this.logger.debug(`Failed to get rewards available: ${error.message}`);
+      return 0;
+    }
+  }
 }
 

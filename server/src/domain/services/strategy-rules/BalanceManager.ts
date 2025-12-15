@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IBalanceManager } from './IBalanceManager';
 import { ExchangeBalanceRebalancer } from '../ExchangeBalanceRebalancer';
@@ -9,6 +9,7 @@ import { ArbitrageOpportunity } from '../FundingRateAggregator';
 import { Contract, JsonRpcProvider, Wallet, formatUnits } from 'ethers';
 import { Result } from '../../common/Result';
 import { DomainException, ExchangeException } from '../../exceptions/DomainException';
+import type { ProfitTracker } from '../../../infrastructure/services/ProfitTracker';
 
 /**
  * Balance manager for funding arbitrage strategy
@@ -17,6 +18,9 @@ import { DomainException, ExchangeException } from '../../exceptions/DomainExcep
 @Injectable()
 export class BalanceManager implements IBalanceManager {
   private readonly logger = new Logger(BalanceManager.name);
+  
+  // ProfitTracker for excluding accrued profits from deployable capital
+  private profitTracker?: ProfitTracker;
 
   constructor(
     private readonly configService: ConfigService,
@@ -24,6 +28,73 @@ export class BalanceManager implements IBalanceManager {
     private readonly balanceRebalancer?: ExchangeBalanceRebalancer,
     private readonly config: StrategyConfig = StrategyConfig.withDefaults(),
   ) {}
+
+  /**
+   * Set the ProfitTracker instance
+   * Called by the module after both services are instantiated (to avoid circular dependency)
+   */
+  setProfitTracker(profitTracker: ProfitTracker): void {
+    this.profitTracker = profitTracker;
+    this.logger.log('ProfitTracker set - profits will be excluded from deployable capital');
+  }
+
+  /**
+   * Get deployable capital for a specific exchange
+   * This excludes accrued profits to ensure we don't use profit funds for new positions
+   * 
+   * @param adapter The exchange adapter
+   * @param exchangeType The exchange type
+   * @returns Deployable capital (balance - accrued profits)
+   */
+  async getDeployableCapital(
+    adapter: IPerpExchangeAdapter,
+    exchangeType: ExchangeType,
+  ): Promise<number> {
+    const totalBalance = await adapter.getBalance();
+    
+    if (this.profitTracker) {
+      try {
+        const deployable = await this.profitTracker.getDeployableCapital(exchangeType);
+        // Use the minimum of actual balance and deployable capital
+        // This handles edge cases where balance might have changed
+        const result = Math.min(totalBalance, deployable);
+        this.logger.debug(
+          `Deployable capital for ${exchangeType}: $${result.toFixed(2)} ` +
+          `(total: $${totalBalance.toFixed(2)}, profit-adjusted: $${deployable.toFixed(2)})`,
+        );
+        return result;
+      } catch (error: any) {
+        this.logger.debug(
+          `Failed to get deployable capital from ProfitTracker: ${error.message}, using full balance`,
+        );
+      }
+    }
+    
+    // If ProfitTracker not available, use full balance
+    return totalBalance;
+  }
+
+  /**
+   * Get deployable balances for multiple exchanges
+   * Returns a map of exchange -> deployable capital
+   */
+  async getDeployableBalances(
+    adapters: Map<ExchangeType, IPerpExchangeAdapter>,
+  ): Promise<Map<ExchangeType, number>> {
+    const balances = new Map<ExchangeType, number>();
+    
+    for (const [exchangeType, adapter] of adapters) {
+      try {
+        const deployable = await this.getDeployableCapital(adapter, exchangeType);
+        balances.set(exchangeType, deployable);
+      } catch (error: any) {
+        this.logger.debug(`Failed to get deployable capital for ${exchangeType}: ${error.message}`);
+        balances.set(exchangeType, 0);
+      }
+    }
+    
+    return balances;
+  }
 
   async getWalletUsdcBalance(): Promise<Result<number, DomainException>> {
     try {

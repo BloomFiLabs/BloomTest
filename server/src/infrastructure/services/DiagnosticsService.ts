@@ -148,6 +148,13 @@ export interface DiagnosticsResponse {
     pairsFiltered: { last24h: number; reasons: Record<string, number> };
   };
   connectionStatus: Record<string, { status: string; reconnects24h: number; lastError?: string }>;
+  rewards: {
+    accruedProfits: number;
+    lastHarvestTime: Date | null;
+    lastHarvestAmount: number;
+    nextHarvestIn: string;
+    totalHarvested: number;
+  };
 }
 
 /**
@@ -188,6 +195,21 @@ export class DiagnosticsService {
     unrealizedPnl: number;
     byExchange: Record<string, number>;
   } = { count: 0, totalValue: 0, unrealizedPnl: 0, byExchange: {} };
+
+  // Rewards data (set externally by RewardHarvester)
+  private rewardsData: {
+    accruedProfits: number;
+    lastHarvestTime: Date | null;
+    lastHarvestAmount: number;
+    nextHarvestIn: string;
+    totalHarvested: number;
+  } = { 
+    accruedProfits: 0, 
+    lastHarvestTime: null, 
+    lastHarvestAmount: 0, 
+    nextHarvestIn: '24h 0m',
+    totalHarvested: 0,
+  };
 
   constructor() {
     this.logger.log('DiagnosticsService initialized');
@@ -344,6 +366,19 @@ export class DiagnosticsService {
     this.positionData = data;
   }
 
+  /**
+   * Update rewards data (called by RewardHarvester)
+   */
+  updateRewardsData(data: {
+    accruedProfits: number;
+    lastHarvestTime: Date | null;
+    lastHarvestAmount: number;
+    nextHarvestIn: string;
+    totalHarvested: number;
+  }): void {
+    this.rewardsData = data;
+  }
+
   // ==================== Query Methods ====================
 
   /**
@@ -414,6 +449,7 @@ export class DiagnosticsService {
         },
       },
       connectionStatus: this.getConnectionStatus(),
+      rewards: this.rewardsData,
     };
   }
 
