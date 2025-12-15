@@ -47,6 +47,7 @@ import {
   OrderExecutionFailedEvent,
   StrategyExecutionCompletedEvent,
 } from '../events/ArbitrageEvents';
+import { DiagnosticsService } from '../../infrastructure/services/DiagnosticsService';
 
 /**
  * Execution plan for an arbitrage opportunity
@@ -159,6 +160,7 @@ export class FundingArbitrageStrategy {
     private readonly idleFundsManager?: any, // IIdleFundsManager - using any to avoid circular dependency
     @Optional() @Inject('IOptimalLeverageService')
     private readonly optimalLeverageService?: IOptimalLeverageService,
+    @Optional() private readonly diagnosticsService?: DiagnosticsService,
   ) {
     // Use leverage from StrategyConfig
     // Leverage improves net returns: 2x leverage = 2x funding returns, but fees stay same %
@@ -1392,6 +1394,13 @@ export class FundingArbitrageStrategy {
 
       if (selectedOpportunities.length === 0) {
         this.logger.warn('⚠️ Insufficient capital to open any positions');
+        this.recordDiagnosticError(
+          'INSUFFICIENT_CAPITAL',
+          'No capital available to open any positions',
+          undefined,
+          undefined,
+          { availableOpportunities: opportunitiesWithMaxPortfolio.length },
+        );
         return result;
       }
 
@@ -1552,6 +1561,7 @@ export class FundingArbitrageStrategy {
             result,
           );
           if (singleLegCloseResult.stillOpen.length > 0) {
+            const errorMsg = `${singleLegCloseResult.stillOpen.length} single-leg position(s) failed to close - MANUAL INTERVENTION REQUIRED`;
             this.logger.error(
               `❌ CRITICAL: ${singleLegCloseResult.stillOpen.length} single-leg position(s) failed to close! ` +
                 `These positions have price exposure: ${singleLegCloseResult.stillOpen
@@ -1559,6 +1569,16 @@ export class FundingArbitrageStrategy {
                   .join(', ')}. ` +
                 `MANUAL INTERVENTION REQUIRED!`,
             );
+            // Record critical error for each single-leg position
+            for (const pos of singleLegCloseResult.stillOpen) {
+              this.recordDiagnosticError(
+                'SINGLE_LEG_CLOSE_FAILED',
+                errorMsg,
+                pos.exchangeType,
+                pos.symbol,
+                { side: pos.side, critical: true },
+              );
+            }
           }
         }
         
@@ -2416,6 +2436,13 @@ export class FundingArbitrageStrategy {
         `Failed to execute single position for ${bestOpportunity.opportunity.symbol}: ${executionResult.error.message}`,
       );
       result.errors.push(executionResult.error.message);
+      this.recordDiagnosticError(
+        'EXECUTION_FAILED',
+        executionResult.error.message,
+        undefined,
+        bestOpportunity.opportunity.symbol,
+        { type: 'single_position' },
+      );
     }
 
         return result;
@@ -3343,4 +3370,54 @@ export class FundingArbitrageStrategy {
     return { toClose, toKeep, reasons };
   }
   // ==================== End Position Stickiness Methods ====================
+
+  // ==================== Diagnostics Integration ====================
+  
+  /**
+   * Record an error to the diagnostics service for monitoring
+   */
+  private recordDiagnosticError(
+    type: string,
+    message: string,
+    exchange?: ExchangeType,
+    symbol?: string,
+    context?: Record<string, any>,
+  ): void {
+    if (this.diagnosticsService) {
+      this.diagnosticsService.recordError({
+        type,
+        message,
+        exchange,
+        symbol,
+        timestamp: new Date(),
+        context,
+      });
+    }
+  }
+
+  /**
+   * Record an order event to the diagnostics service
+   */
+  private recordDiagnosticOrder(
+    orderId: string,
+    symbol: string,
+    exchange: ExchangeType,
+    side: 'LONG' | 'SHORT',
+    status: 'PLACED' | 'FILLED' | 'FAILED' | 'CANCELLED',
+    fillTimeMs?: number,
+    failReason?: string,
+  ): void {
+    if (this.diagnosticsService) {
+      this.diagnosticsService.recordOrder({
+        orderId,
+        symbol,
+        exchange,
+        side,
+        placedAt: new Date(),
+        status,
+        fillTimeMs,
+        failReason,
+      });
+    }
+  }
 }
