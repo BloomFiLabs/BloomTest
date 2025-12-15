@@ -81,6 +81,17 @@ export class HyperLiquidWebSocketProvider implements OnModuleInit, OnModuleDestr
           }
         });
 
+        // Handle WebSocket ping frames - respond with pong to keep connection alive
+        this.ws.on('ping', (data: Buffer) => {
+          try {
+            if (this.ws && this.isConnected) {
+              this.ws.pong(data);
+            }
+          } catch (error: any) {
+            this.logger.debug(`Failed to send pong: ${error.message}`);
+          }
+        });
+
         this.ws.on('error', (error: Error) => {
           this.logger.error(`WebSocket error: ${error.message}`);
           this.isConnected = false;
@@ -91,10 +102,13 @@ export class HyperLiquidWebSocketProvider implements OnModuleInit, OnModuleDestr
           this.isConnected = false;
           // Removed WebSocket connection log - only execution logs shown
           
-          // Attempt to reconnect
+          // Attempt to reconnect (silently - only log on repeated failures)
           if (this.reconnectAttempts < this.MAX_RECONNECT_ATTEMPTS) {
             this.reconnectAttempts++;
-            this.logger.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS})...`);
+            // Only log on 3rd+ attempt to reduce noise
+            if (this.reconnectAttempts >= 3) {
+              this.logger.warn(`WebSocket reconnect attempt ${this.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS}...`);
+            }
             setTimeout(() => this.connect(), this.RECONNECT_DELAY);
           } else {
             this.logger.error('Max reconnection attempts reached. WebSocket will not reconnect.');
