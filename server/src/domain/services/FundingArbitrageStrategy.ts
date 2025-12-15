@@ -2476,8 +2476,17 @@ export class FundingArbitrageStrategy {
             // Match by symbol (handle different formats: YZY, YZY-USD, YZYUSD)
             const normalizedOrderSymbol = order.symbol?.toUpperCase()?.replace('-USD', '')?.replace('USD', '');
             const normalizedOpportunitySymbol = opportunity.symbol?.toUpperCase()?.replace('-USD', '')?.replace('USD', '');
-            return normalizedOrderSymbol === normalizedOpportunitySymbol && 
-                   order.side?.toUpperCase() === missingSide.toUpperCase();
+            
+            // Normalize side - different exchanges use different formats:
+            // Hyperliquid: 'buy'/'sell', Lighter: 'LONG'/'SHORT' or 'BUY'/'SELL'
+            const orderSide = order.side?.toUpperCase();
+            const isOrderLong = orderSide === 'LONG' || orderSide === 'BUY' || orderSide === 'B';
+            const isOrderShort = orderSide === 'SHORT' || orderSide === 'SELL' || orderSide === 'S';
+            const isMissingSideLong = missingSide === OrderSide.LONG;
+            
+            const sideMatches = (isMissingSideLong && isOrderLong) || (!isMissingSideLong && isOrderShort);
+            
+            return normalizedOrderSymbol === normalizedOpportunitySymbol && sideMatches;
           });
 
           if (pendingOrdersForSymbol.length > 0) {

@@ -1198,8 +1198,17 @@ export class PerpKeeperScheduler implements OnModuleInit {
             // Match by symbol (handle different formats: YZY, YZY-USD, YZYUSD)
             const normalizedOrderSymbol = order.symbol?.toUpperCase()?.replace('-USD', '')?.replace('USD', '');
             const normalizedPositionSymbol = position.symbol?.toUpperCase()?.replace('-USD', '')?.replace('USD', '');
-            return normalizedOrderSymbol === normalizedPositionSymbol && 
-                   order.side?.toUpperCase() === missingSide.toUpperCase();
+            
+            // Normalize side - different exchanges use different formats:
+            // Hyperliquid: 'buy'/'sell', Lighter: 'LONG'/'SHORT' or 'BUY'/'SELL'
+            const orderSide = order.side?.toUpperCase();
+            const isOrderLong = orderSide === 'LONG' || orderSide === 'BUY' || orderSide === 'B';
+            const isOrderShort = orderSide === 'SHORT' || orderSide === 'SELL' || orderSide === 'S';
+            const isMissingSideLong = missingSide === OrderSide.LONG;
+            
+            const sideMatches = (isMissingSideLong && isOrderLong) || (!isMissingSideLong && isOrderShort);
+            
+            return normalizedOrderSymbol === normalizedPositionSymbol && sideMatches;
           });
 
           if (pendingOrdersForSymbol.length > 0) {

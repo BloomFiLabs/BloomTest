@@ -1015,7 +1015,7 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
 
   /**
    * Get all open orders for this account
-   * Uses Lighter Explorer API: https://explorer.elliot.ai/api/accounts/{accountIndex}/open-orders
+   * Uses Lighter API: /api/v1/accountActiveOrders (requires auth token)
    * 
    * Returns orders with: orderId, symbol, side, price, size, timestamp
    * Used for deduplication checks to prevent placing multiple orders for single-leg hedging
@@ -1031,26 +1031,26 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
     try {
       await this.ensureInitialized();
       
-      const accountIndex = this.config.accountIndex!;
-      const explorerUrl = `https://explorer.elliot.ai/api/accounts/${accountIndex}/open-orders`;
+      // Create auth token for authenticated endpoint
+      const authToken = await this.signerClient!.createAuthTokenWithExpiry(600); // 10 minutes
       
-      this.logger.debug(`Fetching open orders from Lighter Explorer API for account ${accountIndex}...`);
-      
-      const response = await axios.get(explorerUrl, {
+      const response = await axios.get(`${this.config.baseUrl}/api/v1/accountActiveOrders`, {
+        params: {
+          auth: authToken,
+        },
         timeout: 10000,
         headers: { accept: 'application/json' },
       });
 
-      if (!response.data) {
-        this.logger.debug('Lighter Explorer API returned empty open orders data');
+      if (!response.data || response.data.code !== 200) {
+        this.logger.debug(`Lighter accountActiveOrders returned: ${JSON.stringify(response.data).substring(0, 200)}`);
         return [];
       }
 
-      // Lighter API returns open orders as an array
-      // Structure: { "open_orders": [...] } or just [...]
-      const ordersData = response.data.open_orders || response.data || [];
+      // Response structure: { code: 200, orders: [...] }
+      const ordersData = response.data.orders || [];
       if (!Array.isArray(ordersData)) {
-        this.logger.debug('Lighter Explorer API returned unexpected open orders format');
+        this.logger.debug('Lighter accountActiveOrders returned unexpected format');
         return [];
       }
 
@@ -1065,9 +1065,9 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
 
       for (const orderData of ordersData) {
         try {
-          // Parse order data - expected fields:
-          // { id, market_index, side, price, size, created_at }
-          const orderId = String(orderData.id || orderData.order_id || orderData.orderId || '');
+          // Parse order data - expected fields from Lighter:
+          // { order_id, market_index, is_ask (true=sell/short, false=buy/long), price, size, created_time }
+          const orderId = String(orderData.order_id || orderData.id || orderData.orderId || '');
           const marketIndex = orderData.market_index ?? orderData.marketIndex ?? null;
           
           if (!orderId || marketIndex === null) {
@@ -1080,26 +1080,27 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
             continue;
           }
 
-          // Parse side
+          // Parse side - Lighter uses is_ask: true=sell(SHORT), false=buy(LONG)
           let side = 'LONG';
-          if (orderData.side !== undefined) {
-            // side can be 'long', 'short', 'buy', 'sell', 0, 1, etc.
+          if (orderData.is_ask !== undefined) {
+            side = orderData.is_ask ? 'SHORT' : 'LONG';
+          } else if (orderData.side !== undefined) {
             const sideValue = String(orderData.side).toLowerCase();
-            if (sideValue === 'short' || sideValue === 'sell' || sideValue === '1') {
+            if (sideValue === 'short' || sideValue === 'sell' || sideValue === 'ask' || sideValue === '1') {
               side = 'SHORT';
             }
           }
 
           // Parse price and size
           const price = parseFloat(String(orderData.price || orderData.limit_price || '0'));
-          const size = Math.abs(parseFloat(String(orderData.size || orderData.amount || orderData.quantity || '0')));
+          const size = Math.abs(parseFloat(String(orderData.size || orderData.amount || orderData.remaining_size || '0')));
           
-          // Parse timestamp
+          // Parse timestamp - Lighter uses created_time (unix timestamp in seconds)
           let timestamp = new Date();
-          if (orderData.created_at || orderData.createdAt || orderData.timestamp) {
-            const tsValue = orderData.created_at || orderData.createdAt || orderData.timestamp;
-            // Could be Unix timestamp (seconds or ms) or ISO string
+          const tsValue = orderData.created_time || orderData.created_at || orderData.createdAt || orderData.timestamp;
+          if (tsValue !== undefined) {
             if (typeof tsValue === 'number') {
+              // Unix timestamp - check if seconds or milliseconds
               timestamp = new Date(tsValue > 1e12 ? tsValue : tsValue * 1000);
             } else {
               timestamp = new Date(tsValue);
@@ -1119,7 +1120,9 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
         }
       }
 
-      this.logger.debug(`Found ${orders.length} open order(s) on Lighter`);
+      if (orders.length > 0) {
+        this.logger.debug(`Found ${orders.length} open order(s) on Lighter: ${orders.map(o => `${o.symbol} ${o.side} ${o.size}@${o.price}`).join(', ')}`);
+      }
       return orders;
     } catch (error: any) {
       // Don't throw - return empty array so deduplication check can continue
