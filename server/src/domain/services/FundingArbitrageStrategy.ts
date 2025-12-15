@@ -941,7 +941,7 @@ export class FundingArbitrageStrategy {
       // Calculate optimal portfolio allocation across all opportunities
       // Include opportunities with valid execution plans OR good break-even times
       // (even if not instantly profitable, as long as they break even within threshold)
-      const maxBreakEvenHours = this.strategyConfig.maxWorstCaseBreakEvenDays * 24;
+      const maxBreakEvenHoursForPortfolio = this.strategyConfig.maxWorstCaseBreakEvenDays * 24;
       const portfolioOptimizationData = allEvaluatedOpportunities
         .filter(
           (item) => {
@@ -1162,9 +1162,9 @@ export class FundingArbitrageStrategy {
 
         // Try to create execution plans for opportunities with acceptable break-even times
         // Even if not instantly profitable, they can still be executed
-        const maxBreakEvenHours = this.strategyConfig.maxWorstCaseBreakEvenDays * 24;
+        const maxBreakEvenHoursForPlans = this.strategyConfig.maxWorstCaseBreakEvenDays * 24;
         this.logger.log(
-          `🔍 Checking opportunities with acceptable break-even times (≤${maxBreakEvenHours.toFixed(1)}h)...`,
+          `🔍 Checking opportunities with acceptable break-even times (≤${maxBreakEvenHoursForPlans.toFixed(1)}h)...`,
         );
 
         for (const item of allEvaluatedOpportunities) {
@@ -1174,7 +1174,7 @@ export class FundingArbitrageStrategy {
           const hasAcceptableBreakEven =
             item.breakEvenHours !== null &&
             isFinite(item.breakEvenHours) &&
-            item.breakEvenHours <= maxBreakEvenHours &&
+            item.breakEvenHours <= maxBreakEvenHoursForPlans &&
             item.netReturn > -Infinity &&
             item.opportunity.expectedReturn &&
             item.opportunity.expectedReturn.toAPY() > 0; // Must have positive expected return
@@ -1198,7 +1198,7 @@ export class FundingArbitrageStrategy {
                   undefined, // Use available capital, not portfolio allocation
                 );
 
-                if (planResult.isSuccess()) {
+                if (planResult.isSuccess) {
                   executionPlans.push({
                     plan: planResult.value,
                     opportunity: item.opportunity,
@@ -1285,12 +1285,12 @@ export class FundingArbitrageStrategy {
           // (even if not instantly profitable, as long as they break even within threshold)
           const maxBreakEvenHours = this.strategyConfig.maxWorstCaseBreakEvenDays * 24;
           const hasValidPlan = item.plan !== null;
-          const hasAcceptableBreakEven =
-            item.plan === null && // Only check break-even if no plan exists
-            item.breakEvenHours !== null &&
-            isFinite(item.breakEvenHours) &&
-            item.breakEvenHours <= maxBreakEvenHours &&
-            item.netReturn > -Infinity; // Must have calculated metrics
+            const hasAcceptableBreakEven =
+              item.plan === null && // Only check break-even if no plan exists
+              item.breakEvenHours !== null &&
+              isFinite(item.breakEvenHours) &&
+              item.breakEvenHours <= maxBreakEvenHoursForPortfolio &&
+              item.netReturn > -Infinity; // Must have calculated metrics
           
           if (!hasValidPlan && !hasAcceptableBreakEven) {
             return false;
@@ -1786,7 +1786,7 @@ export class FundingArbitrageStrategy {
       }
 
       // Create execution plans for opportunities that don't have one but have acceptable break-even times
-      const maxBreakEvenHours = this.strategyConfig.maxWorstCaseBreakEvenDays * 24;
+      const maxBreakEvenHoursForSelected = this.strategyConfig.maxWorstCaseBreakEvenDays * 24;
       for (const opp of selectedOpportunities) {
         if (!opp.plan && opp.opportunity && opp.maxPortfolioFor35APY) {
           // Check if this opportunity has acceptable break-even time
@@ -1801,7 +1801,7 @@ export class FundingArbitrageStrategy {
             oppData &&
             oppData.breakEvenHours !== null &&
             isFinite(oppData.breakEvenHours) &&
-            oppData.breakEvenHours <= maxBreakEvenHours
+            oppData.breakEvenHours <= maxBreakEvenHoursForSelected
           ) {
             // Create execution plan with the allocated position size
             const longBalance =
@@ -1819,7 +1819,7 @@ export class FundingArbitrageStrategy {
               opp.maxPortfolioFor35APY, // Use allocated position size
             );
             
-            if (planResult.isSuccess()) {
+            if (planResult.isSuccess) {
               opp.plan = planResult.value;
               this.logger.log(
                 `✅ Created execution plan for ${opp.opportunity.symbol} (break-even: ${oppData.breakEvenHours.toFixed(1)}h)`,
@@ -3052,7 +3052,7 @@ export class FundingArbitrageStrategy {
         worstCase.plan.shortOrder,
       );
 
-      if (longResponse.isSuccess() && shortResponse.isSuccess()) {
+      if (longResponse.isSuccess && shortResponse.isSuccess) {
         result.opportunitiesExecuted = 1;
         result.ordersPlaced = 2;
         // Worst-case opportunity executed successfully - no log needed for routine operation
