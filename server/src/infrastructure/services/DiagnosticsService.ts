@@ -1,5 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
 import { ExchangeType } from '../../domain/value-objects/ExchangeConfig';
+import type { CircuitBreakerService, CircuitState } from './CircuitBreakerService';
+import type { RateLimiterService } from './RateLimiterService';
+import type { PositionStateRepository } from '../repositories/PositionStateRepository';
 
 /**
  * Error event for tracking
@@ -155,6 +158,28 @@ export interface DiagnosticsResponse {
     nextHarvestIn: string;
     totalHarvested: number;
   };
+  // New fields for enhanced diagnostics
+  circuitBreaker?: {
+    state: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+    errorsThisHour: number;
+    threshold: number;
+    cooldownRemainingMs: number | null;
+  };
+  rateLimiter?: {
+    byExchange: Record<string, { 
+      currentPerSecond: number; 
+      maxPerSecond: number;
+      currentPerMinute: number;
+      maxPerMinute: number;
+      queued: number;
+    }>;
+  };
+  positionState?: {
+    persisted: number;
+    singleLeg: number;
+    pending: number;
+    complete: number;
+  };
 }
 
 /**
@@ -195,6 +220,11 @@ export class DiagnosticsService {
     unrealizedPnl: number;
     byExchange: Record<string, number>;
   } = { count: 0, totalValue: 0, unrealizedPnl: 0, byExchange: {} };
+
+  // Injected services for enhanced diagnostics
+  private circuitBreaker?: CircuitBreakerService;
+  private rateLimiter?: RateLimiterService;
+  private positionStateRepo?: PositionStateRepository;
 
   // Rewards data (set externally by RewardHarvester)
   private rewardsData: {
@@ -379,6 +409,27 @@ export class DiagnosticsService {
     this.rewardsData = data;
   }
 
+  /**
+   * Set circuit breaker service reference for diagnostics
+   */
+  setCircuitBreaker(circuitBreaker: CircuitBreakerService): void {
+    this.circuitBreaker = circuitBreaker;
+  }
+
+  /**
+   * Set rate limiter service reference for diagnostics
+   */
+  setRateLimiter(rateLimiter: RateLimiterService): void {
+    this.rateLimiter = rateLimiter;
+  }
+
+  /**
+   * Set position state repository reference for diagnostics
+   */
+  setPositionStateRepository(repo: PositionStateRepository): void {
+    this.positionStateRepo = repo;
+  }
+
   // ==================== Query Methods ====================
 
   /**
@@ -450,6 +501,74 @@ export class DiagnosticsService {
       },
       connectionStatus: this.getConnectionStatus(),
       rewards: this.rewardsData,
+      // Enhanced diagnostics from new services
+      circuitBreaker: this.getCircuitBreakerDiagnostics(),
+      rateLimiter: this.getRateLimiterDiagnostics(),
+      positionState: this.getPositionStateDiagnostics(),
+    };
+  }
+
+  /**
+   * Get circuit breaker diagnostics
+   */
+  private getCircuitBreakerDiagnostics(): DiagnosticsResponse['circuitBreaker'] {
+    if (!this.circuitBreaker) {
+      return undefined;
+    }
+
+    const diagnostics = this.circuitBreaker.getDiagnostics();
+    return {
+      state: diagnostics.state as 'CLOSED' | 'OPEN' | 'HALF_OPEN',
+      errorsThisHour: diagnostics.errorsThisHour,
+      threshold: diagnostics.threshold,
+      cooldownRemainingMs: diagnostics.cooldownRemainingMs,
+    };
+  }
+
+  /**
+   * Get rate limiter diagnostics
+   */
+  private getRateLimiterDiagnostics(): DiagnosticsResponse['rateLimiter'] {
+    if (!this.rateLimiter) {
+      return undefined;
+    }
+
+    const allUsage = this.rateLimiter.getAllUsage();
+    const byExchange: Record<string, {
+      currentPerSecond: number;
+      maxPerSecond: number;
+      currentPerMinute: number;
+      maxPerMinute: number;
+      queued: number;
+    }> = {};
+
+    for (const [exchange, usage] of allUsage) {
+      byExchange[exchange] = {
+        currentPerSecond: usage.currentRequestsPerSecond,
+        maxPerSecond: usage.maxRequestsPerSecond,
+        currentPerMinute: usage.currentRequestsPerMinute,
+        maxPerMinute: usage.maxRequestsPerMinute,
+        queued: usage.queuedRequests,
+      };
+    }
+
+    return { byExchange };
+  }
+
+  /**
+   * Get position state diagnostics
+   */
+  private getPositionStateDiagnostics(): DiagnosticsResponse['positionState'] {
+    if (!this.positionStateRepo) {
+      return undefined;
+    }
+
+    const counts = this.positionStateRepo.getStatusCounts();
+    return {
+      persisted: this.positionStateRepo.getAll().length,
+      singleLeg: counts.SINGLE_LEG,
+      pending: counts.PENDING,
+      complete: counts.COMPLETE,
     };
   }
 
