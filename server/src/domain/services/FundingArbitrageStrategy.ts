@@ -1110,19 +1110,45 @@ export class FundingArbitrageStrategy {
                 positionValueUsd = positionSizeUsd;
 
                 // Calculate costs and returns
-                const longFeeRate =
+                // IMPORTANT: Use TAKER fees for break-even calculation as a conservative estimate
+                // Even though we place LIMIT orders, they may cross the spread and execute as taker
+                // especially on illiquid markets or when the price moves against us.
+                // This gives a more realistic break-even time.
+                // 
+                // Fee comparison (per side):
+                // - Hyperliquid: Maker 0.015%, Taker 0.02% (33% higher)
+                // - Aster: Maker 0.005%, Taker 0.04% (8x higher!)
+                // - Lighter: 0% for both
+                const longMakerFeeRate =
                   this.strategyConfig.exchangeFeeRates.get(
                     opportunity.longExchange,
                   ) || 0.0005;
-                const shortFeeRate = opportunity.shortExchange
+                const longTakerFeeRate =
+                  this.strategyConfig.takerFeeRates.get(
+                    opportunity.longExchange,
+                  ) || 0.0005;
+                const shortMakerFeeRate = opportunity.shortExchange
                   ? this.strategyConfig.exchangeFeeRates.get(
                       opportunity.shortExchange,
                     ) || 0.0005
                   : 0.0005;
-                const longEntryFee = positionSizeUsd * longFeeRate;
-                const shortEntryFee = positionSizeUsd * shortFeeRate;
+                const shortTakerFeeRate = opportunity.shortExchange
+                  ? this.strategyConfig.takerFeeRates.get(
+                      opportunity.shortExchange,
+                    ) || 0.0005
+                  : 0.0005;
+                
+                // Use taker fees for conservative break-even estimate
+                // Entry: assume taker (crossing spread for immediate fill)
+                // Exit: assume taker (need to close quickly)
+                const longEntryFee = positionSizeUsd * longTakerFeeRate;
+                const shortEntryFee = positionSizeUsd * shortTakerFeeRate;
                 const totalEntryFees = longEntryFee + shortEntryFee;
-                const totalExitFees = totalEntryFees;
+                
+                // Exit fees - also use taker rates for conservative estimate
+                const longExitFee = positionSizeUsd * longTakerFeeRate;
+                const shortExitFee = positionSizeUsd * shortTakerFeeRate;
+                const totalExitFees = longExitFee + shortExitFee;
 
                 // Estimate slippage cost for the ACTUAL position size we'll trade
                 // Use actual slippage calculation method, but with conservative parameters

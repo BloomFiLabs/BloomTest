@@ -810,6 +810,19 @@ export class OrderExecutor implements IOrderExecutor {
         `(~${Math.round(totalTime / 1000)}s). Order may still be resting on the order book.`,
     );
     
+    // CRITICAL: Cancel the unfilled order to prevent orphaned orders on the order book
+    // This is especially important for GTC (Good Till Cancel) orders on Lighter
+    try {
+      this.logger.log(`🗑️ Cancelling unfilled ${operationType} order ${orderId} on ${exchangeType}...`);
+      await adapter.cancelOrder(orderId, symbol);
+      this.logger.log(`✅ Successfully cancelled unfilled order ${orderId}`);
+    } catch (cancelError: any) {
+      this.logger.warn(
+        `⚠️ Failed to cancel unfilled order ${orderId}: ${cancelError.message}. ` +
+        `Order may still be resting on order book - manual cleanup may be required.`
+      );
+    }
+    
     this.recordError(
       'ORDER_FILL_TIMEOUT',
       `${operationType} order did not fill after ${maxRetries} attempts (~${Math.round(totalTime / 1000)}s)`,
@@ -818,16 +831,16 @@ export class OrderExecutor implements IOrderExecutor {
       { orderId, maxRetries, totalTimeMs: totalTime },
     );
 
-    // Return a response indicating the order is still pending
+    // Return a response indicating the order was cancelled due to timeout
     return new PerpOrderResponse(
       orderId,
-      OrderStatus.SUBMITTED,
+      OrderStatus.CANCELLED,
       symbol,
       OrderSide.LONG,
       undefined,
       undefined,
       undefined,
-      `Order did not fill within ${Math.round(totalTime / 1000)} seconds`,
+      `Order cancelled after not filling within ${Math.round(totalTime / 1000)} seconds`,
     );
   }
 
