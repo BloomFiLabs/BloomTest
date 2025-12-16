@@ -480,11 +480,16 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
       );
     } catch (error: any) {
       // Enhanced error logging for debugging
+      let errorDetail = error.message;
       if (error.response) {
+        // Extract the actual error message from the API response
+        const responseData = error.response.data;
+        const apiErrorMsg = responseData?.msg || responseData?.message || responseData?.error || JSON.stringify(responseData);
+        errorDetail = `${error.response.status}: ${apiErrorMsg}`;
+        
         this.logger.error(
-          `Failed to place order: ${error.message}. ` +
-          `Status: ${error.response.status}, ` +
-          `Response: ${JSON.stringify(error.response.data)}`
+          `Failed to place order: ${errorDetail}. ` +
+          `Full response: ${JSON.stringify(responseData)}`
         );
         // Log request parameters for debugging (without sensitive data)
         // Note: Log formatted quantity, not raw size, to match what was actually sent
@@ -495,9 +500,9 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
       } else {
         this.logger.error(`Failed to place order: ${error.message}`);
       }
-      this.recordError('ASTER_ORDER_FAILED', error.message, request.symbol);
+      this.recordError('ASTER_ORDER_FAILED', errorDetail, request.symbol);
       throw new ExchangeError(
-        `Failed to place order: ${error.message}`,
+        `Failed to place order: ${errorDetail}`,
         ExchangeType.ASTER,
         error.response?.data?.code,
         error,
