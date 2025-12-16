@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SignerClient, OrderType as LighterOrderType, ApiClient, OrderApi, MarketHelper } from '@reservoir0x/lighter-ts-sdk';
 import axios from 'axios';
@@ -22,7 +22,7 @@ import { DiagnosticsService } from '../../services/DiagnosticsService';
  * Based on the existing lighter-order-simple.ts script logic
  */
 @Injectable()
-export class LighterExchangeAdapter implements IPerpExchangeAdapter {
+export class LighterExchangeAdapter implements IPerpExchangeAdapter, OnModuleDestroy {
   private readonly logger = new Logger(LighterExchangeAdapter.name);
   private readonly config: ExchangeConfig;
   private signerClient: SignerClient | null = null;
@@ -96,6 +96,41 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
         context,
       });
     }
+  }
+
+  /**
+   * NestJS lifecycle hook - called when module is destroyed (app shutdown)
+   */
+  async onModuleDestroy(): Promise<void> {
+    await this.dispose();
+  }
+
+  /**
+   * Clean up resources when the adapter is destroyed
+   * Called on application shutdown or when adapter is no longer needed
+   */
+  async dispose(): Promise<void> {
+    this.logger.log('Disposing Lighter adapter...');
+    
+    if (this.signerClient) {
+      try {
+        if (typeof (this.signerClient as any).close === 'function') {
+          await (this.signerClient as any).close();
+        }
+        if (typeof (this.signerClient as any).destroy === 'function') {
+          await (this.signerClient as any).destroy();
+        }
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+      this.signerClient = null;
+    }
+    
+    this.orderApi = null;
+    this.marketHelpers.clear();
+    this.marketIndexCache.clear();
+    
+    this.logger.log('Lighter adapter disposed');
   }
 
   private async ensureInitialized(): Promise<void> {
