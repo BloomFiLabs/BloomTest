@@ -14,6 +14,7 @@ import { DiagnosticsService } from '../../infrastructure/services/DiagnosticsSer
 import { WithdrawalFulfiller } from '../../infrastructure/adapters/blockchain/WithdrawalFulfiller';
 import { NAVReporter } from '../../infrastructure/adapters/blockchain/NAVReporter';
 import { RealFundingPaymentsService } from '../../infrastructure/services/RealFundingPaymentsService';
+import { PositionStateRepository, PersistedPositionState } from '../../infrastructure/repositories/PositionStateRepository';
 
 /**
  * PerpKeeperScheduler - Scheduled execution for funding rate arbitrage
@@ -57,6 +58,7 @@ export class PerpKeeperScheduler implements OnModuleInit {
     @Optional() private readonly withdrawalFulfiller?: WithdrawalFulfiller,
     @Optional() private readonly navReporter?: NAVReporter,
     @Optional() private readonly fundingPaymentsService?: RealFundingPaymentsService,
+    @Optional() private readonly positionStateRepository?: PositionStateRepository,
   ) {
     // Initialize orchestrator with exchange adapters
     const adapters = this.keeperService.getExchangeAdapters();
@@ -234,9 +236,170 @@ export class PerpKeeperScheduler implements OnModuleInit {
   async onModuleInit() {
     // Wait a bit for other services to initialize
     setTimeout(async () => {
+      // Reconcile persisted position state with actual exchange positions
+      await this.reconcilePositions();
+      
       // Removed startup log - execution logs will show when it runs
       await this.executeHourly();
     }, 2000); // 2 second delay to ensure all services are ready
+  }
+
+  /**
+   * Reconcile persisted position states with actual exchange positions
+   * This runs on startup to detect:
+   * - Orphaned single-leg positions that need attention
+   * - Positions that were completed while service was down
+   * - Stale position states that should be cleaned up
+   */
+  private async reconcilePositions(): Promise<void> {
+    if (!this.positionStateRepository) {
+      this.logger.debug('Position state repository not available, skipping reconciliation');
+      return;
+    }
+
+    this.logger.log('🔄 Starting position state reconciliation...');
+
+    try {
+      // Get all persisted active positions
+      const persistedPositions = this.positionStateRepository.getActive();
+      if (persistedPositions.length === 0) {
+        this.logger.log('No active persisted positions to reconcile');
+        return;
+      }
+
+      this.logger.log(`Found ${persistedPositions.length} active persisted positions to reconcile`);
+
+      // Get actual positions from all exchanges
+      const actualPositions = await this.getAllExchangePositions();
+      this.logger.log(`Found ${actualPositions.length} actual positions across exchanges`);
+
+      // Build a map of actual positions by symbol and exchange
+      const actualPositionMap = new Map<string, PerpPosition[]>();
+      for (const position of actualPositions) {
+        const key = position.symbol;
+        if (!actualPositionMap.has(key)) {
+          actualPositionMap.set(key, []);
+        }
+        actualPositionMap.get(key)!.push(position);
+      }
+
+      // Reconcile each persisted position
+      let reconciled = 0;
+      let singleLegFound = 0;
+      let closed = 0;
+
+      for (const persisted of persistedPositions) {
+        const symbolPositions = actualPositionMap.get(persisted.symbol) || [];
+        
+        // Find matching positions on long and short exchanges
+        const longPosition = symbolPositions.find(
+          p => p.exchangeType === persisted.longExchange && p.side === OrderSide.LONG
+        );
+        const shortPosition = symbolPositions.find(
+          p => p.exchangeType === persisted.shortExchange && p.side === OrderSide.SHORT
+        );
+
+        const hasLong = !!longPosition && Math.abs(longPosition.size) > 0.0001;
+        const hasShort = !!shortPosition && Math.abs(shortPosition.size) > 0.0001;
+
+        if (hasLong && hasShort) {
+          // Both legs exist - position is complete
+          if (persisted.status !== 'COMPLETE') {
+            await this.positionStateRepository.markComplete(persisted.id);
+            this.logger.log(`✅ Reconciled ${persisted.symbol}: marked as COMPLETE (both legs found)`);
+            reconciled++;
+          }
+        } else if (hasLong || hasShort) {
+          // Only one leg exists - single-leg position
+          if (persisted.status !== 'SINGLE_LEG') {
+            await this.positionStateRepository.markSingleLeg(persisted.id, hasLong, hasShort);
+            this.logger.warn(
+              `⚠️ Reconciled ${persisted.symbol}: marked as SINGLE_LEG ` +
+              `(long: ${hasLong ? 'YES' : 'NO'}, short: ${hasShort ? 'YES' : 'NO'})`
+            );
+            singleLegFound++;
+          }
+        } else {
+          // Neither leg exists - position was closed
+          if (persisted.status !== 'CLOSED') {
+            await this.positionStateRepository.markClosed(persisted.id);
+            this.logger.log(`🔒 Reconciled ${persisted.symbol}: marked as CLOSED (no positions found)`);
+            closed++;
+          }
+        }
+      }
+
+      // Clean up old closed positions
+      const cleanedUp = await this.positionStateRepository.cleanupOldPositions(7);
+
+      this.logger.log(
+        `✅ Position reconciliation complete: ` +
+        `${reconciled} reconciled, ${singleLegFound} single-leg found, ` +
+        `${closed} marked closed, ${cleanedUp} cleaned up`
+      );
+
+      // Report single-leg positions to diagnostics
+      if (singleLegFound > 0 && this.diagnosticsService) {
+        const singleLegPositions = this.positionStateRepository.getSingleLegPositions();
+        for (const pos of singleLegPositions) {
+          this.diagnosticsService.recordSingleLegStart({
+            id: pos.id,
+            symbol: pos.symbol,
+            exchange: pos.longFilled ? pos.longExchange : pos.shortExchange,
+            side: pos.longFilled ? 'LONG' : 'SHORT',
+            startedAt: pos.createdAt,
+            retryCount: pos.retryCount || 0,
+          });
+        }
+      }
+    } catch (error: any) {
+      this.logger.error(`Position reconciliation failed: ${error.message}`);
+      if (error.stack) {
+        this.logger.debug(`Reconciliation error stack: ${error.stack}`);
+      }
+    }
+  }
+
+  /**
+   * Get all positions from all configured exchanges
+   */
+  private async getAllExchangePositions(): Promise<PerpPosition[]> {
+    const adapters = this.keeperService.getExchangeAdapters();
+    const allPositions: PerpPosition[] = [];
+
+    for (const [exchangeType, adapter] of adapters) {
+      try {
+        const positions = await adapter.getPositions();
+        // Positions should already have exchangeType set by the adapter
+        // If not, we need to create new positions with the correct exchange type
+        for (const pos of positions) {
+          if (pos.exchangeType !== exchangeType) {
+            // Create a new position with the correct exchange type
+            const taggedPosition = new PerpPosition(
+              exchangeType,
+              pos.symbol,
+              pos.side,
+              pos.size,
+              pos.entryPrice,
+              pos.markPrice,
+              pos.unrealizedPnl,
+              pos.leverage,
+              pos.liquidationPrice,
+              pos.marginUsed,
+              pos.timestamp,
+              pos.lastUpdated,
+            );
+            allPositions.push(taggedPosition);
+          } else {
+            allPositions.push(pos);
+          }
+        }
+      } catch (error: any) {
+        this.logger.warn(`Failed to get positions from ${exchangeType}: ${error.message}`);
+      }
+    }
+
+    return allPositions;
   }
 
   /**

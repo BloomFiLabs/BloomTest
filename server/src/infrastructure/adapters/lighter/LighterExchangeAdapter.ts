@@ -38,6 +38,11 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
   // Lighter uses sequential nonces - concurrent orders cause "invalid nonce" errors
   private orderMutex: Promise<void> = Promise.resolve();
   private orderMutexRelease: (() => void) | null = null;
+  
+  // Nonce reset lock - blocks new orders during nonce resync
+  private nonceResetInProgress = false;
+  private nonceResetQueue: Array<() => void> = [];
+  private readonly NONCE_RESET_TIMEOUT_MS = 5000; // 5 second timeout for waiting on current order
 
   constructor(
     private readonly configService: ConfigService,
@@ -112,10 +117,25 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
    * Acquire the order mutex to prevent concurrent order placements
    * Lighter uses sequential nonces - concurrent orders cause "invalid nonce" errors
    * Returns a release function that MUST be called when done
+   * 
+   * IMPORTANT: This also waits for any ongoing nonce reset to complete first
    */
   private async acquireOrderMutex(): Promise<() => void> {
+    // First, wait for any nonce reset to complete
+    if (this.nonceResetInProgress) {
+      this.logger.debug('Waiting for nonce reset to complete before acquiring mutex...');
+      await new Promise<void>(resolve => this.nonceResetQueue.push(resolve));
+      this.logger.debug('Nonce reset complete, proceeding with mutex acquisition');
+    }
+    
     // Wait for any pending order to complete
     await this.orderMutex;
+    
+    // Double-check nonce reset didn't start while we were waiting
+    if (this.nonceResetInProgress) {
+      this.logger.debug('Nonce reset started while waiting, re-waiting...');
+      await new Promise<void>(resolve => this.nonceResetQueue.push(resolve));
+    }
     
     // Create a new promise that will be resolved when we release
     let release: () => void;
@@ -129,26 +149,60 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
   /**
    * Reset the SignerClient to force re-initialization
    * This is useful when nonce gets out of sync with the server
+   * 
+   * IMPORTANT: This blocks all new orders until reset is complete
    */
   private async resetSignerClient(): Promise<void> {
-    this.logger.warn('🔄 Resetting Lighter SignerClient to re-sync nonce...');
-    
-    // Close existing client if it has a close method
-    if (this.signerClient && typeof (this.signerClient as any).close === 'function') {
-      try {
-        await (this.signerClient as any).close();
-      } catch (e) {
-        // Ignore close errors
-      }
+    // Prevent multiple concurrent resets
+    if (this.nonceResetInProgress) {
+      this.logger.debug('Nonce reset already in progress, waiting...');
+      await new Promise<void>(resolve => this.nonceResetQueue.push(resolve));
+      return;
     }
     
-    // Clear the client to force re-initialization
-    this.signerClient = null;
+    this.nonceResetInProgress = true;
+    this.logger.warn('🔄 Resetting Lighter SignerClient to re-sync nonce...');
     
-    // Re-initialize
-    await this.ensureInitialized();
-    
-    this.logger.log('✅ Lighter SignerClient reset complete');
+    try {
+      // Wait for current order to complete (with timeout)
+      // This prevents resetting while an order is in-flight
+      const currentOrderPromise = this.orderMutex;
+      const timeoutPromise = new Promise<void>(resolve => 
+        setTimeout(resolve, this.NONCE_RESET_TIMEOUT_MS)
+      );
+      
+      await Promise.race([currentOrderPromise, timeoutPromise]);
+      
+      // Close existing client if it has a close method
+      if (this.signerClient && typeof (this.signerClient as any).close === 'function') {
+        try {
+          await (this.signerClient as any).close();
+        } catch (e) {
+          // Ignore close errors
+        }
+      }
+      
+      // Clear the client to force re-initialization
+      this.signerClient = null;
+      
+      // Re-initialize
+      await this.ensureInitialized();
+      
+      this.logger.log('✅ Lighter SignerClient reset complete');
+    } finally {
+      // Release all waiting operations
+      this.nonceResetInProgress = false;
+      const waitingOperations = this.nonceResetQueue.splice(0);
+      this.logger.debug(`Releasing ${waitingOperations.length} operations waiting on nonce reset`);
+      waitingOperations.forEach(resolve => resolve());
+    }
+  }
+  
+  /**
+   * Check if a nonce reset is currently in progress
+   */
+  isNonceResetInProgress(): boolean {
+    return this.nonceResetInProgress;
   }
 
   private async getMarketHelper(marketIndex: number): Promise<MarketHelper> {

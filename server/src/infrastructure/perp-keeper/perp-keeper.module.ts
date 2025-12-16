@@ -32,6 +32,9 @@ import { PortfolioRiskAnalyzer } from '../services/PortfolioRiskAnalyzer';
 import { RealFundingPaymentsService } from '../services/RealFundingPaymentsService';
 import { OptimalLeverageService } from '../services/OptimalLeverageService';
 import { DiagnosticsService } from '../services/DiagnosticsService';
+import { CircuitBreakerService } from '../services/CircuitBreakerService';
+import { PositionStateRepository } from '../repositories/PositionStateRepository';
+import { RateLimiterService } from '../services/RateLimiterService';
 import { ProfitTracker } from '../services/ProfitTracker';
 import { RewardHarvester } from '../services/RewardHarvester';
 import { PerpKeeperController } from '../controllers/PerpKeeperController';
@@ -362,6 +365,15 @@ import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTrack
     // Diagnostics service (must be before PerformanceLogger due to dependency)
     DiagnosticsService,
     
+    // Circuit breaker for error rate protection
+    CircuitBreakerService,
+    
+    // Position state persistence for recovery
+    PositionStateRepository,
+    
+    // Global rate limiter for exchange API calls
+    RateLimiterService,
+    
     // Profit tracking and reward harvesting
     {
       provide: ProfitTracker,
@@ -433,6 +445,9 @@ import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTrack
     RealFundingPaymentsService,
     OptimalLeverageService,
     DiagnosticsService,
+    CircuitBreakerService,
+    PositionStateRepository,
+    RateLimiterService,
     ProfitTracker,
     RewardHarvester,
     KeeperStrategyEventListener,
@@ -446,6 +461,10 @@ export class PerpKeeperModule implements OnModuleInit {
   constructor(
     @Optional() private readonly balanceManager?: BalanceManager,
     @Optional() private readonly profitTracker?: ProfitTracker,
+    @Optional() private readonly diagnosticsService?: DiagnosticsService,
+    @Optional() private readonly circuitBreaker?: CircuitBreakerService,
+    @Optional() private readonly rateLimiter?: RateLimiterService,
+    @Optional() private readonly positionStateRepo?: PositionStateRepository,
   ) {}
 
   /**
@@ -456,6 +475,22 @@ export class PerpKeeperModule implements OnModuleInit {
     if (this.balanceManager && this.profitTracker) {
       this.balanceManager.setProfitTracker(this.profitTracker);
       this.logger.log('Wired ProfitTracker into BalanceManager for profit-excluded position sizing');
+    }
+
+    // Wire new services into DiagnosticsService for enhanced diagnostics
+    if (this.diagnosticsService) {
+      if (this.circuitBreaker) {
+        this.diagnosticsService.setCircuitBreaker(this.circuitBreaker);
+        this.logger.log('Wired CircuitBreaker into DiagnosticsService');
+      }
+      if (this.rateLimiter) {
+        this.diagnosticsService.setRateLimiter(this.rateLimiter);
+        this.logger.log('Wired RateLimiter into DiagnosticsService');
+      }
+      if (this.positionStateRepo) {
+        this.diagnosticsService.setPositionStateRepository(this.positionStateRepo);
+        this.logger.log('Wired PositionStateRepository into DiagnosticsService');
+      }
     }
   }
 }

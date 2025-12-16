@@ -583,4 +583,241 @@ describe('OrderExecutor', () => {
       expect(executionResult.isSuccess).toBe(true);
     }, 15000);
   });
+
+  describe('placeOrderPair sequential execution', () => {
+    it('should execute sequentially when long exchange is Lighter', async () => {
+      const lighterAdapter = mockAdapters.get(ExchangeType.LIGHTER)!;
+      const asterAdapter = mockAdapters.get(ExchangeType.ASTER)!;
+      
+      const callOrder: string[] = [];
+      
+      lighterAdapter.placeOrder.mockImplementation(async () => {
+        callOrder.push('lighter-start');
+        await new Promise(resolve => setTimeout(resolve, 10));
+        callOrder.push('lighter-end');
+        return new PerpOrderResponse('order-1', OrderStatus.FILLED, 'ETHUSDT', OrderSide.LONG, 1.0, 1.0, 3000);
+      });
+      
+      asterAdapter.placeOrder.mockImplementation(async () => {
+        callOrder.push('aster-start');
+        await new Promise(resolve => setTimeout(resolve, 10));
+        callOrder.push('aster-end');
+        return new PerpOrderResponse('order-2', OrderStatus.FILLED, 'ETHUSDT', OrderSide.SHORT, 1.0, 1.0, 3001);
+      });
+
+      const opportunity = {
+        plan: {
+          longOrder: {
+            symbol: 'ETHUSDT',
+            side: OrderSide.LONG,
+            size: 1.0,
+            type: OrderType.LIMIT,
+            price: 3000,
+            timeInForce: TimeInForce.GTC,
+            reduceOnly: false,
+          } as PerpOrderRequest,
+          shortOrder: {
+            symbol: 'ETHUSDT',
+            side: OrderSide.SHORT,
+            size: 1.0,
+            type: OrderType.LIMIT,
+            price: 3001,
+            timeInForce: TimeInForce.GTC,
+            reduceOnly: false,
+          } as PerpOrderRequest,
+          positionSize: new PositionSize(1.0, 3000.5),
+          expectedNetReturn: 10,
+          estimatedCosts: { total: 1 },
+          longMarkPrice: 3000,
+          shortMarkPrice: 3001,
+          breakEvenDays: 1,
+        } as ArbitrageExecutionPlan,
+        opportunity: {
+          symbol: 'ETHUSDT',
+          longExchange: ExchangeType.LIGHTER, // Lighter on long side
+          shortExchange: ExchangeType.ASTER,
+          spread: { toDecimal: () => 0.01 },
+          longRate: { toDecimal: () => 0.001 },
+          shortRate: { toDecimal: () => -0.001 },
+          strategyType: 'perp-perp',
+        } as any,
+      };
+
+      const result: ArbitrageExecutionResult = {
+        success: true,
+        opportunitiesEvaluated: 0,
+        opportunitiesExecuted: 0,
+        totalExpectedReturn: 0,
+        ordersPlaced: 0,
+        errors: [],
+        timestamp: new Date(),
+      };
+
+      await executor.executeSinglePosition(opportunity, mockAdapters, result);
+
+      // Sequential execution: lighter should complete before aster starts
+      expect(callOrder).toEqual(['lighter-start', 'lighter-end', 'aster-start', 'aster-end']);
+    });
+
+    it('should execute sequentially when short exchange is Lighter', async () => {
+      const lighterAdapter = mockAdapters.get(ExchangeType.LIGHTER)!;
+      const asterAdapter = mockAdapters.get(ExchangeType.ASTER)!;
+      
+      const callOrder: string[] = [];
+      
+      asterAdapter.placeOrder.mockImplementation(async () => {
+        callOrder.push('aster-start');
+        await new Promise(resolve => setTimeout(resolve, 10));
+        callOrder.push('aster-end');
+        return new PerpOrderResponse('order-1', OrderStatus.FILLED, 'ETHUSDT', OrderSide.LONG, 1.0, 1.0, 3000);
+      });
+      
+      lighterAdapter.placeOrder.mockImplementation(async () => {
+        callOrder.push('lighter-start');
+        await new Promise(resolve => setTimeout(resolve, 10));
+        callOrder.push('lighter-end');
+        return new PerpOrderResponse('order-2', OrderStatus.FILLED, 'ETHUSDT', OrderSide.SHORT, 1.0, 1.0, 3001);
+      });
+
+      const opportunity = {
+        plan: {
+          longOrder: {
+            symbol: 'ETHUSDT',
+            side: OrderSide.LONG,
+            size: 1.0,
+            type: OrderType.LIMIT,
+            price: 3000,
+            timeInForce: TimeInForce.GTC,
+            reduceOnly: false,
+          } as PerpOrderRequest,
+          shortOrder: {
+            symbol: 'ETHUSDT',
+            side: OrderSide.SHORT,
+            size: 1.0,
+            type: OrderType.LIMIT,
+            price: 3001,
+            timeInForce: TimeInForce.GTC,
+            reduceOnly: false,
+          } as PerpOrderRequest,
+          positionSize: new PositionSize(1.0, 3000.5),
+          expectedNetReturn: 10,
+          estimatedCosts: { total: 1 },
+          longMarkPrice: 3000,
+          shortMarkPrice: 3001,
+          breakEvenDays: 1,
+        } as ArbitrageExecutionPlan,
+        opportunity: {
+          symbol: 'ETHUSDT',
+          longExchange: ExchangeType.ASTER,
+          shortExchange: ExchangeType.LIGHTER, // Lighter on short side
+          spread: { toDecimal: () => 0.01 },
+          longRate: { toDecimal: () => 0.001 },
+          shortRate: { toDecimal: () => -0.001 },
+          strategyType: 'perp-perp',
+        } as any,
+      };
+
+      const result: ArbitrageExecutionResult = {
+        success: true,
+        opportunitiesEvaluated: 0,
+        opportunitiesExecuted: 0,
+        totalExpectedReturn: 0,
+        ordersPlaced: 0,
+        errors: [],
+        timestamp: new Date(),
+      };
+
+      await executor.executeSinglePosition(opportunity, mockAdapters, result);
+
+      // Sequential execution: aster (long) should complete before lighter (short) starts
+      expect(callOrder).toEqual(['aster-start', 'aster-end', 'lighter-start', 'lighter-end']);
+    });
+
+    it('should execute in parallel when neither exchange is Lighter', async () => {
+      // Add HYPERLIQUID adapter for this test
+      const hyperliquidAdapter = {
+        placeOrder: jest.fn(),
+        getOrderStatus: jest.fn(),
+        getBalance: jest.fn().mockResolvedValue(10000),
+        getPositions: jest.fn().mockResolvedValue([]),
+        cancelAllOrders: jest.fn().mockResolvedValue(0),
+      } as any;
+      mockAdapters.set(ExchangeType.HYPERLIQUID, hyperliquidAdapter);
+
+      const asterAdapter = mockAdapters.get(ExchangeType.ASTER)!;
+      
+      const callOrder: string[] = [];
+      
+      asterAdapter.placeOrder.mockImplementation(async () => {
+        callOrder.push('aster-start');
+        await new Promise(resolve => setTimeout(resolve, 50));
+        callOrder.push('aster-end');
+        return new PerpOrderResponse('order-1', OrderStatus.FILLED, 'ETHUSDT', OrderSide.LONG, 1.0, 1.0, 3000);
+      });
+      
+      hyperliquidAdapter.placeOrder.mockImplementation(async () => {
+        callOrder.push('hyperliquid-start');
+        await new Promise(resolve => setTimeout(resolve, 50));
+        callOrder.push('hyperliquid-end');
+        return new PerpOrderResponse('order-2', OrderStatus.FILLED, 'ETHUSDT', OrderSide.SHORT, 1.0, 1.0, 3001);
+      });
+
+      const opportunity = {
+        plan: {
+          longOrder: {
+            symbol: 'ETHUSDT',
+            side: OrderSide.LONG,
+            size: 1.0,
+            type: OrderType.LIMIT,
+            price: 3000,
+            timeInForce: TimeInForce.GTC,
+            reduceOnly: false,
+          } as PerpOrderRequest,
+          shortOrder: {
+            symbol: 'ETHUSDT',
+            side: OrderSide.SHORT,
+            size: 1.0,
+            type: OrderType.LIMIT,
+            price: 3001,
+            timeInForce: TimeInForce.GTC,
+            reduceOnly: false,
+          } as PerpOrderRequest,
+          positionSize: new PositionSize(1.0, 3000.5),
+          expectedNetReturn: 10,
+          estimatedCosts: { total: 1 },
+          longMarkPrice: 3000,
+          shortMarkPrice: 3001,
+          breakEvenDays: 1,
+        } as ArbitrageExecutionPlan,
+        opportunity: {
+          symbol: 'ETHUSDT',
+          longExchange: ExchangeType.ASTER,
+          shortExchange: ExchangeType.HYPERLIQUID, // Neither is Lighter
+          spread: { toDecimal: () => 0.01 },
+          longRate: { toDecimal: () => 0.001 },
+          shortRate: { toDecimal: () => -0.001 },
+          strategyType: 'perp-perp',
+        } as any,
+      };
+
+      const result: ArbitrageExecutionResult = {
+        success: true,
+        opportunitiesEvaluated: 0,
+        opportunitiesExecuted: 0,
+        totalExpectedReturn: 0,
+        ordersPlaced: 0,
+        errors: [],
+        timestamp: new Date(),
+      };
+
+      await executor.executeSinglePosition(opportunity, mockAdapters, result);
+
+      // Parallel execution: both should start before either ends
+      // The order should be: both start, then both end (interleaved)
+      expect(callOrder[0]).toMatch(/start/);
+      expect(callOrder[1]).toMatch(/start/);
+      expect(callOrder[2]).toMatch(/end/);
+      expect(callOrder[3]).toMatch(/end/);
+    });
+  });
 });

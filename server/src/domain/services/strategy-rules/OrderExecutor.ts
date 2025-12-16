@@ -35,6 +35,7 @@ import {
   InsufficientBalanceException,
 } from '../../exceptions/DomainException';
 import { DiagnosticsService } from '../../../infrastructure/services/DiagnosticsService';
+import { CircuitBreakerService, CircuitState } from '../../../infrastructure/services/CircuitBreakerService';
 
 /**
  * Order executor for funding arbitrage strategy
@@ -55,10 +56,12 @@ export class OrderExecutor implements IOrderExecutor {
     private readonly performanceLogger?: IPerpKeeperPerformanceLogger,
     @Optional()
     private readonly diagnosticsService?: DiagnosticsService,
+    @Optional()
+    private readonly circuitBreaker?: CircuitBreakerService,
   ) {}
 
   /**
-   * Record an error to diagnostics service
+   * Record an error to diagnostics service and circuit breaker
    */
   private recordError(type: string, message: string, exchange?: ExchangeType, symbol?: string, context?: Record<string, any>): void {
     if (this.diagnosticsService) {
@@ -71,6 +74,67 @@ export class OrderExecutor implements IOrderExecutor {
         context,
       });
     }
+    
+    // Notify circuit breaker of the error
+    if (this.circuitBreaker) {
+      this.circuitBreaker.recordError(type);
+    }
+  }
+  
+  /**
+   * Record a successful order execution to circuit breaker
+   */
+  private recordSuccess(): void {
+    if (this.circuitBreaker) {
+      this.circuitBreaker.recordSuccess();
+    }
+  }
+
+  /**
+   * Place a pair of orders (long and short) with intelligent execution strategy
+   * 
+   * - If either exchange is Lighter, execute SEQUENTIALLY to avoid nonce conflicts
+   * - If both exchanges are the same, execute SEQUENTIALLY
+   * - Otherwise, execute in PARALLEL for speed
+   * 
+   * @returns Tuple of [longResponse, shortResponse]
+   */
+  private async placeOrderPair(
+    longAdapter: IPerpExchangeAdapter,
+    shortAdapter: IPerpExchangeAdapter,
+    longOrder: PerpOrderRequest,
+    shortOrder: PerpOrderRequest,
+    longExchange: ExchangeType,
+    shortExchange: ExchangeType,
+  ): Promise<[PerpOrderResponse, PerpOrderResponse]> {
+    // Determine if sequential execution is required
+    const requiresSequential = 
+      longExchange === shortExchange ||
+      longExchange === ExchangeType.LIGHTER ||
+      shortExchange === ExchangeType.LIGHTER;
+
+    if (requiresSequential) {
+      this.logger.debug(
+        `📋 Sequential order placement for ${longOrder.symbol}: ` +
+        `${longExchange} -> ${shortExchange} (Lighter or same exchange)`
+      );
+      
+      // Execute sequentially - long first, then short
+      const longResponse = await longAdapter.placeOrder(longOrder);
+      const shortResponse = await shortAdapter.placeOrder(shortOrder);
+      return [longResponse, shortResponse];
+    }
+
+    // Different exchanges (non-Lighter) can be executed in parallel
+    this.logger.debug(
+      `📋 Parallel order placement for ${longOrder.symbol}: ` +
+      `${longExchange} || ${shortExchange}`
+    );
+    
+    return Promise.all([
+      longAdapter.placeOrder(longOrder),
+      shortAdapter.placeOrder(shortOrder),
+    ]);
   }
 
   async waitForOrderFill(
@@ -308,6 +372,16 @@ export class OrderExecutor implements IOrderExecutor {
   ): Promise<Result<ArbitrageExecutionResult, DomainException>> {
     const { plan, opportunity } = bestOpportunity;
 
+    // Circuit breaker check - block new position opening if circuit is OPEN
+    if (this.circuitBreaker && !this.circuitBreaker.canOpenNewPosition()) {
+      const state = this.circuitBreaker.getState();
+      this.logger.warn(
+        `🔴 Circuit breaker is ${state} - blocking new position for ${opportunity.symbol}`
+      );
+      result.errors.push(`Circuit breaker ${state}: blocking new position opening`);
+      return Result.success(result);
+    }
+
     this.logger.log(
       `🎯 Executing single best opportunity: ${opportunity.symbol} ` +
         `(Expected net return: $${plan.expectedNetReturn.toFixed(4)} per period)`,
@@ -474,75 +548,76 @@ export class OrderExecutor implements IOrderExecutor {
           `SHORT ${scaledSizeBaseAsset.toFixed(4)} ($${actualPositionUsd.toFixed(2)}) on ${opportunity.shortExchange}`,
       );
 
-      // Place orders with individual error handling to identify which one failed
+      // Place orders with intelligent execution strategy (sequential for Lighter, parallel otherwise)
       let longResponse: PerpOrderResponse;
       let shortResponse: PerpOrderResponse;
       let longError: any = null;
       let shortError: any = null;
 
-      // Place orders in parallel but catch errors individually
-      const [longResult, shortResult] = await Promise.allSettled([
-        longAdapter.placeOrder(longOrder).catch((err: any) => {
-          longError = err;
-          const errorMsg = err?.message || String(err);
-          this.logger.error(
-            `❌ Failed to place LONG order on ${opportunity.longExchange}: ${errorMsg}`,
-          );
-          throw err;
-        }),
-        shortAdapter.placeOrder(shortOrder).catch((err: any) => {
+      try {
+        // Use placeOrderPair which handles sequential vs parallel execution
+        [longResponse, shortResponse] = await this.placeOrderPair(
+          longAdapter,
+          shortAdapter,
+          longOrder,
+          shortOrder,
+          opportunity.longExchange,
+          opportunity.shortExchange!,
+        );
+      } catch (err: any) {
+        // If placeOrderPair throws, we need to determine which order failed
+        // For sequential execution, the first failure stops execution
+        const errorMsg = err?.message || String(err);
+        
+        // Check if we have partial results (long succeeded, short failed)
+        // This can happen in sequential execution
+        if (err.longResponse) {
+          longResponse = err.longResponse;
           shortError = err;
-          const errorMsg = err?.message || String(err);
           this.logger.error(
             `❌ Failed to place SHORT order on ${opportunity.shortExchange}: ${errorMsg}`,
           );
-          throw err;
-        }),
-      ]);
-
-      // Extract responses or create error responses
-      if (longResult.status === 'fulfilled') {
-        longResponse = longResult.value;
-      } else {
-        const reason = longResult.reason as any;
-        const errorMsg =
-          longError?.message ||
-          reason?.message ||
-          String(reason) ||
-          'Unknown error';
-        longResponse = new PerpOrderResponse(
-          'error',
-          OrderStatus.REJECTED,
-          opportunity.symbol,
-          OrderSide.LONG,
-          undefined,
-          undefined,
-          undefined,
-          errorMsg,
-          new Date(),
-        );
-      }
-
-      if (shortResult.status === 'fulfilled') {
-        shortResponse = shortResult.value;
-      } else {
-        const reason = shortResult.reason as any;
-        const errorMsg =
-          shortError?.message ||
-          reason?.message ||
-          String(reason) ||
-          'Unknown error';
-        shortResponse = new PerpOrderResponse(
-          'error',
-          OrderStatus.REJECTED,
-          opportunity.symbol,
-          OrderSide.SHORT,
-          undefined,
-          undefined,
-          undefined,
-          errorMsg,
-          new Date(),
-        );
+          shortResponse = new PerpOrderResponse(
+            'error',
+            OrderStatus.REJECTED,
+            opportunity.symbol,
+            OrderSide.SHORT,
+            undefined,
+            undefined,
+            undefined,
+            errorMsg,
+            new Date(),
+          );
+        } else {
+          // Long order failed
+          longError = err;
+          this.logger.error(
+            `❌ Failed to place LONG order on ${opportunity.longExchange}: ${errorMsg}`,
+          );
+          longResponse = new PerpOrderResponse(
+            'error',
+            OrderStatus.REJECTED,
+            opportunity.symbol,
+            OrderSide.LONG,
+            undefined,
+            undefined,
+            undefined,
+            errorMsg,
+            new Date(),
+          );
+          // Short was never attempted
+          shortResponse = new PerpOrderResponse(
+            'not-attempted',
+            OrderStatus.REJECTED,
+            opportunity.symbol,
+            OrderSide.SHORT,
+            undefined,
+            undefined,
+            undefined,
+            'Not attempted due to long order failure',
+            new Date(),
+          );
+        }
       }
 
       if (longResponse.isSuccess() && shortResponse.isSuccess()) {
@@ -597,6 +672,16 @@ export class OrderExecutor implements IOrderExecutor {
       if (error.stack) {
         this.logger.error(`Error stack: ${error.stack}`);
       }
+      
+      // Record error to circuit breaker
+      this.recordError(
+        'ORDER_EXECUTION_ERROR',
+        error.message,
+        opportunity.longExchange,
+        opportunity.symbol,
+        { error: error.message },
+      );
+      
       return Result.failure(
         new OrderExecutionException(
           `Failed to execute orders: ${error.message}`,
@@ -637,6 +722,20 @@ export class OrderExecutor implements IOrderExecutor {
     let successfulExecutions = 0;
     let totalOrders = 0;
     let totalExpectedReturn = 0;
+
+    // Circuit breaker check - block new position opening if circuit is OPEN
+    if (this.circuitBreaker && !this.circuitBreaker.canOpenNewPosition()) {
+      const state = this.circuitBreaker.getState();
+      this.logger.warn(
+        `🔴 Circuit breaker is ${state} - blocking all new positions (${opportunities.length} opportunities)`
+      );
+      result.errors.push(`Circuit breaker ${state}: blocking new position opening`);
+      return Result.success({
+        successfulExecutions: 0,
+        totalOrders: 0,
+        totalExpectedReturn: 0,
+      });
+    }
 
     this.logger.log(`\n🚀 Executing ${opportunities.length} positions...`);
 
@@ -802,7 +901,7 @@ export class OrderExecutor implements IOrderExecutor {
               );
             }
 
-            // Place orders
+            // Place orders using intelligent execution strategy
             this.logger.log(
               `📤 [${i + 1}/${opportunities.length}] Opening ${opportunity.symbol}: ` +
                 `$${actualPositionUsd.toFixed(2)} (${actualPositionBaseAsset.toFixed(4)} size)` +
@@ -814,10 +913,15 @@ export class OrderExecutor implements IOrderExecutor {
                   : ''),
             );
 
-            const [longResponse, shortResponse] = await Promise.all([
-              longAdapter.placeOrder(longOrder),
-              shortAdapter.placeOrder(shortOrder),
-            ]);
+            // Use placeOrderPair which handles sequential vs parallel execution
+            const [longResponse, shortResponse] = await this.placeOrderPair(
+              longAdapter,
+              shortAdapter,
+              longOrder,
+              shortOrder,
+              opportunity.longExchange,
+              opportunity.shortExchange!,
+            );
 
             // Wait for orders to fill if they're not immediately filled
             // CRITICAL: For Lighter orders, always check status even if marked as SUBMITTED,
@@ -969,6 +1073,9 @@ export class OrderExecutor implements IOrderExecutor {
               successfulExecutions++;
               totalOrders += 2;
               totalExpectedReturn += perpPerpPlan.expectedNetReturn;
+              
+              // Record success to circuit breaker
+              this.recordSuccess();
 
               // Record trading costs (entry fees + slippage, exit fees will be recorded on close)
               if (this.performanceLogger && perpPerpPlan.estimatedCosts) {
