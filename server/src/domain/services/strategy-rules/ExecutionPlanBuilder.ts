@@ -1,7 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { IExecutionPlanBuilder, ExecutionPlanContext } from './IExecutionPlanBuilder';
+import {
+  IExecutionPlanBuilder,
+  ExecutionPlanContext,
+} from './IExecutionPlanBuilder';
 import { CostCalculator } from './CostCalculator';
-import { FundingRateAggregator, ArbitrageOpportunity } from '../FundingRateAggregator';
+import {
+  FundingRateAggregator,
+  ArbitrageOpportunity,
+} from '../FundingRateAggregator';
 import { ArbitrageExecutionPlan } from '../FundingArbitrageStrategy';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
@@ -94,15 +100,33 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
   ): Promise<Result<ArbitrageExecutionPlan, DomainException>> {
     // Use override leverage if provided, otherwise use config leverage
     const leverage = leverageOverride ?? config.leverage;
-    
+
     try {
+      if (opportunity.strategyType !== 'perp-perp') {
+        return Result.failure(
+          new ValidationException(
+            'ExecutionPlanBuilder only supports perp-perp opportunities',
+            'INVALID_STRATEGY_TYPE',
+          ),
+        );
+      }
+
+      if (!opportunity.shortExchange) {
+        return Result.failure(
+          new ValidationException(
+            'shortExchange is required for perp-perp opportunities',
+            'MISSING_SHORT_EXCHANGE',
+          ),
+        );
+      }
+
       const longAdapter = adapters.get(opportunity.longExchange);
       const shortAdapter = adapters.get(opportunity.shortExchange);
 
       if (!longAdapter || !shortAdapter) {
         const missingExchange = !longAdapter
           ? opportunity.longExchange
-          : opportunity.shortExchange;
+          : opportunity.shortExchange!;
         return Result.failure(
           new ExchangeException(
             `Missing adapter for ${missingExchange}`,
@@ -112,9 +136,9 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
         );
       }
 
-      // Use provided mark prices if available, otherwise fetch
-      let finalLongMarkPrice = longMarkPrice;
-      let finalShortMarkPrice = shortMarkPrice;
+      // Use provided mark prices if available, otherwise use from opportunity, otherwise fetch
+      let finalLongMarkPrice = longMarkPrice ?? opportunity.longMarkPrice;
+      let finalShortMarkPrice = shortMarkPrice ?? opportunity.shortMarkPrice;
 
       if (!finalLongMarkPrice || finalLongMarkPrice === 0) {
         try {
@@ -147,7 +171,7 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
           return Result.failure(
             new ExchangeException(
               `Failed to get mark price: ${error.message}`,
-              opportunity.shortExchange,
+              opportunity.shortExchange!,
               { symbol: opportunity.symbol, error: error.message },
             ),
           );
@@ -156,7 +180,8 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
 
       // Determine position size based on actual available capital
       const minBalance = Math.min(longBalance, shortBalance);
-      const availableCapital = minBalance * config.balanceUsagePercent.toDecimal();
+      const availableCapital =
+        minBalance * config.balanceUsagePercent.toDecimal();
       const leveragedCapital = availableCapital * leverage;
       const maxSize = maxPositionSizeUsd || Infinity;
 
@@ -228,14 +253,20 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
       ) {
         return Result.failure(
           new ValidationException(
-            `Missing or zero open interest for short exchange: ${opportunity.shortExchange}`,
+            `Missing or zero open interest for short exchange: ${opportunity.shortExchange!}`,
             'MISSING_OPEN_INTEREST',
-            { symbol: opportunity.symbol, exchange: opportunity.shortExchange },
+            {
+              symbol: opportunity.symbol,
+              exchange: opportunity.shortExchange!,
+            },
           ),
         );
       }
 
-      if (longOI < config.minOpenInterestUsd || shortOI < config.minOpenInterestUsd) {
+      if (
+        longOI < config.minOpenInterestUsd ||
+        shortOI < config.minOpenInterestUsd
+      ) {
         return Result.failure(
           new ValidationException(
             `Insufficient open interest: long=${longOI}, short=${shortOI}, minimum=${config.minOpenInterestUsd}`,
@@ -291,7 +322,7 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
       // Example: $15k position with 5% max → needs $300k volume
       const volumeMultiplier = 100 / config.maxPositionToVolumePercent; // e.g., 20x for 5%
       const requiredVolumeForPosition = positionSizeUsd * volumeMultiplier;
-      
+
       // Also enforce absolute minimum if configured (safety floor)
       const effectiveMinVolume = Math.max(
         config.min24hVolumeUsd, // Absolute floor (can be 0 to disable)
@@ -302,14 +333,15 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
       if (min24hVolume < Infinity && min24hVolume > 0) {
         if (min24hVolume < effectiveMinVolume) {
           // Calculate what position size WOULD work with this volume
-          const maxViablePosition = min24hVolume * (config.maxPositionToVolumePercent / 100);
-          
+          const maxViablePosition =
+            min24hVolume * (config.maxPositionToVolumePercent / 100);
+
           if (maxViablePosition < config.minPositionSizeUsd) {
             // Volume is so low that even minimum position won't fill quickly
             return Result.failure(
               new ValidationException(
                 `Insufficient 24h volume for quick fills: $${min24hVolume.toLocaleString()} ` +
-                `(need $${effectiveMinVolume.toLocaleString()} for $${positionSizeUsd.toFixed(0)} position at ${config.maxPositionToVolumePercent}% max)`,
+                  `(need $${effectiveMinVolume.toLocaleString()} for $${positionSizeUsd.toFixed(0)} position at ${config.maxPositionToVolumePercent}% max)`,
                 'INSUFFICIENT_VOLUME',
                 {
                   symbol: opportunity.symbol,
@@ -323,11 +355,11 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
               ),
             );
           }
-          
+
           // Cap position to what volume supports
           this.logger.debug(
             `📊 Reducing position for ${opportunity.symbol} from $${positionSizeUsd.toFixed(0)} to $${maxViablePosition.toFixed(0)} ` +
-            `(${config.maxPositionToVolumePercent}% of 24h volume $${min24hVolume.toLocaleString()}) - prioritizing quick fills`,
+              `(${config.maxPositionToVolumePercent}% of 24h volume $${min24hVolume.toLocaleString()}) - prioritizing quick fills`,
           );
           positionSizeUsd = maxViablePosition;
           positionSizeBaseAsset = positionSizeUsd / avgMarkPrice;
@@ -351,7 +383,9 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
           );
         }
         // If no minimum configured and no data, proceed with caution (OI filter still applies)
-        this.logger.debug(`⚠️ No volume data for ${opportunity.symbol} - proceeding (no min volume configured)`);
+        this.logger.debug(
+          `⚠️ No volume data for ${opportunity.symbol} - proceeding (no min volume configured)`,
+        );
       }
       // =========================================================================
 
@@ -362,7 +396,7 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
       );
       const shortExchangeSymbol = this.aggregator.getExchangeSymbol(
         opportunity.symbol,
-        opportunity.shortExchange,
+        opportunity.shortExchange!,
       );
 
       const longSymbol =
@@ -385,7 +419,7 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
         shortAdapter,
         shortSymbol,
         opportunity.symbol,
-        opportunity.shortExchange,
+        opportunity.shortExchange!,
       );
 
       // Calculate slippage costs
@@ -415,7 +449,7 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
       );
       const shortEntryFee = this.costCalculator.calculateFees(
         positionSizeUsd,
-        opportunity.shortExchange,
+        opportunity.shortExchange!,
         true,
         true,
       );
@@ -497,7 +531,7 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
         isFinite(breakEvenHours) &&
         breakEvenHours <= maxBreakEvenHours &&
         expectedReturnPerPeriod > 0; // Must have positive expected return (even if not instantly profitable)
-      
+
       if (expectedNetReturn <= 0 && !isAcceptableBreakEven) {
         const amortizedCosts =
           breakEvenHours !== null && isFinite(breakEvenHours)
@@ -527,7 +561,7 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
           ),
         );
       }
-      
+
       // Log if accepted based on break-even time (not instant profitability)
       if (expectedNetReturn <= 0 && isAcceptableBreakEven) {
         this.logger.log(
@@ -555,20 +589,28 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
       // For other exchanges: use best bid/ask without price improvement
       // LONG orders: at mark price (for Hyperliquid/Lighter) or best bid (for others)
       // SHORT orders: at mark price (for Hyperliquid/Lighter) or best ask (for others)
-      const longLimitPrice = (opportunity.longExchange === ExchangeType.HYPERLIQUID || 
-                              opportunity.longExchange === ExchangeType.LIGHTER)
-        ? finalLongMarkPrice
-        : longBidAsk.bestBid;
-      const shortLimitPrice = (opportunity.shortExchange === ExchangeType.HYPERLIQUID || 
-                               opportunity.shortExchange === ExchangeType.LIGHTER)
-        ? finalShortMarkPrice
-        : shortBidAsk.bestAsk;
+      const longLimitPrice =
+        opportunity.longExchange === ExchangeType.HYPERLIQUID ||
+        opportunity.longExchange === ExchangeType.LIGHTER
+          ? finalLongMarkPrice
+          : longBidAsk.bestBid;
+      const shortLimitPrice =
+        opportunity.shortExchange === ExchangeType.HYPERLIQUID ||
+        opportunity.shortExchange === ExchangeType.LIGHTER
+          ? finalShortMarkPrice
+          : shortBidAsk.bestAsk;
 
-      const longPriceSource = (opportunity.longExchange === ExchangeType.HYPERLIQUID || 
-                               opportunity.longExchange === ExchangeType.LIGHTER) ? 'mark' : 'best bid';
-      const shortPriceSource = (opportunity.shortExchange === ExchangeType.HYPERLIQUID || 
-                                opportunity.shortExchange === ExchangeType.LIGHTER) ? 'mark' : 'best ask';
-      
+      const longPriceSource =
+        opportunity.longExchange === ExchangeType.HYPERLIQUID ||
+        opportunity.longExchange === ExchangeType.LIGHTER
+          ? 'mark'
+          : 'best bid';
+      const shortPriceSource =
+        opportunity.shortExchange === ExchangeType.HYPERLIQUID ||
+        opportunity.shortExchange === ExchangeType.LIGHTER
+          ? 'mark'
+          : 'best ask';
+
       this.logger.debug(
         `Limit order prices for ${opportunity.symbol}: ` +
           `LONG @ ${longLimitPrice.toFixed(4)} (${longPriceSource}: ${finalLongMarkPrice.toFixed(4)}, best bid: ${longBidAsk.bestBid.toFixed(4)}), ` +

@@ -1,4 +1,10 @@
-import { Injectable, Logger, Inject, forwardRef, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Inject,
+  forwardRef,
+  Optional,
+} from '@nestjs/common';
 import { IOrderExecutor } from './IOrderExecutor';
 import type { IPositionManager } from './IPositionManager';
 import type { AsymmetricFill } from './IPositionManager';
@@ -43,7 +49,8 @@ export class OrderExecutor implements IOrderExecutor {
     private readonly costCalculator: CostCalculator,
     private readonly executionPlanBuilder: ExecutionPlanBuilder,
     private readonly config: StrategyConfig,
-    @Optional() @Inject('IPerpKeeperPerformanceLogger')
+    @Optional()
+    @Inject('IPerpKeeperPerformanceLogger')
     private readonly performanceLogger?: IPerpKeeperPerformanceLogger,
   ) {}
 
@@ -70,7 +77,7 @@ export class OrderExecutor implements IOrderExecutor {
       try {
         const positions = await adapter.getPositions();
         const matchingPosition = positions.find(
-          p => p.symbol === symbol && Math.abs(p.size) > 0.0001
+          (p) => p.symbol === symbol && Math.abs(p.size) > 0.0001,
         );
         if (matchingPosition) {
           initialPosition = {
@@ -78,7 +85,7 @@ export class OrderExecutor implements IOrderExecutor {
             side: matchingPosition.side,
           };
           this.logger.debug(
-            `Initial position for ${symbol}: ${initialPosition.side} ${initialPosition.size.toFixed(4)}`
+            `Initial position for ${symbol}: ${initialPosition.side} ${initialPosition.size.toFixed(4)}`,
           );
         }
       } catch (error: any) {
@@ -109,25 +116,28 @@ export class OrderExecutor implements IOrderExecutor {
           try {
             const positions = await adapter.getPositions();
             const matchingPosition = positions.find(
-              p => p.symbol === symbol && Math.abs(p.size) > 0.0001
+              (p) => p.symbol === symbol && Math.abs(p.size) > 0.0001,
             );
-            
+
             if (matchingPosition) {
               const currentSize = matchingPosition.size;
               const currentSide = matchingPosition.side;
-              
+
               // Determine expected side based on operation type
               const expectedSide = isClosingPosition
-                ? (currentSide === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG)
+                ? currentSide === OrderSide.LONG
+                  ? OrderSide.SHORT
+                  : OrderSide.LONG
                 : currentSide;
-              
+
               // Check if position changed (indicating fill)
               if (initialPosition) {
                 const sizeChange = Math.abs(currentSize - initialPosition.size);
-                if (sizeChange >= expectedSize * 0.9) { // At least 90% of expected size
+                if (sizeChange >= expectedSize * 0.9) {
+                  // At least 90% of expected size
                   this.logger.log(
                     `✅ ${operationType} order ${orderId} filled (detected via position change): ` +
-                    `${currentSize.toFixed(4)} ${symbol} (change: ${sizeChange.toFixed(4)})`
+                      `${currentSize.toFixed(4)} ${symbol} (change: ${sizeChange.toFixed(4)})`,
                   );
                   return new PerpOrderResponse(
                     orderId,
@@ -143,10 +153,13 @@ export class OrderExecutor implements IOrderExecutor {
                 }
               } else {
                 // No initial position - check if current position matches expected
-                if (currentSide === expectedSide && currentSize >= expectedSize * 0.9) {
+                if (
+                  currentSide === expectedSide &&
+                  currentSize >= expectedSize * 0.9
+                ) {
                   this.logger.log(
                     `✅ ${operationType} order ${orderId} filled (detected via position): ` +
-                    `${currentSize.toFixed(4)} ${symbol}`
+                      `${currentSize.toFixed(4)} ${symbol}`,
                   );
                   return new PerpOrderResponse(
                     orderId,
@@ -164,7 +177,7 @@ export class OrderExecutor implements IOrderExecutor {
             } else if (initialPosition && isClosingPosition) {
               // Position closed - order filled
               this.logger.log(
-                `✅ ${operationType} order ${orderId} filled (position closed)`
+                `✅ ${operationType} order ${orderId} filled (position closed)`,
               );
               return new PerpOrderResponse(
                 orderId,
@@ -179,7 +192,9 @@ export class OrderExecutor implements IOrderExecutor {
               );
             }
           } catch (positionError: any) {
-            this.logger.debug(`Could not check positions: ${positionError.message}`);
+            this.logger.debug(
+              `Could not check positions: ${positionError.message}`,
+            );
           }
         }
 
@@ -271,6 +286,16 @@ export class OrderExecutor implements IOrderExecutor {
         `(Expected net return: $${plan.expectedNetReturn.toFixed(4)} per period)`,
     );
 
+    if (!opportunity.shortExchange) {
+      return Result.failure(
+        new ExchangeException(
+          'Missing shortExchange for perp-perp opportunity',
+          opportunity.longExchange,
+          { symbol: opportunity.symbol },
+        ),
+      );
+    }
+
     // Get adapters
     const [longAdapter, shortAdapter] = [
       adapters.get(opportunity.longExchange),
@@ -280,7 +305,7 @@ export class OrderExecutor implements IOrderExecutor {
     if (!longAdapter || !shortAdapter) {
       const missingExchange = !longAdapter
         ? opportunity.longExchange
-        : opportunity.shortExchange;
+        : opportunity.shortExchange || 'UNKNOWN';
       return Result.failure(
         new ExchangeException(
           `Missing adapter for ${missingExchange}`,
@@ -297,16 +322,20 @@ export class OrderExecutor implements IOrderExecutor {
         longAdapter.cancelAllOrders(opportunity.symbol).catch(() => 0),
         shortAdapter.cancelAllOrders(opportunity.symbol).catch(() => 0),
       ]);
-      const totalCancelled = 
+      const totalCancelled =
         (longCancelled.status === 'fulfilled' ? longCancelled.value : 0) +
         (shortCancelled.status === 'fulfilled' ? shortCancelled.value : 0);
       if (totalCancelled > 0) {
-        this.logger.log(`🗑️ Pre-flight: Cancelled ${totalCancelled} existing order(s) for ${opportunity.symbol}`);
+        this.logger.log(
+          `🗑️ Pre-flight: Cancelled ${totalCancelled} existing order(s) for ${opportunity.symbol}`,
+        );
         // Small delay to let margin be released
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, 500));
       }
     } catch (error: any) {
-      this.logger.debug(`Pre-flight cancel failed (non-critical): ${error.message}`);
+      this.logger.debug(
+        `Pre-flight cancel failed (non-critical): ${error.message}`,
+      );
     }
 
     // PRE-FLIGHT CHECK: Scale position to available capital
@@ -315,51 +344,53 @@ export class OrderExecutor implements IOrderExecutor {
         longAdapter.getBalance(),
         shortAdapter.getBalance(),
       ]);
-      const avgPrice = ((plan.longOrder.price || 0) + (plan.shortOrder.price || 0)) / 2;
+      const avgPrice =
+        ((plan.longOrder.price || 0) + (plan.shortOrder.price || 0)) / 2;
       const leverage = this.config?.leverage || 2;
       const originalPositionUsd = plan.positionSize.toUSD(avgPrice);
       const originalRequiredMargin = originalPositionUsd / leverage;
       const minBalance = Math.min(longBalance, shortBalance);
-      
+
       // Scale down position to fit available capital (use 90% for safety margin)
       let actualPositionUsd = originalPositionUsd;
       let actualRequiredMargin = originalRequiredMargin;
-      
+
       if (minBalance < originalRequiredMargin) {
         // Not enough for original position - scale down
         const usableBalance = minBalance * 0.9;
         actualPositionUsd = usableBalance * leverage;
         actualRequiredMargin = usableBalance;
-        
+
         // Check if scaled position is too small
         if (actualPositionUsd < this.config.minPositionSizeUsd) {
-          const insufficientExchange = longBalance < shortBalance 
-            ? opportunity.longExchange 
-            : opportunity.shortExchange;
+          const insufficientExchange =
+            longBalance < shortBalance
+              ? opportunity.longExchange
+              : opportunity.shortExchange;
           return Result.failure(
             new InsufficientBalanceException(
               this.config.minPositionSizeUsd / leverage,
               minBalance,
               'USDC',
-              { 
-                symbol: opportunity.symbol, 
+              {
+                symbol: opportunity.symbol,
                 exchange: insufficientExchange,
                 message: `Cannot scale down to available capital. Min position: $${this.config.minPositionSizeUsd}, Available: $${minBalance.toFixed(2)}`,
               },
             ),
           );
         }
-        
+
         this.logger.log(
           `📉 Scaling ${opportunity.symbol} from $${originalPositionUsd.toFixed(2)} to $${actualPositionUsd.toFixed(2)} ` +
-          `(available collateral: $${usableBalance.toFixed(2)} per exchange)`
+            `(available collateral: $${usableBalance.toFixed(2)} per exchange)`,
         );
       }
-      
+
       // Create scaled orders if position was scaled down
       let longOrder = plan.longOrder;
       let shortOrder = plan.shortOrder;
-      
+
       if (actualPositionUsd < originalPositionUsd * 0.99) {
         // Need to scale the orders
         const scaledSizeBaseAsset = actualPositionUsd / avgPrice;
@@ -382,10 +413,10 @@ export class OrderExecutor implements IOrderExecutor {
           plan.shortOrder.reduceOnly,
         );
       }
-      
+
       // Store scaled orders for use after try block
       // Use plan.longOrder/shortOrder which we already updated above
-      
+
       // Validation checks (now just validation since we already scaled)
       if (longBalance < actualRequiredMargin * 0.95) {
         return Result.failure(
@@ -427,13 +458,17 @@ export class OrderExecutor implements IOrderExecutor {
         longAdapter.placeOrder(longOrder).catch((err: any) => {
           longError = err;
           const errorMsg = err?.message || String(err);
-          this.logger.error(`❌ Failed to place LONG order on ${opportunity.longExchange}: ${errorMsg}`);
+          this.logger.error(
+            `❌ Failed to place LONG order on ${opportunity.longExchange}: ${errorMsg}`,
+          );
           throw err;
         }),
         shortAdapter.placeOrder(shortOrder).catch((err: any) => {
           shortError = err;
           const errorMsg = err?.message || String(err);
-          this.logger.error(`❌ Failed to place SHORT order on ${opportunity.shortExchange}: ${errorMsg}`);
+          this.logger.error(
+            `❌ Failed to place SHORT order on ${opportunity.shortExchange}: ${errorMsg}`,
+          );
           throw err;
         }),
       ]);
@@ -443,7 +478,11 @@ export class OrderExecutor implements IOrderExecutor {
         longResponse = longResult.value;
       } else {
         const reason = longResult.reason as any;
-        const errorMsg = longError?.message || reason?.message || String(reason) || 'Unknown error';
+        const errorMsg =
+          longError?.message ||
+          reason?.message ||
+          String(reason) ||
+          'Unknown error';
         longResponse = new PerpOrderResponse(
           'error',
           OrderStatus.REJECTED,
@@ -461,7 +500,11 @@ export class OrderExecutor implements IOrderExecutor {
         shortResponse = shortResult.value;
       } else {
         const reason = shortResult.reason as any;
-        const errorMsg = shortError?.message || reason?.message || String(reason) || 'Unknown error';
+        const errorMsg =
+          shortError?.message ||
+          reason?.message ||
+          String(reason) ||
+          'Unknown error';
         shortResponse = new PerpOrderResponse(
           'error',
           OrderStatus.REJECTED,
@@ -482,8 +525,10 @@ export class OrderExecutor implements IOrderExecutor {
 
         // Record trading costs (entry fees + slippage, exit fees will be recorded on close)
         if (this.performanceLogger && plan.estimatedCosts) {
-          const totalCosts = plan.estimatedCosts.total || 
-            (plan.estimatedCosts.fees || 0) + (plan.estimatedCosts.slippage || 0);
+          const totalCosts =
+            plan.estimatedCosts.total ||
+            (plan.estimatedCosts.fees || 0) +
+              (plan.estimatedCosts.slippage || 0);
           this.performanceLogger.recordTradingCosts(totalCosts);
         }
 
@@ -494,26 +539,34 @@ export class OrderExecutor implements IOrderExecutor {
 
         return Result.success(result);
       } else {
-        const longErrorMsg = longResponse.error || (longError as any)?.message || 'unknown';
-        const shortErrorMsg = shortResponse.error || (shortError as any)?.message || 'unknown';
-        
+        const longErrorMsg =
+          longResponse.error || (longError as any)?.message || 'unknown';
+        const shortErrorMsg =
+          shortResponse.error || (shortError as any)?.message || 'unknown';
+
         this.logger.error(
           `❌ Order execution failed for ${opportunity.symbol}: ` +
-          `LONG (${opportunity.longExchange}): ${longErrorMsg}, ` +
-          `SHORT (${opportunity.shortExchange}): ${shortErrorMsg}`
+            `LONG (${opportunity.longExchange}): ${longErrorMsg}, ` +
+            `SHORT (${opportunity.shortExchange}): ${shortErrorMsg}`,
         );
-        
+
         return Result.failure(
           new OrderExecutionException(
             `Order execution failed: Long (${opportunity.longExchange}): ${longErrorMsg}, Short (${opportunity.shortExchange}): ${shortErrorMsg}`,
             longResponse.orderId || shortResponse.orderId || 'unknown',
             opportunity.longExchange,
-            { symbol: opportunity.symbol, longError: longErrorMsg, shortError: shortErrorMsg },
+            {
+              symbol: opportunity.symbol,
+              longError: longErrorMsg,
+              shortError: shortErrorMsg,
+            },
           ),
         );
       }
     } catch (error: any) {
-      this.logger.error(`❌ Unexpected error executing orders for ${opportunity.symbol}: ${error.message}`);
+      this.logger.error(
+        `❌ Unexpected error executing orders for ${opportunity.symbol}: ${error.message}`,
+      );
       if (error.stack) {
         this.logger.error(`Error stack: ${error.stack}`);
       }
@@ -531,7 +584,10 @@ export class OrderExecutor implements IOrderExecutor {
   async executeMultiplePositions(
     opportunities: Array<{
       opportunity: ArbitrageOpportunity;
-      plan: ArbitrageExecutionPlan | null;
+      plan:
+        | ArbitrageExecutionPlan
+        | import('./PerpSpotExecutionPlanBuilder').PerpSpotExecutionPlan
+        | null;
       maxPortfolioFor35APY: number | null;
       isExisting?: boolean;
       currentValue?: number;
@@ -541,11 +597,16 @@ export class OrderExecutor implements IOrderExecutor {
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
     exchangeBalances: Map<ExchangeType, number>,
     result: ArbitrageExecutionResult,
-  ): Promise<Result<{
-    successfulExecutions: number;
-    totalOrders: number;
-    totalExpectedReturn: number;
-  }, DomainException>> {
+  ): Promise<
+    Result<
+      {
+        successfulExecutions: number;
+        totalOrders: number;
+        totalExpectedReturn: number;
+      },
+      DomainException
+    >
+  > {
     let successfulExecutions = 0;
     let totalOrders = 0;
     let totalExpectedReturn = 0;
@@ -572,187 +633,411 @@ export class OrderExecutor implements IOrderExecutor {
           executionAttempt++;
 
           try {
-          const { opportunity, plan } = item;
+            const { opportunity, plan } = item;
 
-          // Get adapters
-          const [longAdapter, shortAdapter] = [
-            adapters.get(opportunity.longExchange),
-            adapters.get(opportunity.shortExchange),
-          ];
+            // Get adapters
+            if (!opportunity.shortExchange) {
+              result.errors.push(
+                `Missing shortExchange for ${opportunity.symbol}`,
+              );
+              break;
+            }
+            const [longAdapter, shortAdapter] = [
+              adapters.get(opportunity.longExchange),
+              adapters.get(opportunity.shortExchange),
+            ];
 
-          if (!longAdapter || !shortAdapter) {
-            result.errors.push(`Missing adapters for ${opportunity.symbol}`);
-            break;
-          }
+            if (!longAdapter || !shortAdapter) {
+              result.errors.push(`Missing adapters for ${opportunity.symbol}`);
+              break;
+            }
 
-          // PRE-FLIGHT CHECK: Cancel any existing open orders for this symbol to free up margin
-          try {
-            const [longCancelled, shortCancelled] = await Promise.allSettled([
-              longAdapter.cancelAllOrders(opportunity.symbol).catch(() => 0),
-              shortAdapter.cancelAllOrders(opportunity.symbol).catch(() => 0),
+            // PRE-FLIGHT CHECK: Cancel any existing open orders for this symbol to free up margin
+            try {
+              const [longCancelled, shortCancelled] = await Promise.allSettled([
+                longAdapter.cancelAllOrders(opportunity.symbol).catch(() => 0),
+                shortAdapter.cancelAllOrders(opportunity.symbol).catch(() => 0),
+              ]);
+              const totalCancelled =
+                (longCancelled.status === 'fulfilled'
+                  ? longCancelled.value
+                  : 0) +
+                (shortCancelled.status === 'fulfilled'
+                  ? shortCancelled.value
+                  : 0);
+              if (totalCancelled > 0) {
+                this.logger.log(
+                  `🗑️ Pre-flight: Cancelled ${totalCancelled} existing order(s) for ${opportunity.symbol}`,
+                );
+                await new Promise((resolve) => setTimeout(resolve, 500));
+              }
+            } catch (error: any) {
+              this.logger.debug(
+                `Pre-flight cancel failed (non-critical): ${error.message}`,
+              );
+            }
+
+            // PRE-FLIGHT CHECK: Verify both exchanges have sufficient margin
+            const [longBalance, shortBalance] = await Promise.all([
+              longAdapter.getBalance(),
+              shortAdapter.getBalance(),
             ]);
-            const totalCancelled = 
-              (longCancelled.status === 'fulfilled' ? longCancelled.value : 0) +
-              (shortCancelled.status === 'fulfilled' ? shortCancelled.value : 0);
-            if (totalCancelled > 0) {
-              this.logger.log(`🗑️ Pre-flight: Cancelled ${totalCancelled} existing order(s) for ${opportunity.symbol}`);
-              await new Promise(resolve => setTimeout(resolve, 500));
+            // Check if this is a perp-spot plan
+            if ('perpOrder' in plan && 'spotOrder' in plan) {
+              // Perp-spot plan - skip for now (handled separately)
+              this.logger.warn(
+                `Skipping perp-spot plan for ${opportunity.symbol} in executeMultiplePositions`,
+              );
+              continue;
+            }
+            const perpPerpPlan = plan as ArbitrageExecutionPlan;
+            const avgPrice =
+              ((perpPerpPlan.longOrder.price || 0) +
+                (perpPerpPlan.shortOrder.price || 0)) /
+              2;
+
+            // Use the SCALED maxPortfolioFor35APY from ladder allocation if available
+            // This is the actual amount we want to deploy, not the original plan size
+            const scaledPositionUsd =
+              item.maxPortfolioFor35APY ||
+              perpPerpPlan.positionSize.toUSD(avgPrice);
+            const leverage = this.config?.leverage || 2;
+            const requiredMargin = scaledPositionUsd / leverage;
+
+            // Check if we have sufficient balance (allow small buffer for fees)
+            const minBalance = Math.min(longBalance, shortBalance);
+            if (minBalance < requiredMargin * 0.95) {
+              // Not enough for the scaled position - scale down to what we can afford
+              const actualCollateral = minBalance * 0.9; // Use 90% of available
+              const actualPositionUsd = actualCollateral * leverage;
+
+              if (actualPositionUsd < this.config.minPositionSizeUsd) {
+                const insufficientExchange =
+                  longBalance < shortBalance
+                    ? opportunity.longExchange
+                    : opportunity.shortExchange;
+                this.logger.warn(
+                  `⚠️ Insufficient margin for ${opportunity.symbol} on ${insufficientExchange}: ` +
+                    `need $${requiredMargin.toFixed(2)}, have $${minBalance.toFixed(2)} (min position: $${this.config.minPositionSizeUsd})`,
+                );
+                result.errors.push(
+                  `Insufficient margin for ${opportunity.symbol}: need $${requiredMargin.toFixed(2)}, have $${minBalance.toFixed(2)}`,
+                );
+                break; // Skip this opportunity, move to next
+              }
+
+              // Scale down the position to fit available capital
+              this.logger.log(
+                `📉 Scaling ${opportunity.symbol} from $${scaledPositionUsd.toFixed(2)} to $${actualPositionUsd.toFixed(2)} ` +
+                  `(available collateral: $${actualCollateral.toFixed(2)})`,
+              );
+
+              // Update the maxPortfolioFor35APY to reflect actual size
+              item.maxPortfolioFor35APY = actualPositionUsd;
+            }
+
+            // Calculate the actual position size to use
+            // Use scaled maxPortfolioFor35APY from ladder allocation
+            const actualPositionUsd =
+              item.maxPortfolioFor35APY || scaledPositionUsd;
+            const actualPositionBaseAsset = actualPositionUsd / avgPrice;
+
+            // Scale the orders if the position size differs from the original plan
+            const originalPositionBaseAsset =
+              perpPerpPlan.positionSize.toBaseAsset();
+            const scaleFactor =
+              actualPositionBaseAsset / originalPositionBaseAsset;
+
+            // Create scaled orders if needed
+            let longOrder = perpPerpPlan.longOrder;
+            let shortOrder = perpPerpPlan.shortOrder;
+
+            if (Math.abs(scaleFactor - 1) > 0.01) {
+              // Need to scale the orders
+              const scaledSize = actualPositionBaseAsset;
+              longOrder = new PerpOrderRequest(
+                perpPerpPlan.longOrder.symbol,
+                perpPerpPlan.longOrder.side,
+                perpPerpPlan.longOrder.type,
+                scaledSize,
+                perpPerpPlan.longOrder.price,
+                perpPerpPlan.longOrder.timeInForce,
+                perpPerpPlan.longOrder.reduceOnly,
+              );
+              shortOrder = new PerpOrderRequest(
+                perpPerpPlan.shortOrder.symbol,
+                perpPerpPlan.shortOrder.side,
+                perpPerpPlan.shortOrder.type,
+                scaledSize,
+                perpPerpPlan.shortOrder.price,
+                perpPerpPlan.shortOrder.timeInForce,
+                perpPerpPlan.shortOrder.reduceOnly,
+              );
+            }
+
+            // Place orders
+            this.logger.log(
+              `📤 [${i + 1}/${opportunities.length}] Opening ${opportunity.symbol}: ` +
+                `$${actualPositionUsd.toFixed(2)} (${actualPositionBaseAsset.toFixed(4)} size)` +
+                (Math.abs(scaleFactor - 1) > 0.01
+                  ? ` [scaled ${(scaleFactor * 100).toFixed(0)}%]`
+                  : '') +
+                (executionAttempt > 1
+                  ? ` [Attempt ${executionAttempt}/${this.config.maxExecutionRetries}]`
+                  : ''),
+            );
+
+            const [longResponse, shortResponse] = await Promise.all([
+              longAdapter.placeOrder(longOrder),
+              shortAdapter.placeOrder(shortOrder),
+            ]);
+
+            // Wait for orders to fill if they're not immediately filled
+            // CRITICAL: For Lighter orders, always check status even if marked as SUBMITTED,
+            // as they may be immediately canceled by the system
+            let finalLongResponse = longResponse;
+            let finalShortResponse = shortResponse;
+
+            // Always check Lighter orders - they're never immediately filled and may be canceled
+            const longIsLighter =
+              opportunity.longExchange === ExchangeType.LIGHTER;
+            const shortIsLighter =
+              opportunity.shortExchange === ExchangeType.LIGHTER;
+
+            if (
+              (!longResponse.isFilled() || longIsLighter) &&
+              longResponse.orderId
+            ) {
+              finalLongResponse = await this.waitForOrderFill(
+                longAdapter,
+                longResponse.orderId,
+                opportunity.symbol,
+                opportunity.longExchange,
+                actualPositionBaseAsset,
+                this.config.maxOrderWaitRetries,
+                this.config.orderWaitBaseInterval,
+                false,
+              );
+            }
+
+            if (
+              (!shortResponse.isFilled() || shortIsLighter) &&
+              shortResponse.orderId
+            ) {
+              finalShortResponse = await this.waitForOrderFill(
+                shortAdapter,
+                shortResponse.orderId,
+                opportunity.symbol,
+                opportunity.shortExchange,
+                actualPositionBaseAsset,
+                this.config.maxOrderWaitRetries,
+                this.config.orderWaitBaseInterval,
+                false,
+              );
+            }
+
+            // Check if both orders succeeded
+            const longIsGTC =
+              perpPerpPlan.longOrder.timeInForce === TimeInForce.GTC;
+            const shortIsGTC =
+              perpPerpPlan.shortOrder.timeInForce === TimeInForce.GTC;
+
+            // Check if orders were canceled (especially for Lighter)
+            const longCanceled =
+              finalLongResponse.status === OrderStatus.CANCELLED ||
+              (finalLongResponse.error &&
+                finalLongResponse.error.toLowerCase().includes('cancel'));
+            const shortCanceled =
+              finalShortResponse.status === OrderStatus.CANCELLED ||
+              (finalShortResponse.error &&
+                finalShortResponse.error.toLowerCase().includes('cancel'));
+
+            // If an order was canceled, treat it as failed and retry
+            if (longCanceled || shortCanceled) {
+              this.logger.warn(
+                `⚠️ Order canceled for ${opportunity.symbol}: ` +
+                  `Long: ${longCanceled ? 'CANCELED' : 'OK'}, ` +
+                  `Short: ${shortCanceled ? 'CANCELED' : 'OK'}. ` +
+                  `Will retry...`,
+              );
+
+              // Treat canceled orders as failures - will trigger retry below
+              if (executionAttempt < this.config.maxExecutionRetries) {
+                const delayIndex = executionAttempt - 1;
+                const retryDelay =
+                  this.config.executionRetryDelays[delayIndex] ||
+                  this.config.executionRetryDelays[
+                    this.config.executionRetryDelays.length - 1
+                  ];
+
+                this.logger.warn(
+                  `⚠️ Retrying ${opportunity.symbol} after order cancellation in ${retryDelay / 1000}s... ` +
+                    `(attempt ${executionAttempt}/${this.config.maxExecutionRetries})`,
+                );
+
+                await new Promise((resolve) => setTimeout(resolve, retryDelay));
+                continue; // Retry the order placement
+              } else {
+                result.errors.push(
+                  `Order canceled for ${opportunity.symbol} after ${executionAttempt} attempts`,
+                );
+                break; // Max retries reached
+              }
+            }
+
+            const longSuccess =
+              finalLongResponse.isSuccess() &&
+              (finalLongResponse.isFilled() ||
+                (longIsGTC &&
+                  finalLongResponse.status === OrderStatus.SUBMITTED));
+            const shortSuccess =
+              finalShortResponse.isSuccess() &&
+              (finalShortResponse.isFilled() ||
+                (shortIsGTC &&
+                  finalShortResponse.status === OrderStatus.SUBMITTED));
+
+            if (longSuccess && shortSuccess) {
+              // Handle asymmetric fills
+              const longFilled = finalLongResponse.filledSize || 0;
+              const shortFilled = finalShortResponse.filledSize || 0;
+              const positionSizeBase = perpPerpPlan.positionSize.toBaseAsset();
+              const longFullyFilled = longFilled >= positionSizeBase - 0.0001;
+              const shortFullyFilled = shortFilled >= positionSizeBase - 0.0001;
+              const longOnBook =
+                longIsGTC &&
+                finalLongResponse.status === OrderStatus.SUBMITTED &&
+                !longFullyFilled;
+              const shortOnBook =
+                shortIsGTC &&
+                finalShortResponse.status === OrderStatus.SUBMITTED &&
+                !shortFullyFilled;
+
+              const asymmetricFill =
+                (longFullyFilled && shortOnBook) ||
+                (shortFullyFilled && longOnBook);
+
+              if (asymmetricFill) {
+                // Handle asymmetric fill immediately via position manager
+                // Immediate handling reduces exposure time from 2 minutes to seconds
+                const fill: AsymmetricFill = {
+                  symbol: opportunity.symbol,
+                  longFilled: longFullyFilled,
+                  shortFilled: shortFullyFilled,
+                  longOrderId: longResponse.orderId,
+                  shortOrderId: shortResponse.orderId,
+                  longExchange: opportunity.longExchange,
+                  shortExchange: opportunity.shortExchange!,
+                  positionSize: perpPerpPlan.positionSize.toBaseAsset(),
+                  opportunity,
+                  timestamp: new Date(),
+                };
+                await this.positionManager.handleAsymmetricFills(
+                  adapters,
+                  [fill],
+                  result,
+                  true,
+                ); // immediate=true
+              }
+
+              successfulExecutions++;
+              totalOrders += 2;
+              totalExpectedReturn += perpPerpPlan.expectedNetReturn;
+
+              // Record trading costs (entry fees + slippage, exit fees will be recorded on close)
+              if (this.performanceLogger && perpPerpPlan.estimatedCosts) {
+                const totalCosts =
+                  perpPerpPlan.estimatedCosts.total ||
+                  (perpPerpPlan.estimatedCosts.fees || 0) +
+                    (perpPerpPlan.estimatedCosts.slippage || 0);
+                this.performanceLogger.recordTradingCosts(totalCosts);
+              }
+
+              this.logger.log(
+                `✅ [${i + 1}/${opportunities.length}] ${opportunity.symbol}: ` +
+                  `$${perpPerpPlan.expectedNetReturn.toFixed(4)}/period`,
+              );
+
+              executionSuccess = true;
+            } else {
+              // One or both orders failed - CRITICAL: Check if one leg filled
+              const longFilled =
+                finalLongResponse.isFilled() && finalLongResponse.isSuccess();
+              const shortFilled =
+                finalShortResponse.isFilled() && finalShortResponse.isSuccess();
+
+              if (longFilled || shortFilled) {
+                // CRITICAL SAFETY: One leg filled but other failed - close filled position immediately
+                // This prevents price exposure from single-leg positions
+                this.logger.error(
+                  `🚨 CRITICAL: Single leg filled for ${opportunity.symbol}! ` +
+                    `Long: ${longFilled ? 'FILLED' : 'FAILED'}, ` +
+                    `Short: ${shortFilled ? 'FILLED' : 'FAILED'}. ` +
+                    `Closing filled position to prevent price exposure...`,
+                );
+
+                if (longFilled) {
+                  const closeResult =
+                    await this.positionManager.closeFilledPosition(
+                      longAdapter,
+                      opportunity.symbol,
+                      'LONG',
+                      perpPerpPlan.positionSize.toBaseAsset(),
+                      opportunity.longExchange,
+                      result,
+                    );
+                  if (closeResult.isFailure) {
+                    this.logger.error(
+                      `CRITICAL: Failed to close filled LONG position for ${opportunity.symbol}! ` +
+                        `Position remains open - MANUAL INTERVENTION REQUIRED!`,
+                    );
+                  }
+                }
+
+                if (shortFilled) {
+                  const closeResult =
+                    await this.positionManager.closeFilledPosition(
+                      shortAdapter,
+                      opportunity.symbol,
+                      'SHORT',
+                      perpPerpPlan.positionSize.toBaseAsset(),
+                      opportunity.shortExchange!,
+                      result,
+                    );
+                  if (closeResult.isFailure) {
+                    this.logger.error(
+                      `CRITICAL: Failed to close filled SHORT position for ${opportunity.symbol}! ` +
+                        `Position remains open - MANUAL INTERVENTION REQUIRED!`,
+                    );
+                  }
+                }
+
+                result.errors.push(
+                  `Single leg execution for ${opportunity.symbol} - filled position closed`,
+                );
+                executionSuccess = true; // Don't retry - we've closed the position
+              } else if (executionAttempt < this.config.maxExecutionRetries) {
+                // Both failed - safe to retry
+                const delayIndex = executionAttempt - 1;
+                const retryDelay =
+                  this.config.executionRetryDelays[delayIndex] ||
+                  this.config.executionRetryDelays[
+                    this.config.executionRetryDelays.length - 1
+                  ];
+
+                this.logger.warn(
+                  `⚠️ Error executing ${opportunity.symbol}: Retrying in ${retryDelay / 1000}s... ` +
+                    `(attempt ${executionAttempt}/${this.config.maxExecutionRetries})`,
+                );
+
+                await new Promise((resolve) => setTimeout(resolve, retryDelay));
+              } else {
+                result.errors.push(
+                  `Error executing ${opportunity.symbol} after ${executionAttempt} attempts`,
+                );
+                executionSuccess = true; // Stop retrying
+              }
             }
           } catch (error: any) {
-            this.logger.debug(`Pre-flight cancel failed (non-critical): ${error.message}`);
-          }
-
-          // PRE-FLIGHT CHECK: Verify both exchanges have sufficient margin
-          const [longBalance, shortBalance] = await Promise.all([
-            longAdapter.getBalance(),
-            shortAdapter.getBalance(),
-          ]);
-          const avgPrice = ((plan.longOrder.price || 0) + (plan.shortOrder.price || 0)) / 2;
-          
-          // Use the SCALED maxPortfolioFor35APY from ladder allocation if available
-          // This is the actual amount we want to deploy, not the original plan size
-          const scaledPositionUsd = item.maxPortfolioFor35APY || plan.positionSize.toUSD(avgPrice);
-          const leverage = this.config?.leverage || 2;
-          const requiredMargin = scaledPositionUsd / leverage;
-          
-          // Check if we have sufficient balance (allow small buffer for fees)
-          const minBalance = Math.min(longBalance, shortBalance);
-          if (minBalance < requiredMargin * 0.95) {
-            // Not enough for the scaled position - scale down to what we can afford
-            const actualCollateral = minBalance * 0.9; // Use 90% of available
-            const actualPositionUsd = actualCollateral * leverage;
-            
-            if (actualPositionUsd < this.config.minPositionSizeUsd) {
-              const insufficientExchange = longBalance < shortBalance 
-                ? opportunity.longExchange 
-                : opportunity.shortExchange;
-              this.logger.warn(
-                `⚠️ Insufficient margin for ${opportunity.symbol} on ${insufficientExchange}: ` +
-                `need $${requiredMargin.toFixed(2)}, have $${minBalance.toFixed(2)} (min position: $${this.config.minPositionSizeUsd})`
-              );
-              result.errors.push(
-                `Insufficient margin for ${opportunity.symbol}: need $${requiredMargin.toFixed(2)}, have $${minBalance.toFixed(2)}`
-              );
-              break; // Skip this opportunity, move to next
-            }
-            
-            // Scale down the position to fit available capital
-            this.logger.log(
-              `📉 Scaling ${opportunity.symbol} from $${scaledPositionUsd.toFixed(2)} to $${actualPositionUsd.toFixed(2)} ` +
-              `(available collateral: $${actualCollateral.toFixed(2)})`
-            );
-            
-            // Update the maxPortfolioFor35APY to reflect actual size
-            item.maxPortfolioFor35APY = actualPositionUsd;
-          }
-
-          // Calculate the actual position size to use
-          // Use scaled maxPortfolioFor35APY from ladder allocation
-          const actualPositionUsd = item.maxPortfolioFor35APY || scaledPositionUsd;
-          const actualPositionBaseAsset = actualPositionUsd / avgPrice;
-          
-          // Scale the orders if the position size differs from the original plan
-          const originalPositionBaseAsset = plan.positionSize.toBaseAsset();
-          const scaleFactor = actualPositionBaseAsset / originalPositionBaseAsset;
-          
-          // Create scaled orders if needed
-          let longOrder = plan.longOrder;
-          let shortOrder = plan.shortOrder;
-          
-          if (Math.abs(scaleFactor - 1) > 0.01) {
-            // Need to scale the orders
-            const scaledSize = actualPositionBaseAsset;
-            longOrder = new PerpOrderRequest(
-              plan.longOrder.symbol,
-              plan.longOrder.side,
-              plan.longOrder.type,
-              scaledSize,
-              plan.longOrder.price,
-              plan.longOrder.timeInForce,
-              plan.longOrder.reduceOnly,
-            );
-            shortOrder = new PerpOrderRequest(
-              plan.shortOrder.symbol,
-              plan.shortOrder.side,
-              plan.shortOrder.type,
-              scaledSize,
-              plan.shortOrder.price,
-              plan.shortOrder.timeInForce,
-              plan.shortOrder.reduceOnly,
-            );
-          }
-
-          // Place orders
-          this.logger.log(
-            `📤 [${i + 1}/${opportunities.length}] Opening ${opportunity.symbol}: ` +
-              `$${actualPositionUsd.toFixed(2)} (${actualPositionBaseAsset.toFixed(4)} size)` +
-              (Math.abs(scaleFactor - 1) > 0.01 ? ` [scaled ${(scaleFactor * 100).toFixed(0)}%]` : '') +
-              (executionAttempt > 1
-                ? ` [Attempt ${executionAttempt}/${this.config.maxExecutionRetries}]`
-                : ''),
-          );
-
-          const [longResponse, shortResponse] = await Promise.all([
-            longAdapter.placeOrder(longOrder),
-            shortAdapter.placeOrder(shortOrder),
-          ]);
-
-          // Wait for orders to fill if they're not immediately filled
-          // CRITICAL: For Lighter orders, always check status even if marked as SUBMITTED,
-          // as they may be immediately canceled by the system
-          let finalLongResponse = longResponse;
-          let finalShortResponse = shortResponse;
-
-          // Always check Lighter orders - they're never immediately filled and may be canceled
-          const longIsLighter = opportunity.longExchange === ExchangeType.LIGHTER;
-          const shortIsLighter = opportunity.shortExchange === ExchangeType.LIGHTER;
-          
-          if ((!longResponse.isFilled() || longIsLighter) && longResponse.orderId) {
-            finalLongResponse = await this.waitForOrderFill(
-              longAdapter,
-              longResponse.orderId,
-              opportunity.symbol,
-              opportunity.longExchange,
-              actualPositionBaseAsset,
-              this.config.maxOrderWaitRetries,
-              this.config.orderWaitBaseInterval,
-              false,
-            );
-          }
-
-          if ((!shortResponse.isFilled() || shortIsLighter) && shortResponse.orderId) {
-            finalShortResponse = await this.waitForOrderFill(
-              shortAdapter,
-              shortResponse.orderId,
-              opportunity.symbol,
-              opportunity.shortExchange,
-              actualPositionBaseAsset,
-              this.config.maxOrderWaitRetries,
-              this.config.orderWaitBaseInterval,
-              false,
-            );
-          }
-
-          // Check if both orders succeeded
-          const longIsGTC = plan.longOrder.timeInForce === TimeInForce.GTC;
-          const shortIsGTC = plan.shortOrder.timeInForce === TimeInForce.GTC;
-          
-          // Check if orders were canceled (especially for Lighter)
-          const longCanceled = finalLongResponse.status === OrderStatus.CANCELLED || 
-                               (finalLongResponse.error && finalLongResponse.error.toLowerCase().includes('cancel'));
-          const shortCanceled = finalShortResponse.status === OrderStatus.CANCELLED || 
-                               (finalShortResponse.error && finalShortResponse.error.toLowerCase().includes('cancel'));
-          
-          // If an order was canceled, treat it as failed and retry
-          if (longCanceled || shortCanceled) {
-            this.logger.warn(
-              `⚠️ Order canceled for ${opportunity.symbol}: ` +
-              `Long: ${longCanceled ? 'CANCELED' : 'OK'}, ` +
-              `Short: ${shortCanceled ? 'CANCELED' : 'OK'}. ` +
-              `Will retry...`
-            );
-            
-            // Treat canceled orders as failures - will trigger retry below
             if (executionAttempt < this.config.maxExecutionRetries) {
               const delayIndex = executionAttempt - 1;
               const retryDelay =
@@ -762,182 +1047,17 @@ export class OrderExecutor implements IOrderExecutor {
                 ];
 
               this.logger.warn(
-                `⚠️ Retrying ${opportunity.symbol} after order cancellation in ${retryDelay / 1000}s... ` +
-                  `(attempt ${executionAttempt}/${this.config.maxExecutionRetries})`,
-              );
-
-              await new Promise((resolve) => setTimeout(resolve, retryDelay));
-              continue; // Retry the order placement
-            } else {
-              result.errors.push(
-                `Order canceled for ${opportunity.symbol} after ${executionAttempt} attempts`,
-              );
-              break; // Max retries reached
-            }
-          }
-          
-          const longSuccess =
-            finalLongResponse.isSuccess() &&
-            (finalLongResponse.isFilled() ||
-              (longIsGTC &&
-                finalLongResponse.status === OrderStatus.SUBMITTED));
-          const shortSuccess =
-            finalShortResponse.isSuccess() &&
-            (finalShortResponse.isFilled() ||
-              (shortIsGTC &&
-                finalShortResponse.status === OrderStatus.SUBMITTED));
-
-          if (longSuccess && shortSuccess) {
-            // Handle asymmetric fills
-            const longFilled = finalLongResponse.filledSize || 0;
-            const shortFilled = finalShortResponse.filledSize || 0;
-            const positionSizeBase = plan.positionSize.toBaseAsset();
-            const longFullyFilled = longFilled >= positionSizeBase - 0.0001;
-            const shortFullyFilled = shortFilled >= positionSizeBase - 0.0001;
-            const longOnBook =
-              longIsGTC &&
-              finalLongResponse.status === OrderStatus.SUBMITTED &&
-              !longFullyFilled;
-            const shortOnBook =
-              shortIsGTC &&
-              finalShortResponse.status === OrderStatus.SUBMITTED &&
-              !shortFullyFilled;
-
-            const asymmetricFill =
-              (longFullyFilled && shortOnBook) ||
-              (shortFullyFilled && longOnBook);
-
-            if (asymmetricFill) {
-              // Handle asymmetric fill immediately via position manager
-              // Immediate handling reduces exposure time from 2 minutes to seconds
-              const fill: AsymmetricFill = {
-                symbol: opportunity.symbol,
-                longFilled: longFullyFilled,
-                shortFilled: shortFullyFilled,
-                longOrderId: longResponse.orderId,
-                shortOrderId: shortResponse.orderId,
-                longExchange: opportunity.longExchange,
-                shortExchange: opportunity.shortExchange,
-                positionSize: plan.positionSize.toBaseAsset(),
-                opportunity,
-                timestamp: new Date(),
-              };
-              await this.positionManager.handleAsymmetricFills(adapters, [fill], result, true); // immediate=true
-            }
-
-            successfulExecutions++;
-            totalOrders += 2;
-            totalExpectedReturn += plan.expectedNetReturn;
-
-            // Record trading costs (entry fees + slippage, exit fees will be recorded on close)
-            if (this.performanceLogger && plan.estimatedCosts) {
-              const totalCosts = plan.estimatedCosts.total || 
-                (plan.estimatedCosts.fees || 0) + (plan.estimatedCosts.slippage || 0);
-              this.performanceLogger.recordTradingCosts(totalCosts);
-            }
-
-            this.logger.log(
-              `✅ [${i + 1}/${opportunities.length}] ${opportunity.symbol}: ` +
-                `$${plan.expectedNetReturn.toFixed(4)}/period`,
-            );
-
-            executionSuccess = true;
-          } else {
-            // One or both orders failed - CRITICAL: Check if one leg filled
-            const longFilled = finalLongResponse.isFilled() && finalLongResponse.isSuccess();
-            const shortFilled = finalShortResponse.isFilled() && finalShortResponse.isSuccess();
-            
-            if (longFilled || shortFilled) {
-              // CRITICAL SAFETY: One leg filled but other failed - close filled position immediately
-              // This prevents price exposure from single-leg positions
-              this.logger.error(
-                `🚨 CRITICAL: Single leg filled for ${opportunity.symbol}! ` +
-                  `Long: ${longFilled ? 'FILLED' : 'FAILED'}, ` +
-                  `Short: ${shortFilled ? 'FILLED' : 'FAILED'}. ` +
-                  `Closing filled position to prevent price exposure...`,
-              );
-              
-              if (longFilled) {
-                const closeResult = await this.positionManager.closeFilledPosition(
-                  longAdapter,
-                  opportunity.symbol,
-                  'LONG',
-                  plan.positionSize.toBaseAsset(),
-                  opportunity.longExchange,
-                  result,
-                );
-                if (closeResult.isFailure) {
-                  this.logger.error(
-                    `CRITICAL: Failed to close filled LONG position for ${opportunity.symbol}! ` +
-                      `Position remains open - MANUAL INTERVENTION REQUIRED!`,
-                  );
-                }
-              }
-              
-              if (shortFilled) {
-                const closeResult = await this.positionManager.closeFilledPosition(
-                  shortAdapter,
-                  opportunity.symbol,
-                  'SHORT',
-                  plan.positionSize.toBaseAsset(),
-                  opportunity.shortExchange,
-                  result,
-                );
-                if (closeResult.isFailure) {
-                  this.logger.error(
-                    `CRITICAL: Failed to close filled SHORT position for ${opportunity.symbol}! ` +
-                      `Position remains open - MANUAL INTERVENTION REQUIRED!`,
-                  );
-                }
-              }
-              
-              result.errors.push(
-                `Single leg execution for ${opportunity.symbol} - filled position closed`,
-              );
-              executionSuccess = true; // Don't retry - we've closed the position
-            } else if (executionAttempt < this.config.maxExecutionRetries) {
-              // Both failed - safe to retry
-              const delayIndex = executionAttempt - 1;
-              const retryDelay =
-                this.config.executionRetryDelays[delayIndex] ||
-                this.config.executionRetryDelays[
-                  this.config.executionRetryDelays.length - 1
-                ];
-
-              this.logger.warn(
-                `⚠️ Error executing ${opportunity.symbol}: Retrying in ${retryDelay / 1000}s... ` +
-                  `(attempt ${executionAttempt}/${this.config.maxExecutionRetries})`,
+                `⚠️ Error executing ${item.opportunity.symbol}: ${error.message}. ` +
+                  `Retrying in ${retryDelay / 1000}s... (attempt ${executionAttempt}/${this.config.maxExecutionRetries})`,
               );
 
               await new Promise((resolve) => setTimeout(resolve, retryDelay));
             } else {
               result.errors.push(
-                `Error executing ${opportunity.symbol} after ${executionAttempt} attempts`,
+                `Error executing ${item.opportunity.symbol} after ${executionAttempt} attempts: ${error.message}`,
               );
               executionSuccess = true; // Stop retrying
             }
-          }
-        } catch (error: any) {
-          if (executionAttempt < this.config.maxExecutionRetries) {
-            const delayIndex = executionAttempt - 1;
-            const retryDelay =
-              this.config.executionRetryDelays[delayIndex] ||
-              this.config.executionRetryDelays[
-                this.config.executionRetryDelays.length - 1
-              ];
-
-            this.logger.warn(
-              `⚠️ Error executing ${item.opportunity.symbol}: ${error.message}. ` +
-                `Retrying in ${retryDelay / 1000}s... (attempt ${executionAttempt}/${this.config.maxExecutionRetries})`,
-            );
-
-            await new Promise((resolve) => setTimeout(resolve, retryDelay));
-          } else {
-            result.errors.push(
-              `Error executing ${item.opportunity.symbol} after ${executionAttempt} attempts: ${error.message}`,
-            );
-            executionSuccess = true; // Stop retrying
-          }
           }
         }
       }
@@ -953,7 +1073,9 @@ export class OrderExecutor implements IOrderExecutor {
         totalExpectedReturn,
       });
     } catch (error: any) {
-      this.logger.error(`Failed to execute multiple positions: ${error.message}`);
+      this.logger.error(
+        `Failed to execute multiple positions: ${error.message}`,
+      );
       return Result.failure(
         new DomainException(
           `Failed to execute multiple positions: ${error.message}`,

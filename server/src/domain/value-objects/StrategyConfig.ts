@@ -40,6 +40,11 @@ export class StrategyConfig {
     // Dynamic scaling: required_volume = position_size * (100 / maxPositionToVolumePercent)
     public readonly min24hVolumeUsd: number = 0, // Absolute floor (0 = use dynamic only)
     public readonly maxPositionToVolumePercent: number = 5, // Position can't exceed 5% of 24h volume
+    // Perp-spot configuration
+    public readonly enablePerpSpotHedging: boolean = true,
+    public readonly perpSpotMaxPositionSizeUsd: number = 10000,
+    public readonly deltaNeutralityTolerance: Percentage = Percentage.fromDecimal(0.01), // 1% tolerance
+    public readonly preferPerpSpotOverPerpPerp: boolean = false, // Automatic selection
   ) {
     this._exchangeFeeRates = new Map(exchangeFeeRates);
     this._takerFeeRates = new Map(takerFeeRates);
@@ -175,6 +180,14 @@ export class StrategyConfig {
       }
     }
 
+    // Perp-spot configuration
+    const enablePerpSpotHedging = configService.get<string>('PERP_SPOT_ENABLED') !== 'false';
+    const perpSpotMaxPositionSizeUsd = parseFloat(configService.get<string>('PERP_SPOT_MAX_POSITION_SIZE_USD') || '10000');
+    const deltaNeutralityTolerance = Percentage.fromDecimal(
+      parseFloat(configService.get<string>('PERP_SPOT_DELTA_TOLERANCE') || '0.01')
+    );
+    const preferPerpSpotOverPerpPerp = configService.get<string>('PREFER_PERP_SPOT_OVER_PERP_PERP') === 'true';
+
     return StrategyConfig.withDefaults(
       leverage,
       useDynamicLeverage,
@@ -184,6 +197,10 @@ export class StrategyConfig {
       leverageOverrides,
       min24hVolumeUsd,
       maxPositionToVolumePercent,
+      enablePerpSpotHedging,
+      perpSpotMaxPositionSizeUsd,
+      deltaNeutralityTolerance,
+      preferPerpSpotOverPerpPerp,
     );
   }
 
@@ -199,6 +216,10 @@ export class StrategyConfig {
     leverageOverrides: Map<string, number> = new Map(),
     min24hVolumeUsd: number = 500000,
     maxPositionToVolumePercent: number = 5,
+    enablePerpSpotHedging: boolean = true,
+    perpSpotMaxPositionSizeUsd: number = 10000,
+    deltaNeutralityTolerance: Percentage = Percentage.fromDecimal(0.01),
+    preferPerpSpotOverPerpPerp: boolean = false,
   ): StrategyConfig {
     const exchangeFeeRates = new Map<ExchangeType, Percentage>([
       [ExchangeType.HYPERLIQUID, Percentage.fromDecimal(0.00015)], // 0.0150% maker fee (tier 0)
@@ -240,6 +261,10 @@ export class StrategyConfig {
       leverageOverrides,
       min24hVolumeUsd, // Minimum 24h volume to trade a pair
       maxPositionToVolumePercent, // Position can't exceed X% of 24h volume
+      enablePerpSpotHedging,
+      perpSpotMaxPositionSizeUsd,
+      deltaNeutralityTolerance,
+      preferPerpSpotOverPerpPerp,
     );
   }
 }

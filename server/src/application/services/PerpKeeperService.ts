@@ -14,6 +14,11 @@ import { LighterExchangeAdapter } from '../../infrastructure/adapters/lighter/Li
 import { HyperliquidExchangeAdapter } from '../../infrastructure/adapters/hyperliquid/HyperliquidExchangeAdapter';
 import { ExtendedExchangeAdapter } from '../../infrastructure/adapters/extended/ExtendedExchangeAdapter';
 import { MockExchangeAdapter } from '../../infrastructure/adapters/mock/MockExchangeAdapter';
+import { HyperliquidSpotAdapter } from '../../infrastructure/adapters/hyperliquid/HyperliquidSpotAdapter';
+import { AsterSpotAdapter } from '../../infrastructure/adapters/aster/AsterSpotAdapter';
+import { LighterSpotAdapter } from '../../infrastructure/adapters/lighter/LighterSpotAdapter';
+import { ExtendedSpotAdapter } from '../../infrastructure/adapters/extended/ExtendedSpotAdapter';
+import { ISpotExchangeAdapter } from '../../domain/ports/ISpotExchangeAdapter';
 import { PerpKeeperPerformanceLogger } from '../../infrastructure/logging/PerpKeeperPerformanceLogger';
 import { ExchangeBalanceRebalancer, RebalanceResult } from '../../domain/services/ExchangeBalanceRebalancer';
 import { ArbitrageOpportunity } from '../../domain/services/FundingRateAggregator';
@@ -27,12 +32,17 @@ import { ArbitrageOpportunity } from '../../domain/services/FundingRateAggregato
 export class PerpKeeperService implements IPerpKeeperService {
   private readonly logger = new Logger(PerpKeeperService.name);
   private readonly adapters: Map<ExchangeType, IPerpExchangeAdapter> = new Map();
+  private readonly spotAdapters: Map<ExchangeType, ISpotExchangeAdapter> = new Map();
 
   constructor(
     @Optional() @Inject(AsterExchangeAdapter) private readonly asterAdapter: AsterExchangeAdapter | null,
     @Optional() @Inject(LighterExchangeAdapter) private readonly lighterAdapter: LighterExchangeAdapter | null,
     @Optional() @Inject(HyperliquidExchangeAdapter) private readonly hyperliquidAdapter: HyperliquidExchangeAdapter | null,
     @Optional() @Inject(ExtendedExchangeAdapter) private readonly extendedAdapter: ExtendedExchangeAdapter | null,
+    @Optional() @Inject(HyperliquidSpotAdapter) private readonly hyperliquidSpotAdapter: HyperliquidSpotAdapter | null,
+    @Optional() @Inject(AsterSpotAdapter) private readonly asterSpotAdapter: AsterSpotAdapter | null,
+    @Optional() @Inject(LighterSpotAdapter) private readonly lighterSpotAdapter: LighterSpotAdapter | null,
+    @Optional() @Inject(ExtendedSpotAdapter) private readonly extendedSpotAdapter: ExtendedSpotAdapter | null,
     private readonly performanceLogger: PerpKeeperPerformanceLogger,
     private readonly balanceRebalancer: ExchangeBalanceRebalancer,
     private readonly configService: ConfigService,
@@ -95,7 +105,23 @@ export class PerpKeeperService implements IPerpKeeperService {
       }
     }
 
-    this.logger.log(`PerpKeeperService initialized with ${this.adapters.size} exchange adapters`);
+    // Initialize spot adapters
+    if (hyperliquidSpotAdapter) {
+      this.spotAdapters.set(ExchangeType.HYPERLIQUID, hyperliquidSpotAdapter);
+    }
+    if (asterSpotAdapter) {
+      this.spotAdapters.set(ExchangeType.ASTER, asterSpotAdapter);
+    }
+    if (lighterSpotAdapter) {
+      this.spotAdapters.set(ExchangeType.LIGHTER, lighterSpotAdapter);
+    }
+    if (extendedSpotAdapter) {
+      this.spotAdapters.set(ExchangeType.EXTENDED, extendedSpotAdapter);
+    }
+
+    this.logger.log(
+      `PerpKeeperService initialized with ${this.adapters.size} perp adapters and ${this.spotAdapters.size} spot adapters`
+    );
   }
 
   getExchangeAdapter(exchangeType: ExchangeType): IPerpExchangeAdapter {
@@ -108,6 +134,18 @@ export class PerpKeeperService implements IPerpKeeperService {
 
   getExchangeAdapters(): Map<ExchangeType, IPerpExchangeAdapter> {
     return new Map(this.adapters);
+  }
+
+  getSpotAdapter(exchangeType: ExchangeType): ISpotExchangeAdapter {
+    const adapter = this.spotAdapters.get(exchangeType);
+    if (!adapter) {
+      throw new Error(`Spot adapter not found: ${exchangeType}`);
+    }
+    return adapter;
+  }
+
+  getSpotAdapters(): Map<ExchangeType, ISpotExchangeAdapter> {
+    return new Map(this.spotAdapters);
   }
 
   async placeOrder(exchangeType: ExchangeType, request: PerpOrderRequest): Promise<PerpOrderResponse> {

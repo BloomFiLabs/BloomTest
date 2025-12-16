@@ -8,7 +8,11 @@ import {
 } from '../FundingRateAggregator';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
-import { OrderSide, OrderType, TimeInForce } from '../../value-objects/PerpOrder';
+import {
+  OrderSide,
+  OrderType,
+  TimeInForce,
+} from '../../value-objects/PerpOrder';
 import { Percentage } from '../../value-objects/Percentage';
 
 describe('ExecutionPlanBuilder', () => {
@@ -80,6 +84,8 @@ describe('ExecutionPlanBuilder', () => {
       shortMarkPrice: 3000,
       longOpenInterest: 100000,
       shortOpenInterest: 100000,
+      long24hVolume: 10000000, // 10M volume to satisfy volume requirements
+      short24hVolume: 10000000,
       timestamp: new Date(),
     });
 
@@ -334,7 +340,9 @@ describe('ExecutionPlanBuilder', () => {
       expect(result.isFailure).toBe(true);
       if (result.isFailure) {
         // Could be VALIDATION_ERROR (unprofitable) or EXECUTION_PLAN_ERROR (caught exception)
-        expect(['VALIDATION_ERROR', 'EXECUTION_PLAN_ERROR']).toContain(result.error.code);
+        expect(['VALIDATION_ERROR', 'EXECUTION_PLAN_ERROR']).toContain(
+          result.error.code,
+        );
       }
     });
 

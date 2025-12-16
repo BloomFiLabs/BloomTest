@@ -1,11 +1,26 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ExchangeType } from '../value-objects/ExchangeConfig';
-import { PerpOrderRequest, PerpOrderResponse, OrderStatus } from '../value-objects/PerpOrder';
+import {
+  PerpOrderRequest,
+  PerpOrderResponse,
+  OrderStatus,
+} from '../value-objects/PerpOrder';
 import { PerpPosition } from '../entities/PerpPosition';
 import { PerpOrder } from '../entities/PerpOrder';
-import { IPerpExchangeAdapter, ExchangeError } from '../ports/IPerpExchangeAdapter';
-import { FundingRateAggregator, FundingRateComparison, ArbitrageOpportunity } from './FundingRateAggregator';
-import { FundingArbitrageStrategy, ArbitrageExecutionResult } from './FundingArbitrageStrategy';
+import {
+  IPerpExchangeAdapter,
+  ExchangeError,
+} from '../ports/IPerpExchangeAdapter';
+import { ISpotExchangeAdapter } from '../ports/ISpotExchangeAdapter';
+import {
+  FundingRateAggregator,
+  FundingRateComparison,
+  ArbitrageOpportunity,
+} from './FundingRateAggregator';
+import {
+  FundingArbitrageStrategy,
+  ArbitrageExecutionResult,
+} from './FundingArbitrageStrategy';
 
 /**
  * Strategy execution result
@@ -31,14 +46,17 @@ export interface PositionMonitoringResult {
 
 /**
  * PerpKeeperOrchestrator - Domain service for orchestrating perpetual keeper operations
- * 
+ *
  * This service coordinates trading operations across multiple exchanges,
  * manages order lifecycle, and provides high-level abstractions for strategy execution.
  */
 @Injectable()
 export class PerpKeeperOrchestrator {
   private readonly logger = new Logger(PerpKeeperOrchestrator.name);
-  private readonly exchangeAdapters: Map<ExchangeType, IPerpExchangeAdapter> = new Map();
+  private readonly exchangeAdapters: Map<ExchangeType, IPerpExchangeAdapter> =
+    new Map();
+  private readonly spotAdapters: Map<ExchangeType, ISpotExchangeAdapter> =
+    new Map();
   private readonly activeOrders: Map<string, PerpOrder> = new Map(); // Internal order ID -> PerpOrder
 
   constructor(
@@ -49,12 +67,21 @@ export class PerpKeeperOrchestrator {
   /**
    * Initialize orchestrator with exchange adapters
    */
-  initialize(adapters: Map<ExchangeType, IPerpExchangeAdapter>): void {
+  initialize(
+    adapters: Map<ExchangeType, IPerpExchangeAdapter>,
+    spotAdapters: Map<ExchangeType, ISpotExchangeAdapter> = new Map(),
+  ): void {
     this.exchangeAdapters.clear();
     adapters.forEach((adapter, type) => {
       this.exchangeAdapters.set(type, adapter);
     });
-    this.logger.log(`Initialized with ${this.exchangeAdapters.size} exchange adapters`);
+    this.spotAdapters.clear();
+    spotAdapters.forEach((adapter, type) => {
+      this.spotAdapters.set(type, adapter);
+    });
+    this.logger.log(
+      `Initialized with ${this.exchangeAdapters.size} perp adapters and ${this.spotAdapters.size} spot adapters`,
+    );
   }
 
   /**
@@ -72,7 +99,12 @@ export class PerpKeeperOrchestrator {
     try {
       const response = await adapter.placeOrder(request);
       const orderId = this.generateOrderId();
-      const order = PerpOrder.fromRequestAndResponse(orderId, exchangeType, request, response);
+      const order = PerpOrder.fromRequestAndResponse(
+        orderId,
+        exchangeType,
+        request,
+        response,
+      );
       this.activeOrders.set(orderId, order);
 
       this.logger.log(
@@ -81,7 +113,9 @@ export class PerpKeeperOrchestrator {
 
       return { order, response };
     } catch (error) {
-      this.logger.error(`Failed to place order on ${exchangeType}: ${error.message}`);
+      this.logger.error(
+        `Failed to place order on ${exchangeType}: ${error.message}`,
+      );
       throw error;
     }
   }
@@ -137,7 +171,10 @@ export class PerpKeeperOrchestrator {
     }
 
     try {
-      const success = await adapter.cancelOrder(order.exchangeOrderId, order.symbol);
+      const success = await adapter.cancelOrder(
+        order.exchangeOrderId,
+        order.symbol,
+      );
 
       if (success) {
         const cancelledOrder = order.update(OrderStatus.CANCELLED);
@@ -155,7 +192,9 @@ export class PerpKeeperOrchestrator {
    * Get all active orders across all exchanges
    */
   getActiveOrders(): PerpOrder[] {
-    return Array.from(this.activeOrders.values()).filter((order) => order.isActive());
+    return Array.from(this.activeOrders.values()).filter((order) =>
+      order.isActive(),
+    );
   }
 
   /**
@@ -175,17 +214,27 @@ export class PerpKeeperOrchestrator {
       try {
         const positions = await adapter.getPositions();
         // Filter out positions with very small sizes (likely rounding errors or stale data)
-        const validPositions = positions.filter(p => Math.abs(p.size) > 0.0001);
+        const validPositions = positions.filter(
+          (p) => Math.abs(p.size) > 0.0001,
+        );
         allPositions.push(...validPositions);
         positionsByExchange.set(exchangeType, validPositions);
       } catch (error) {
-        this.logger.error(`Failed to get positions from ${exchangeType}: ${error.message}`);
+        this.logger.error(
+          `Failed to get positions from ${exchangeType}: ${error.message}`,
+        );
       }
     }
 
     // Calculate aggregated metrics
-    const totalUnrealizedPnl = allPositions.reduce((sum, pos) => sum + pos.unrealizedPnl, 0);
-    const totalPositionValue = allPositions.reduce((sum, pos) => sum + pos.getPositionValue(), 0);
+    const totalUnrealizedPnl = allPositions.reduce(
+      (sum, pos) => sum + pos.unrealizedPnl,
+      0,
+    );
+    const totalPositionValue = allPositions.reduce(
+      (sum, pos) => sum + pos.getPositionValue(),
+      0,
+    );
 
     return {
       positions: allPositions,
@@ -199,7 +248,9 @@ export class PerpKeeperOrchestrator {
    * Execute a strategy with error handling and retry logic
    */
   async executeStrategyWithRetry(
-    strategy: (adapters: Map<ExchangeType, IPerpExchangeAdapter>) => Promise<StrategyExecutionResult>,
+    strategy: (
+      adapters: Map<ExchangeType, IPerpExchangeAdapter>,
+    ) => Promise<StrategyExecutionResult>,
     maxRetries: number = 3,
   ): Promise<StrategyExecutionResult> {
     let lastError: Error | undefined;
@@ -211,7 +262,9 @@ export class PerpKeeperOrchestrator {
       } catch (error) {
         lastError = error as Error;
         attempt++;
-        this.logger.warn(`Strategy execution attempt ${attempt} failed: ${error.message}`);
+        this.logger.warn(
+          `Strategy execution attempt ${attempt} failed: ${error.message}`,
+        );
 
         if (attempt < maxRetries) {
           // Exponential backoff
@@ -221,7 +274,9 @@ export class PerpKeeperOrchestrator {
       }
     }
 
-    throw new Error(`Strategy execution failed after ${maxRetries} attempts: ${lastError?.message}`);
+    throw new Error(
+      `Strategy execution failed after ${maxRetries} attempts: ${lastError?.message}`,
+    );
   }
 
   /**
@@ -255,7 +310,9 @@ export class PerpKeeperOrchestrator {
 
     const response = await adapter.placeOrder(request);
 
-    this.logger.log(`Routed order to ${selectedExchange} based on routing criteria`);
+    this.logger.log(
+      `Routed order to ${selectedExchange} based on routing criteria`,
+    );
 
     return { exchangeType: selectedExchange, response };
   }
@@ -267,7 +324,10 @@ export class PerpKeeperOrchestrator {
     healthy: boolean;
     exchanges: Map<ExchangeType, { ready: boolean; error?: string }>;
   }> {
-    const exchanges = new Map<ExchangeType, { ready: boolean; error?: string }>();
+    const exchanges = new Map<
+      ExchangeType,
+      { ready: boolean; error?: string }
+    >();
 
     for (const [type, adapter] of this.exchangeAdapters) {
       try {
@@ -278,7 +338,9 @@ export class PerpKeeperOrchestrator {
       }
     }
 
-    const healthy = Array.from(exchanges.values()).every((status) => status.ready);
+    const healthy = Array.from(exchanges.values()).every(
+      (status) => status.ready,
+    );
 
     return { healthy, exchanges };
   }
@@ -330,8 +392,14 @@ export class PerpKeeperOrchestrator {
     symbols: string[],
     minSpread?: number,
     showProgress: boolean = true,
+    includePerpSpot: boolean = false,
   ): Promise<ArbitrageOpportunity[]> {
-    return await this.aggregator.findArbitrageOpportunities(symbols, minSpread, showProgress);
+    return await this.aggregator.findArbitrageOpportunities(
+      symbols,
+      minSpread,
+      showProgress,
+      includePerpSpot,
+    );
   }
 
   /**
@@ -345,6 +413,7 @@ export class PerpKeeperOrchestrator {
     return await this.arbitrageStrategy.executeStrategy(
       symbols,
       this.exchangeAdapters,
+      this.spotAdapters,
       minSpread,
       maxPositionSizeUsd,
     );
@@ -357,4 +426,3 @@ export class PerpKeeperOrchestrator {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
-

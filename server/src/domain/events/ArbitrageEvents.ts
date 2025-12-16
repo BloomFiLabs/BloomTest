@@ -26,7 +26,9 @@ export class ExecutionPlanCreatedEvent extends BaseDomainEvent {
   public readonly eventType = 'ExecutionPlanCreated';
 
   constructor(
-    public readonly plan: ArbitrageExecutionPlan,
+    public readonly plan:
+      | ArbitrageExecutionPlan
+      | import('../services/strategy-rules/PerpSpotExecutionPlanBuilder').PerpSpotExecutionPlan,
     public readonly opportunity: ArbitrageOpportunity,
     public readonly symbol: string,
   ) {

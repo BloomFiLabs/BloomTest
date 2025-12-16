@@ -1,19 +1,33 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { IIdleFundsManager, IdleFundsInfo, PositionPerformance, IdleFundsAllocation } from './IIdleFundsManager';
+import {
+  IIdleFundsManager,
+  IdleFundsInfo,
+  PositionPerformance,
+  IdleFundsAllocation,
+} from './IIdleFundsManager';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
 import { ArbitrageOpportunity } from '../FundingRateAggregator';
 import { PerpPosition } from '../../entities/PerpPosition';
 import { Result } from '../../common/Result';
-import { DomainException, ExchangeException } from '../../exceptions/DomainException';
+import {
+  DomainException,
+  ExchangeException,
+} from '../../exceptions/DomainException';
 import { StrategyConfig } from '../../value-objects/StrategyConfig';
-import { PerpOrderRequest, OrderSide, OrderType, TimeInForce, OrderStatus } from '../../value-objects/PerpOrder';
+import {
+  PerpOrderRequest,
+  OrderSide,
+  OrderType,
+  TimeInForce,
+  OrderStatus,
+} from '../../value-objects/PerpOrder';
 import { ExecutionPlanBuilder } from './ExecutionPlanBuilder';
 import { CostCalculator } from './CostCalculator';
 
 /**
  * IdleFundsManager - Manages idle funds and reallocates them to best opportunities
- * 
+ *
  * Responsibilities:
  * 1. Detect idle funds (unused balance, unfilled orders after retries)
  * 2. Rank positions by performance
@@ -36,7 +50,10 @@ export class IdleFundsManager implements IIdleFundsManager {
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
     currentPositions: PerpPosition[],
     openOrders: Map<ExchangeType, string[]>,
-    failedOrders: Map<ExchangeType, Array<{ orderId: string; symbol: string; timestamp: Date }>>,
+    failedOrders: Map<
+      ExchangeType,
+      Array<{ orderId: string; symbol: string; timestamp: Date }>
+    >,
   ): Promise<Result<IdleFundsInfo[], DomainException>> {
     const idleFunds: IdleFundsInfo[] = [];
 
@@ -45,7 +62,8 @@ export class IdleFundsManager implements IIdleFundsManager {
       const marginUsedPerExchange = new Map<ExchangeType, number>();
       for (const position of currentPositions) {
         const current = marginUsedPerExchange.get(position.exchangeType) || 0;
-        const positionValue = Math.abs(position.size) * (position.markPrice || position.entryPrice);
+        const positionValue =
+          Math.abs(position.size) * (position.markPrice || position.entryPrice);
         const marginUsed = positionValue / this.config.leverage;
         marginUsedPerExchange.set(position.exchangeType, current + marginUsed);
       }
@@ -60,7 +78,9 @@ export class IdleFundsManager implements IIdleFundsManager {
           // Check for unused balance
           if (availableBalance >= this.MIN_IDLE_THRESHOLD) {
             // Check if this exchange has any active positions or open orders
-            const hasActivePositions = currentPositions.some(p => p.exchangeType === exchange);
+            const hasActivePositions = currentPositions.some(
+              (p) => p.exchangeType === exchange,
+            );
             const hasOpenOrders = (openOrders.get(exchange) || []).length > 0;
 
             if (!hasActivePositions && !hasOpenOrders) {
@@ -87,10 +107,16 @@ export class IdleFundsManager implements IIdleFundsManager {
             if (ageMs >= this.ORDER_FAILURE_TIMEOUT_MS) {
               // Try to get order status to see if it's still pending
               try {
-                const orderStatus = await adapter.getOrderStatus(failedOrder.orderId, failedOrder.symbol);
-                
+                const orderStatus = await adapter.getOrderStatus(
+                  failedOrder.orderId,
+                  failedOrder.symbol,
+                );
+
                 // If order is still pending after timeout, consider funds idle
-                if (orderStatus.status === OrderStatus.SUBMITTED || orderStatus.status === OrderStatus.PENDING) {
+                if (
+                  orderStatus.status === OrderStatus.SUBMITTED ||
+                  orderStatus.status === OrderStatus.PENDING
+                ) {
                   // Estimate idle balance from order size (approximate)
                   const estimatedIdle = availableBalance * 0.1; // Conservative estimate
                   if (estimatedIdle >= this.MIN_IDLE_THRESHOLD) {
@@ -119,7 +145,10 @@ export class IdleFundsManager implements IIdleFundsManager {
       }
 
       if (idleFunds.length > 0) {
-        const totalIdle = idleFunds.reduce((sum, info) => sum + info.idleBalance, 0);
+        const totalIdle = idleFunds.reduce(
+          (sum, info) => sum + info.idleBalance,
+          0,
+        );
         this.logger.log(
           `💰 Detected $${totalIdle.toFixed(2)} in idle funds across ${idleFunds.length} source(s)`,
         );
@@ -148,14 +177,18 @@ export class IdleFundsManager implements IIdleFundsManager {
       const opportunity = opportunities.find(
         (opp) =>
           opp.symbol === position.symbol &&
-          ((opp.longExchange === position.exchangeType && position.side === 'LONG') ||
-            (opp.shortExchange === position.exchangeType && position.side === 'SHORT')),
+          ((opp.longExchange === position.exchangeType &&
+            position.side === 'LONG') ||
+            (opp.shortExchange === position.exchangeType &&
+              position.side === 'SHORT')),
       );
 
       if (opportunity) {
-        const positionValue = Math.abs(position.size) * (position.markPrice || position.entryPrice);
+        const positionValue =
+          Math.abs(position.size) * (position.markPrice || position.entryPrice);
         const expectedReturnPerPeriod = opportunity.expectedReturn
-          ? opportunity.expectedReturn.toDecimal() * positionValue / (24 * 365)
+          ? (opportunity.expectedReturn.toDecimal() * positionValue) /
+            (24 * 365)
           : 0;
         const expectedAPY = opportunity.expectedReturn
           ? opportunity.expectedReturn.toDecimal()
@@ -178,7 +211,9 @@ export class IdleFundsManager implements IIdleFundsManager {
     }
 
     // Sort by expected return per period (best first)
-    return performance.sort((a, b) => b.expectedReturnPerPeriod - a.expectedReturnPerPeriod);
+    return performance.sort(
+      (a, b) => b.expectedReturnPerPeriod - a.expectedReturnPerPeriod,
+    );
   }
 
   allocateIdleFunds(
@@ -197,14 +232,22 @@ export class IdleFundsManager implements IIdleFundsManager {
     }
 
     const allocations: IdleFundsAllocation[] = [];
-    const totalIdle = idleFunds.reduce((sum, info) => sum + info.idleBalance, 0);
+    const totalIdle = idleFunds.reduce(
+      (sum, info) => sum + info.idleBalance,
+      0,
+    );
 
     // Rank positions by performance
-    const rankedPositions = this.rankPositionsByPerformance(currentPositions, opportunities);
+    const rankedPositions = this.rankPositionsByPerformance(
+      currentPositions,
+      opportunities,
+    );
 
     // Sort opportunities by expected return (best first)
     const sortedOpportunities = [...opportunities].sort(
-      (a, b) => (b.expectedReturn?.toDecimal() || 0) - (a.expectedReturn?.toDecimal() || 0),
+      (a, b) =>
+        (b.expectedReturn?.toDecimal() || 0) -
+        (a.expectedReturn?.toDecimal() || 0),
     );
 
     // Strategy 1: Allocate to best performing positions first
@@ -212,17 +255,20 @@ export class IdleFundsManager implements IIdleFundsManager {
       if (rankedPosition.expectedAPY <= 0) break; // Skip non-profitable positions
 
       const position = rankedPosition.position;
-      const positionValue = Math.abs(position.size) * (position.markPrice || position.entryPrice);
+      const positionValue =
+        Math.abs(position.size) * (position.markPrice || position.entryPrice);
       const currentMargin = positionValue / this.config.leverage;
 
       // Calculate how much we can add to this position
       const maxAdditionalMargin = currentMargin * 0.5; // Add up to 50% more
       const targetValue = positionValue * 1.5;
-      const additionalNeeded = targetValue / this.config.leverage - currentMargin;
+      const additionalNeeded =
+        targetValue / this.config.leverage - currentMargin;
 
       // Find idle funds on the same exchange
       const exchangeIdleFunds = idleFunds.filter(
-        (info) => info.exchange === position.exchangeType && info.idleBalance > 0,
+        (info) =>
+          info.exchange === position.exchangeType && info.idleBalance > 0,
       );
 
       for (const idleInfo of exchangeIdleFunds) {
@@ -246,12 +292,17 @@ export class IdleFundsManager implements IIdleFundsManager {
     }
 
     // Strategy 2: Allocate remaining idle funds to next best opportunities
-    const remainingIdleFunds = idleFunds.filter((info) => info.idleBalance >= this.MIN_IDLE_THRESHOLD);
-    
+    const remainingIdleFunds = idleFunds.filter(
+      (info) => info.idleBalance >= this.MIN_IDLE_THRESHOLD,
+    );
+
     if (remainingIdleFunds.length > 0 && sortedOpportunities.length > 0) {
       // Distribute remaining idle funds proportionally to best opportunities
-      const totalRemainingIdle = remainingIdleFunds.reduce((sum, info) => sum + info.idleBalance, 0);
-      
+      const totalRemainingIdle = remainingIdleFunds.reduce(
+        (sum, info) => sum + info.idleBalance,
+        0,
+      );
+
       // Allocate to top opportunities (up to 5)
       const topOpportunities = sortedOpportunities.slice(0, 5);
       const totalExpectedReturn = topOpportunities.reduce(
@@ -261,16 +312,22 @@ export class IdleFundsManager implements IIdleFundsManager {
 
       if (totalExpectedReturn > 0) {
         for (const opportunity of topOpportunities) {
-          const opportunityWeight = (opportunity.expectedReturn?.toDecimal() || 0) / totalExpectedReturn;
+          const opportunityWeight =
+            (opportunity.expectedReturn?.toDecimal() || 0) /
+            totalExpectedReturn;
           const targetAllocation = totalRemainingIdle * opportunityWeight;
 
           // Find idle funds that can be allocated to this opportunity
           // Need funds on both exchanges
           const longExchangeIdle = remainingIdleFunds.find(
-            (info) => info.exchange === opportunity.longExchange && info.idleBalance > 0,
+            (info) =>
+              info.exchange === opportunity.longExchange &&
+              info.idleBalance > 0,
           );
           const shortExchangeIdle = remainingIdleFunds.find(
-            (info) => info.exchange === opportunity.shortExchange && info.idleBalance > 0,
+            (info) =>
+              info.exchange === opportunity.shortExchange &&
+              info.idleBalance > 0,
           );
 
           if (longExchangeIdle && shortExchangeIdle) {
@@ -306,7 +363,10 @@ export class IdleFundsManager implements IIdleFundsManager {
             }
           } else if (longExchangeIdle) {
             // Only long exchange has idle funds
-            const longAllocation = Math.min(targetAllocation, longExchangeIdle.idleBalance);
+            const longAllocation = Math.min(
+              targetAllocation,
+              longExchangeIdle.idleBalance,
+            );
             if (longAllocation >= this.MIN_IDLE_THRESHOLD) {
               allocations.push({
                 source: longExchangeIdle,
@@ -320,7 +380,10 @@ export class IdleFundsManager implements IIdleFundsManager {
             }
           } else if (shortExchangeIdle) {
             // Only short exchange has idle funds
-            const shortAllocation = Math.min(targetAllocation, shortExchangeIdle.idleBalance);
+            const shortAllocation = Math.min(
+              targetAllocation,
+              shortExchangeIdle.idleBalance,
+            );
             if (shortAllocation >= this.MIN_IDLE_THRESHOLD) {
               allocations.push({
                 source: shortExchangeIdle,
@@ -338,7 +401,10 @@ export class IdleFundsManager implements IIdleFundsManager {
     }
 
     if (allocations.length > 0) {
-      const totalAllocated = allocations.reduce((sum, alloc) => sum + alloc.target.allocation, 0);
+      const totalAllocated = allocations.reduce(
+        (sum, alloc) => sum + alloc.target.allocation,
+        0,
+      );
       this.logger.log(
         `📊 Allocated $${totalAllocated.toFixed(2)} idle funds to ${allocations.length} target(s)`,
       );
@@ -350,7 +416,9 @@ export class IdleFundsManager implements IIdleFundsManager {
   async executeAllocations(
     allocations: IdleFundsAllocation[],
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
-  ): Promise<Result<{ allocated: number; allocations: number }, DomainException>> {
+  ): Promise<
+    Result<{ allocated: number; allocations: number }, DomainException>
+  > {
     if (allocations.length === 0) {
       return Result.success({ allocated: 0, allocations: 0 });
     }
@@ -382,11 +450,21 @@ export class IdleFundsManager implements IIdleFundsManager {
 
         // Create execution plan for the opportunity
         // Need to get balances first
+        if (!opportunity.shortExchange) {
+          this.logger.warn(
+            `Missing shortExchange for ${opportunity.symbol}, skipping allocation`,
+          );
+          continue;
+        }
         const longAdapter = adapters.get(opportunity.longExchange);
-        const shortAdapter = adapters.get(opportunity.shortExchange);
-        
+        const shortAdapter = opportunity.shortExchange
+          ? adapters.get(opportunity.shortExchange)
+          : undefined;
+
         if (!longAdapter || !shortAdapter) {
-          this.logger.warn(`Missing adapters for ${opportunity.symbol}, skipping allocation`);
+          this.logger.warn(
+            `Missing adapters for ${opportunity.symbol}, skipping allocation`,
+          );
           continue;
         }
 
@@ -415,9 +493,12 @@ export class IdleFundsManager implements IIdleFundsManager {
         const plan = planResult.value;
 
         // Calculate position size from allocation amount
-        const markPrice = opportunity.longMarkPrice || opportunity.shortMarkPrice || 0;
+        const markPrice =
+          opportunity.longMarkPrice || opportunity.shortMarkPrice || 0;
         if (markPrice <= 0) {
-          this.logger.warn(`Invalid mark price for ${opportunity.symbol}, skipping allocation`);
+          this.logger.warn(
+            `Invalid mark price for ${opportunity.symbol}, skipping allocation`,
+          );
           continue;
         }
 
@@ -475,6 +556,3 @@ export class IdleFundsManager implements IIdleFundsManager {
     });
   }
 }
-
-
-

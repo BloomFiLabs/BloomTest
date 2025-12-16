@@ -34,23 +34,28 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
   evaluateOpportunityWithHistory(
     opportunity: ArbitrageOpportunity,
     plan: ArbitrageExecutionPlan | null,
-  ): Result<{
-    breakEvenHours: number | null;
-    historicalMetrics: {
-      long: HistoricalMetrics | null;
-      short: HistoricalMetrics | null;
-    };
-    worstCaseBreakEvenHours: number | null;
-    consistencyScore: number;
-  }, DomainException> {
+  ): Result<
+    {
+      breakEvenHours: number | null;
+      historicalMetrics: {
+        long: HistoricalMetrics | null;
+        short: HistoricalMetrics | null;
+      };
+      worstCaseBreakEvenHours: number | null;
+      consistencyScore: number;
+    },
+    DomainException
+  > {
     const longMetrics = this.historicalService.getHistoricalMetrics(
       opportunity.symbol,
       opportunity.longExchange,
     );
-    const shortMetrics = this.historicalService.getHistoricalMetrics(
-      opportunity.symbol,
-      opportunity.shortExchange,
-    );
+    const shortMetrics = opportunity.shortExchange
+      ? this.historicalService.getHistoricalMetrics(
+          opportunity.symbol,
+          opportunity.shortExchange,
+        )
+      : null;
 
     // Calculate consistency score (average of both exchanges)
     const consistencyScore =
@@ -95,7 +100,10 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
   async selectWorstCaseOpportunity(
     allOpportunities: Array<{
       opportunity: ArbitrageOpportunity;
-      plan: ArbitrageExecutionPlan | null;
+      plan:
+        | ArbitrageExecutionPlan
+        | import('./PerpSpotExecutionPlanBuilder').PerpSpotExecutionPlan
+        | null;
       netReturn: number;
       positionValueUsd: number;
       breakEvenHours: number | null;
@@ -103,11 +111,18 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
     maxPositionSizeUsd: number | undefined,
     exchangeBalances: Map<ExchangeType, number>,
-  ): Promise<Result<{
-    opportunity: ArbitrageOpportunity;
-    plan: ArbitrageExecutionPlan;
-    reason: string;
-  } | null, DomainException>> {
+  ): Promise<
+    Result<
+      {
+        opportunity: ArbitrageOpportunity;
+        plan:
+          | ArbitrageExecutionPlan
+          | import('./PerpSpotExecutionPlanBuilder').PerpSpotExecutionPlan;
+        reason: string;
+      } | null,
+      DomainException
+    >
+  > {
     if (allOpportunities.length === 0) {
       return Result.success(null);
     }
@@ -123,9 +138,14 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
     for (const item of allOpportunities) {
       if (!item.plan) continue; // Skip if no plan
 
+      // Skip perp-spot plans (not supported for worst-case selection)
+      if ('perpOrder' in item.plan && 'spotOrder' in item.plan) {
+        continue;
+      }
+
       const historicalResult = this.evaluateOpportunityWithHistory(
         item.opportunity,
-        item.plan,
+        item.plan as ArbitrageExecutionPlan,
       );
       if (historicalResult.isFailure) {
         this.logger.warn(
@@ -214,12 +234,17 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
     newPlan: ArbitrageExecutionPlan,
     cumulativeLoss: number,
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
-  ): Promise<Result<{
-    shouldRebalance: boolean;
-    reason: string;
-    currentBreakEvenHours: number | null;
-    newBreakEvenHours: number | null;
-  }, DomainException>> {
+  ): Promise<
+    Result<
+      {
+        shouldRebalance: boolean;
+        reason: string;
+        currentBreakEvenHours: number | null;
+        newBreakEvenHours: number | null;
+      },
+      DomainException
+    >
+  > {
     // Get current position's funding rate
     let currentFundingRate = 0;
     try {
@@ -271,7 +296,8 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
     const periodsPerYear = 24 * 365;
     const newPositionSizeUsd = newPlan.positionSize.toUSD(avgMarkPrice);
     const newHourlyReturn =
-      (newOpportunity.expectedReturn.toDecimal() / periodsPerYear) * newPositionSizeUsd;
+      (newOpportunity.expectedReturn.toDecimal() / periodsPerYear) *
+      newPositionSizeUsd;
 
     // Calculate P2 costs (entry fees + exit fees + slippage)
     const p2EntryFees = newPlan.estimatedCosts.fees / 2; // Entry is half of total fees
@@ -399,9 +425,3 @@ export class OpportunityEvaluator implements IOpportunityEvaluator {
     });
   }
 }
-
-
-
-
-
-

@@ -16,7 +16,7 @@ describe('PortfolioOptimizer', () => {
   let config: StrategyConfig;
 
   beforeEach(async () => {
-    config = new StrategyConfig();
+    config = StrategyConfig.withDefaults();
 
     mockCostCalculator = {
       calculateSlippageCost: jest.fn(),
@@ -36,7 +36,10 @@ describe('PortfolioOptimizer', () => {
       providers: [
         PortfolioOptimizer,
         { provide: CostCalculator, useValue: mockCostCalculator },
-        { provide: HistoricalFundingRateService, useValue: mockHistoricalService },
+        {
+          provide: HistoricalFundingRateService,
+          useValue: mockHistoricalService,
+        },
         { provide: StrategyConfig, useValue: config },
       ],
     }).compile();
@@ -514,4 +517,3 @@ describe('PortfolioOptimizer', () => {
     });
   });
 });
-

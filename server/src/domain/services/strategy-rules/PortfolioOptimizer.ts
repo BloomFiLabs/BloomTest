@@ -1,5 +1,8 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
-import { IPortfolioOptimizer, PortfolioOptimizationInput } from './IPortfolioOptimizer';
+import {
+  IPortfolioOptimizer,
+  PortfolioOptimizationInput,
+} from './IPortfolioOptimizer';
 import { CostCalculator } from './CostCalculator';
 import type { IHistoricalFundingRateService } from '../../ports/IHistoricalFundingRateService';
 import type { IOptimalLeverageService } from '../../ports/IOptimalLeverageService';
@@ -11,7 +14,7 @@ import { OrderType } from '../../value-objects/PerpOrder';
 /**
  * Portfolio optimizer for funding arbitrage strategy
  * Calculates optimal position sizes and allocations across multiple opportunities
- * 
+ *
  * Key concepts:
  * - maxPortfolioFor35APY: The maximum POSITION size that still yields 35% APY on COLLATERAL
  * - optimalLeverage: The leverage that maximizes position capacity while maintaining target APY
@@ -25,7 +28,8 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
     private readonly costCalculator: CostCalculator,
     private readonly historicalService: IHistoricalFundingRateService,
     private readonly config: StrategyConfig,
-    @Optional() @Inject('IOptimalLeverageService')
+    @Optional()
+    @Inject('IOptimalLeverageService')
     private readonly leverageService?: IOptimalLeverageService,
   ) {}
 
@@ -78,7 +82,7 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
           ),
           this.leverageService.calculateOptimalLeverage(
             opportunity.symbol,
-            opportunity.shortExchange,
+            opportunity.shortExchange!,
             10000,
           ),
         ]);
@@ -89,8 +93,8 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
         );
         this.logger.debug(
           `${opportunity.symbol}: Optimal leverage ${optimalLeverage}x ` +
-          `(${opportunity.longExchange}: ${longLevRec.optimalLeverage}x, ` +
-          `${opportunity.shortExchange}: ${shortLevRec.optimalLeverage}x)`,
+            `(${opportunity.longExchange}: ${longLevRec.optimalLeverage}x, ` +
+            `${opportunity.shortExchange}: ${shortLevRec.optimalLeverage}x)`,
         );
       } catch (error: any) {
         this.logger.debug(
@@ -101,9 +105,7 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
 
     // Get historical weighted average rates (more robust than current snapshot)
     const currentLongRate =
-      opportunity.longRate !== undefined
-        ? opportunity.longRate.toDecimal()
-        : 0;
+      opportunity.longRate !== undefined ? opportunity.longRate.toDecimal() : 0;
     const currentShortRate =
       opportunity.shortRate !== undefined
         ? opportunity.shortRate.toDecimal()
@@ -114,6 +116,9 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
       opportunity.longExchange,
       currentLongRate,
     );
+    if (!opportunity.shortExchange) {
+      throw new Error('shortExchange is required for perp-perp opportunities');
+    }
     const historicalShortRate = this.historicalService.getWeightedAverageRate(
       opportunity.symbol,
       opportunity.shortExchange,
@@ -149,6 +154,9 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
     // Get fee rates from config
     const longFeeRate =
       this.config.exchangeFeeRates.get(opportunity.longExchange) || 0.0005;
+    if (!opportunity.shortExchange) {
+      throw new Error('shortExchange is required for perp-perp opportunities');
+    }
     const shortFeeRate =
       this.config.exchangeFeeRates.get(opportunity.shortExchange) || 0.0005;
     const totalFeeRate = (longFeeRate + shortFeeRate) * 2; // Entry + exit fees for both legs
@@ -215,7 +223,7 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
       const grossReturnPerHour =
         (effectiveGrossAPY / periodsPerYear) * testPosition;
       const netReturnPerHour = grossReturnPerHour - amortizedCostsPerHour;
-      
+
       // IMPORTANT: APY should be calculated on COLLATERAL (actual capital deployed), not position value
       // With leverage, you earn funding on the full position but only deploy collateral = position / leverage
       // Example: $100k position with 2x leverage = $50k collateral, 35% position APY = 70% collateral APY
@@ -246,6 +254,11 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
 
     // Apply volatility-based portfolio size reduction
     if (maxPortfolio !== null && maxPortfolio > 0) {
+      if (!opportunity.shortExchange) {
+        throw new Error(
+          'shortExchange is required for perp-perp opportunities',
+        );
+      }
       const volatilityMetrics =
         this.historicalService.getSpreadVolatilityMetrics(
           opportunity.symbol,
@@ -329,7 +342,10 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
           maxPortfolio * (1 - totalVolatilityPenalty);
 
         // Ensure minimum portfolio size ($1k)
-        const finalMaxPortfolio = Math.max(1000, volatilityAdjustedMaxPortfolio);
+        const finalMaxPortfolio = Math.max(
+          1000,
+          volatilityAdjustedMaxPortfolio,
+        );
 
         return {
           maxPortfolio: finalMaxPortfolio,
@@ -389,7 +405,7 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
         item.opportunity.symbol,
         item.opportunity.longExchange,
         item.opportunity.symbol,
-        item.opportunity.shortExchange,
+        item.opportunity.shortExchange!,
         currentLongRate,
         currentShortRate,
       );
@@ -514,7 +530,7 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
               item.opportunity.symbol,
               item.opportunity.longExchange,
               item.opportunity.symbol,
-              item.opportunity.shortExchange,
+              item.opportunity.shortExchange!,
               currentLongRate,
               currentShortRate,
             );
@@ -524,7 +540,7 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
                 item.opportunity.symbol,
                 item.opportunity.longExchange,
                 item.opportunity.symbol,
-                item.opportunity.shortExchange,
+                item.opportunity.shortExchange!,
                 30,
               );
 
@@ -537,8 +553,9 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
               this.config.exchangeFeeRates.get(item.opportunity.longExchange) ||
               0.0005;
             const shortFeeRate =
-              this.config.exchangeFeeRates.get(item.opportunity.shortExchange) ||
-              0.0005;
+              this.config.exchangeFeeRates.get(
+                item.opportunity.shortExchange!,
+              ) || 0.0005;
             const totalFeeRate = (longFeeRate + shortFeeRate) * 2;
 
             const longSlippage = this.costCalculator.calculateSlippageCost(
@@ -567,20 +584,22 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
             const historicalShortRate =
               this.historicalService.getWeightedAverageRate(
                 item.opportunity.symbol,
-                item.opportunity.shortExchange,
+                item.opportunity.shortExchange!,
                 item.opportunity.shortRate?.toDecimal() || 0,
               );
 
-            const longFundingImpact = this.costCalculator.predictFundingRateImpact(
-              allocation,
-              item.opportunity.longOpenInterest || 0,
-              historicalLongRate,
-            );
-            const shortFundingImpact = this.costCalculator.predictFundingRateImpact(
-              allocation,
-              item.opportunity.shortOpenInterest || 0,
-              historicalShortRate,
-            );
+            const longFundingImpact =
+              this.costCalculator.predictFundingRateImpact(
+                allocation,
+                item.opportunity.longOpenInterest || 0,
+                historicalLongRate,
+              );
+            const shortFundingImpact =
+              this.costCalculator.predictFundingRateImpact(
+                allocation,
+                item.opportunity.shortOpenInterest || 0,
+                historicalShortRate,
+              );
 
             const adjustedLongRate = historicalLongRate + longFundingImpact;
             const adjustedShortRate = historicalShortRate - shortFundingImpact;
@@ -592,7 +611,8 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
             // Calculate net APY on COLLATERAL (actual capital deployed)
             // With leverage, funding is earned on position value but APY should be on collateral
             // Use optimal leverage if available, otherwise use default from config
-            const positionLeverage = item.optimalLeverage ?? this.config.leverage;
+            const positionLeverage =
+              item.optimalLeverage ?? this.config.leverage;
             const totalOneTimeCosts =
               totalSlippageCost + allocation * totalFeeRate;
             const amortizedCostsPerHour = totalOneTimeCosts / periodsPerYear;
@@ -677,14 +697,16 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
   }
 
   calculateDataQualityRiskFactor(opportunity: ArbitrageOpportunity): number {
-    const longData = this.historicalService.getHistoricalData(
-      opportunity.symbol,
-      opportunity.longExchange,
-    ) || [];
-    const shortData = this.historicalService.getHistoricalData(
-      opportunity.symbol,
-      opportunity.shortExchange,
-    ) || [];
+    const longData =
+      this.historicalService.getHistoricalData(
+        opportunity.symbol,
+        opportunity.longExchange,
+      ) || [];
+    const shortData =
+      this.historicalService.getHistoricalData(
+        opportunity.symbol,
+        opportunity.shortExchange!,
+      ) || [];
 
     // Target: 168+ hourly points (7 days) or 21+ Aster points (7 days at 8-hour intervals)
     const longExchange = opportunity.longExchange;
@@ -727,7 +749,8 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
 
     // Check if we have matched data points
     const currentSpread = Math.abs(
-      opportunity.longRate.toDecimal() - opportunity.shortRate.toDecimal(),
+      opportunity.longRate.toDecimal() -
+        (opportunity.shortRate?.toDecimal() || 0),
     );
     if (Math.abs(historicalSpread - currentSpread) < 0.0000001) {
       return {
@@ -739,4 +762,3 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
     return { isValid: true };
   }
 }
-

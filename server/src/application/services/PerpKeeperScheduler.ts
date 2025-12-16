@@ -60,7 +60,8 @@ export class PerpKeeperScheduler implements OnModuleInit {
   ) {
     // Initialize orchestrator with exchange adapters
     const adapters = this.keeperService.getExchangeAdapters();
-    this.orchestrator.initialize(adapters);
+    const spotAdapters = this.keeperService.getSpotAdapters();
+    this.orchestrator.initialize(adapters, spotAdapters);
     // Removed initialization log - only execution logs shown
 
     // Load blacklisted symbols from environment variable
@@ -363,10 +364,13 @@ export class PerpKeeperScheduler implements OnModuleInit {
       const filteredSymbols = symbols.filter(s => !this.isBlacklisted(s));
 
       // Find opportunities across ALL discovered assets
+      // Enable perp-spot if configured
+      const includePerpSpot = this.configService.get<string>('PERP_SPOT_ENABLED') !== 'false';
       const opportunities = await this.orchestrator.findArbitrageOpportunities(
         filteredSymbols,
         this.minSpread,
         false, // Hide progress bar
+        includePerpSpot,
       );
 
       // Filter out any opportunities for blacklisted symbols (defensive check)

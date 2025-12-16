@@ -9,6 +9,11 @@ import { LighterExchangeAdapter } from '../adapters/lighter/LighterExchangeAdapt
 import { HyperliquidExchangeAdapter } from '../adapters/hyperliquid/HyperliquidExchangeAdapter';
 import { ExtendedExchangeAdapter } from '../adapters/extended/ExtendedExchangeAdapter';
 import { MockExchangeAdapter } from '../adapters/mock/MockExchangeAdapter';
+import { HyperliquidSpotAdapter } from '../adapters/hyperliquid/HyperliquidSpotAdapter';
+import { AsterSpotAdapter } from '../adapters/aster/AsterSpotAdapter';
+import { LighterSpotAdapter } from '../adapters/lighter/LighterSpotAdapter';
+import { ExtendedSpotAdapter } from '../adapters/extended/ExtendedSpotAdapter';
+import { ISpotExchangeAdapter } from '../../domain/ports/ISpotExchangeAdapter';
 import { ExchangeType } from '../../domain/value-objects/ExchangeConfig';
 import { IPerpExchangeAdapter } from '../../domain/ports/IPerpExchangeAdapter';
 import { AsterFundingDataProvider } from '../adapters/aster/AsterFundingDataProvider';
@@ -41,6 +46,8 @@ import { BalanceManager } from '../../domain/services/strategy-rules/BalanceMana
 import { OpportunityEvaluator } from '../../domain/services/strategy-rules/OpportunityEvaluator';
 import { ExecutionPlanBuilder } from '../../domain/services/strategy-rules/ExecutionPlanBuilder';
 import { CostCalculator } from '../../domain/services/strategy-rules/CostCalculator';
+import { PerpSpotBalanceManager } from '../../domain/services/strategy-rules/PerpSpotBalanceManager';
+import { PerpSpotExecutionPlanBuilder } from '../../domain/services/strategy-rules/PerpSpotExecutionPlanBuilder';
 import { StrategyConfig } from '../../domain/value-objects/StrategyConfig';
 import { SimpleEventBus } from '../events/SimpleEventBus';
 import type { IEventBus } from '../../domain/events/DomainEvent';
@@ -166,6 +173,60 @@ import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTrack
       inject: [ConfigService],
     },
     
+    // Spot exchange adapters
+    {
+      provide: HyperliquidSpotAdapter,
+      useFactory: (configService: ConfigService) => {
+        try {
+          return new HyperliquidSpotAdapter(configService);
+        } catch (error: any) {
+          const logger = new Logger('PerpKeeperModule');
+          logger.warn(`Failed to create Hyperliquid spot adapter: ${error.message}`);
+          return null;
+        }
+      },
+      inject: [ConfigService],
+    },
+    {
+      provide: AsterSpotAdapter,
+      useFactory: (configService: ConfigService) => {
+        try {
+          return new AsterSpotAdapter(configService);
+        } catch (error: any) {
+          const logger = new Logger('PerpKeeperModule');
+          logger.warn(`Failed to create Aster spot adapter: ${error.message}`);
+          return null;
+        }
+      },
+      inject: [ConfigService],
+    },
+    {
+      provide: LighterSpotAdapter,
+      useFactory: (configService: ConfigService) => {
+        try {
+          return new LighterSpotAdapter(configService);
+        } catch (error: any) {
+          const logger = new Logger('PerpKeeperModule');
+          logger.warn(`Failed to create Lighter spot adapter: ${error.message}`);
+          return null;
+        }
+      },
+      inject: [ConfigService],
+    },
+    {
+      provide: ExtendedSpotAdapter,
+      useFactory: (configService: ConfigService) => {
+        try {
+          return new ExtendedSpotAdapter(configService);
+        } catch (error: any) {
+          const logger = new Logger('PerpKeeperModule');
+          logger.warn(`Failed to create Extended spot adapter: ${error.message}`);
+          return null;
+        }
+      },
+      inject: [ConfigService],
+    },
+    
     // Funding data providers
     AsterFundingDataProvider,
     LighterWebSocketProvider, // WebSocket provider for Lighter (real-time OI data)
@@ -186,6 +247,8 @@ import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTrack
     // Strategy rule modules (order matters due to dependencies)
     CostCalculator,
     ExecutionPlanBuilder,
+    PerpSpotBalanceManager,
+    PerpSpotExecutionPlanBuilder,
     {
       provide: PortfolioOptimizer,
       useFactory: (

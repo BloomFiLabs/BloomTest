@@ -182,6 +182,189 @@ async function runTests() {
     log('\n⚠️ Skipping Aster tests (no credentials)');
   }
 
+  // ==================== SPOT ADAPTER TESTS ====================
+  log('\n=== Spot Adapter Integration Tests ===');
+
+  // Hyperliquid Spot Adapter
+  if (process.env.HYPERLIQUID_PRIVATE_KEY || process.env.PRIVATE_KEY) {
+    await describe('Hyperliquid Spot Adapter', async () => {
+      const { HyperliquidSpotAdapter } = await import('../../infrastructure/adapters/hyperliquid/HyperliquidSpotAdapter.js');
+      const adapter = new HyperliquidSpotAdapter(configService);
+
+      await test('should connect', async () => {
+        await adapter.testConnection();
+      });
+
+      await test('should get ETH spot price', async () => {
+        const price = await adapter.getSpotPrice('ETH');
+        if (price <= 0) throw new Error(`Invalid spot price: ${price}`);
+        log(`    ETH spot price: $${price.toFixed(2)}`);
+      });
+
+      await test('should get spot balance', async () => {
+        const balance = await adapter.getSpotBalance('ETH');
+        log(`    ETH spot balance: ${balance}`);
+      });
+
+      await test('should get spot positions', async () => {
+        const positions = await adapter.getSpotPositions();
+        log(`    Spot positions: ${positions.length}`);
+        for (const p of positions) {
+          log(`    - ${p.symbol} ${p.size} @ $${p.currentPrice}`);
+        }
+      });
+    });
+  } else {
+    log('\n⚠️ Skipping Hyperliquid Spot tests (no credentials)');
+  }
+
+  // Aster Spot Adapter
+  if (process.env.ASTER_API_KEY || process.env.ASTER_PRIVATE_KEY) {
+    await describe('Aster Spot Adapter', async () => {
+      const { AsterSpotAdapter } = await import('../../infrastructure/adapters/aster/AsterSpotAdapter.js');
+      const adapter = new AsterSpotAdapter(configService);
+
+      await test('should connect', async () => {
+        await adapter.testConnection();
+      });
+
+      await test('should get ETH spot price', async () => {
+        const price = await adapter.getSpotPrice('ETH');
+        if (price <= 0) throw new Error(`Invalid spot price: ${price}`);
+        log(`    ETH spot price: $${price.toFixed(2)}`);
+      });
+
+      await test('should get spot balance', async () => {
+        const balance = await adapter.getSpotBalance('ETH');
+        log(`    ETH spot balance: ${balance}`);
+      });
+
+      await test('should get spot positions', async () => {
+        const positions = await adapter.getSpotPositions();
+        log(`    Spot positions: ${positions.length}`);
+        for (const p of positions) {
+          log(`    - ${p.symbol} ${p.size} @ $${p.currentPrice}`);
+        }
+      });
+    });
+  } else {
+    log('\n⚠️ Skipping Aster Spot tests (no credentials)');
+  }
+
+  // Extended Spot Adapter
+  if (process.env.EXTENDED_API_KEY) {
+    await describe('Extended Spot Adapter', async () => {
+      const { ExtendedSpotAdapter } = await import('../../infrastructure/adapters/extended/ExtendedSpotAdapter.js');
+      const adapter = new ExtendedSpotAdapter(configService);
+
+      await test('should connect', async () => {
+        await adapter.testConnection();
+      });
+
+      await test('should get ETH spot price', async () => {
+        const price = await adapter.getSpotPrice('ETH');
+        if (price <= 0) throw new Error(`Invalid spot price: ${price}`);
+        log(`    ETH spot price: $${price.toFixed(2)}`);
+      });
+
+      await test('should get spot balance', async () => {
+        const balance = await adapter.getSpotBalance('ETH');
+        log(`    ETH spot balance: ${balance}`);
+      });
+    });
+  } else {
+    log('\n⚠️ Skipping Extended Spot tests (no credentials)');
+  }
+
+  // ==================== PERP-SPOT ARBITRAGE FLOW TESTS ====================
+  log('\n=== Perp-Spot Arbitrage Flow Tests ===');
+
+  if ((process.env.HYPERLIQUID_PRIVATE_KEY || process.env.PRIVATE_KEY) && process.env.HYPERLIQUID_TESTNET === 'true') {
+    await describe('Perp-Spot Arbitrage Flow (Hyperliquid Testnet)', async () => {
+      const { HyperliquidExchangeAdapter } = await import('../../infrastructure/adapters/hyperliquid/HyperliquidExchangeAdapter.js');
+      const { HyperliquidSpotAdapter } = await import('../../infrastructure/adapters/hyperliquid/HyperliquidSpotAdapter.js');
+      const { HyperLiquidDataProvider } = await import('../../infrastructure/adapters/hyperliquid/HyperLiquidDataProvider.js');
+      const { HyperLiquidWebSocketProvider } = await import('../../infrastructure/adapters/hyperliquid/HyperLiquidWebSocketProvider.js');
+      const { FundingRateAggregator } = await import('../../domain/services/FundingRateAggregator.js');
+      const { PerpSpotBalanceManager } = await import('../../domain/services/strategy-rules/PerpSpotBalanceManager.js');
+      const { PerpSpotExecutionPlanBuilder } = await import('../../domain/services/strategy-rules/PerpSpotExecutionPlanBuilder.js');
+
+      const wsProvider = new HyperLiquidWebSocketProvider();
+      const dataProvider = new HyperLiquidDataProvider(configService, wsProvider);
+      const perpAdapter = new HyperliquidExchangeAdapter(configService, dataProvider);
+      const spotAdapter = new HyperliquidSpotAdapter(configService);
+      const balanceManager = new PerpSpotBalanceManager(perpAdapter, spotAdapter);
+      const planBuilder = new PerpSpotExecutionPlanBuilder(balanceManager);
+
+      await test('should detect perp-spot opportunities', async () => {
+        const aggregator = new FundingRateAggregator(
+          null as any, // asterProvider
+          null as any, // lighterProvider
+          dataProvider,
+          wsProvider,
+          null as any, // lighterWsProvider
+          null as any, // extendedProvider
+        );
+
+        const opportunities = await aggregator.findPerpSpotOpportunities(['ETH'], 0.0001, false);
+        log(`    Found ${opportunities.length} perp-spot opportunities`);
+        for (const opp of opportunities) {
+          log(`    - ${opp.symbol}: ${opp.strategyType} on ${opp.longExchange}, spread: ${opp.spread.value}%`);
+        }
+      });
+
+      await test('should calculate optimal balance distribution', async () => {
+        const perpBalance = await perpAdapter.getBalance();
+        const spotBalance = await spotAdapter.getSpotBalance('USDC');
+        log(`    Perp balance: $${perpBalance.toFixed(2)}`);
+        log(`    Spot balance: $${spotBalance.toFixed(2)}`);
+
+        const optimal = balanceManager.calculateOptimalDistribution(
+          perpAdapter,
+          'ETH',
+          5, // leverage
+        );
+        log(`    Optimal perp balance: $${optimal.perpBalance.toFixed(2)}`);
+        log(`    Optimal spot balance: $${optimal.spotBalance.toFixed(2)}`);
+      });
+
+      await test('should build perp-spot execution plan', async () => {
+        const perpBalance = await perpAdapter.getBalance();
+        const spotBalance = await spotAdapter.getSpotBalance('USDC');
+        
+        if (perpBalance > 10 && spotBalance > 10) {
+          const plan = await planBuilder.buildPlan(
+            {
+              symbol: 'ETH',
+              strategyType: 'perp-spot',
+              longExchange: 'HYPERLIQUID',
+              spotExchange: 'HYPERLIQUID',
+              longRate: { value: 0.0001 } as any,
+              spread: { value: 0.0001 } as any,
+              expectedReturn: { value: 0.05 } as any,
+              timestamp: new Date(),
+            },
+            perpAdapter,
+            spotAdapter,
+            5, // leverage
+            1000, // maxPositionSize
+          );
+
+          if (plan) {
+            log(`    Plan created: perp size=${plan.perpOrder.size}, spot size=${plan.spotOrder.size}`);
+            log(`    Expected return: ${plan.expectedReturn.value}%`);
+          } else {
+            log(`    No plan created (insufficient balance or unprofitable)`);
+          }
+        } else {
+          log(`    Skipping (insufficient balance: perp=$${perpBalance}, spot=$${spotBalance})`);
+        }
+      });
+    });
+  } else {
+    log('\n⚠️ Skipping Perp-Spot Arbitrage Flow tests (requires Hyperliquid testnet credentials)');
+  }
+
   // ==================== SUMMARY ====================
   log('\n' + '='.repeat(60));
   log('SUMMARY');

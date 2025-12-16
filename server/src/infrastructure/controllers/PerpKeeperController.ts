@@ -62,10 +62,9 @@ export class PerpKeeperController {
       totalUnrealizedPnl: metrics.totalUnrealizedPnl,
       totalPositionValue: metrics.totalPositionValue,
       positionsByExchange: Object.fromEntries(
-        Array.from(metrics.positionsByExchange.entries()).map(([type, positions]) => [
-          type,
-          positions.length,
-        ]),
+        Array.from(metrics.positionsByExchange.entries()).map(
+          ([type, positions]) => [type, positions.length],
+        ),
       ),
       timestamp: new Date(),
     };
@@ -77,13 +76,22 @@ export class PerpKeeperController {
    * Body: { symbols?: string[], minSpread?: number, maxPositionSizeUsd?: number }
    */
   @Post('execute')
-  async execute(@Body() body: { symbols?: string[]; minSpread?: number; maxPositionSizeUsd?: number }) {
+  async execute(
+    @Body()
+    body: {
+      symbols?: string[];
+      minSpread?: number;
+      maxPositionSizeUsd?: number;
+    },
+  ) {
     const symbols = body.symbols || ['ETH', 'BTC'];
     const adapters = this.keeperService.getExchangeAdapters();
 
+    const spotAdapters = this.keeperService.getSpotAdapters();
     const result = await this.arbitrageStrategy.executeStrategy(
       symbols,
       adapters,
+      spotAdapters,
       body.minSpread,
       body.maxPositionSizeUsd,
     );
@@ -121,7 +129,11 @@ export class PerpKeeperController {
     // Calculate total capital deployed
     let totalCapital = 0;
     try {
-      for (const exchangeType of [ExchangeType.ASTER, ExchangeType.LIGHTER, ExchangeType.HYPERLIQUID]) {
+      for (const exchangeType of [
+        ExchangeType.ASTER,
+        ExchangeType.LIGHTER,
+        ExchangeType.HYPERLIQUID,
+      ]) {
         try {
           const balance = await this.keeperService.getBalance(exchangeType);
           totalCapital += balance;
@@ -138,10 +150,9 @@ export class PerpKeeperController {
     return {
       ...metrics,
       exchangeMetrics: Object.fromEntries(
-        Array.from(metrics.exchangeMetrics.entries()).map(([type, exchangeMetrics]) => [
-          type,
-          exchangeMetrics,
-        ]),
+        Array.from(metrics.exchangeMetrics.entries()).map(
+          ([type, exchangeMetrics]) => [type, exchangeMetrics],
+        ),
       ),
     };
   }
@@ -149,7 +160,7 @@ export class PerpKeeperController {
   /**
    * Get condensed diagnostics for bot health monitoring
    * GET /keeper/diagnostics
-   * 
+   *
    * Returns a condensed, actionable summary of bot health and performance.
    * Designed to remain small (<10KB) even after days of operation.
    * Ideal for AI context windows and quick health checks.
@@ -165,12 +176,13 @@ export class PerpKeeperController {
 
     // Update position data before generating diagnostics
     try {
-      const positionMetrics = await this.orchestrator.getAllPositionsWithMetrics();
+      const positionMetrics =
+        await this.orchestrator.getAllPositionsWithMetrics();
       const positionsByExchange: Record<string, number> = {};
       for (const [exchange, positions] of positionMetrics.positionsByExchange) {
         positionsByExchange[exchange] = positions.length;
       }
-      
+
       this.diagnosticsService.updatePositionData({
         count: positionMetrics.positions.length,
         totalValue: positionMetrics.totalPositionValue,
@@ -184,7 +196,11 @@ export class PerpKeeperController {
     // Update APY data from performance logger
     try {
       let totalCapital = 0;
-      for (const exchangeType of [ExchangeType.ASTER, ExchangeType.LIGHTER, ExchangeType.HYPERLIQUID]) {
+      for (const exchangeType of [
+        ExchangeType.ASTER,
+        ExchangeType.LIGHTER,
+        ExchangeType.HYPERLIQUID,
+      ]) {
         try {
           const balance = await this.keeperService.getBalance(exchangeType);
           totalCapital += balance;
@@ -193,13 +209,16 @@ export class PerpKeeperController {
         }
       }
 
-      const perfMetrics = this.performanceLogger.getPerformanceMetrics(totalCapital);
+      const perfMetrics =
+        this.performanceLogger.getPerformanceMetrics(totalCapital);
       const byExchange: Record<string, number> = {};
       for (const [exchange, metrics] of perfMetrics.exchangeMetrics) {
         // Calculate per-exchange APY approximation based on funding captured
         if (metrics.totalPositionValue > 0) {
-          const dailyReturn = metrics.netFundingCaptured / (perfMetrics.runtimeDays || 1);
-          byExchange[exchange] = (dailyReturn / metrics.totalPositionValue) * 365 * 100;
+          const dailyReturn =
+            metrics.netFundingCaptured / (perfMetrics.runtimeDays || 1);
+          byExchange[exchange] =
+            (dailyReturn / metrics.totalPositionValue) * 365 * 100;
         }
       }
 
@@ -215,4 +234,3 @@ export class PerpKeeperController {
     return this.diagnosticsService.getDiagnostics();
   }
 }
-

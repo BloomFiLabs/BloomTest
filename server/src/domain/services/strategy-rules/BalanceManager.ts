@@ -1,4 +1,10 @@
-import { Injectable, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IBalanceManager } from './IBalanceManager';
 import { ExchangeBalanceRebalancer } from '../ExchangeBalanceRebalancer';
@@ -8,7 +14,11 @@ import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
 import { ArbitrageOpportunity } from '../FundingRateAggregator';
 import { Contract, JsonRpcProvider, Wallet, formatUnits } from 'ethers';
 import { Result } from '../../common/Result';
-import { DomainException, ExchangeException } from '../../exceptions/DomainException';
+import {
+  DomainException,
+  ExchangeException,
+  ValidationException,
+} from '../../exceptions/DomainException';
 import type { ProfitTracker } from '../../../infrastructure/services/ProfitTracker';
 
 /**
@@ -18,7 +28,7 @@ import type { ProfitTracker } from '../../../infrastructure/services/ProfitTrack
 @Injectable()
 export class BalanceManager implements IBalanceManager {
   private readonly logger = new Logger(BalanceManager.name);
-  
+
   // ProfitTracker for excluding accrued profits from deployable capital
   private profitTracker?: ProfitTracker;
 
@@ -35,13 +45,15 @@ export class BalanceManager implements IBalanceManager {
    */
   setProfitTracker(profitTracker: ProfitTracker): void {
     this.profitTracker = profitTracker;
-    this.logger.log('ProfitTracker set - profits will be excluded from deployable capital');
+    this.logger.log(
+      'ProfitTracker set - profits will be excluded from deployable capital',
+    );
   }
 
   /**
    * Get deployable capital for a specific exchange
    * This excludes accrued profits to ensure we don't use profit funds for new positions
-   * 
+   *
    * @param adapter The exchange adapter
    * @param exchangeType The exchange type
    * @returns Deployable capital (balance - accrued profits)
@@ -51,16 +63,17 @@ export class BalanceManager implements IBalanceManager {
     exchangeType: ExchangeType,
   ): Promise<number> {
     const totalBalance = await adapter.getBalance();
-    
+
     if (this.profitTracker) {
       try {
-        const deployable = await this.profitTracker.getDeployableCapital(exchangeType);
+        const deployable =
+          await this.profitTracker.getDeployableCapital(exchangeType);
         // Use the minimum of actual balance and deployable capital
         // This handles edge cases where balance might have changed
         const result = Math.min(totalBalance, deployable);
         this.logger.debug(
           `Deployable capital for ${exchangeType}: $${result.toFixed(2)} ` +
-          `(total: $${totalBalance.toFixed(2)}, profit-adjusted: $${deployable.toFixed(2)})`,
+            `(total: $${totalBalance.toFixed(2)}, profit-adjusted: $${deployable.toFixed(2)})`,
         );
         return result;
       } catch (error: any) {
@@ -69,7 +82,7 @@ export class BalanceManager implements IBalanceManager {
         );
       }
     }
-    
+
     // If ProfitTracker not available, use full balance
     return totalBalance;
   }
@@ -82,17 +95,22 @@ export class BalanceManager implements IBalanceManager {
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
   ): Promise<Map<ExchangeType, number>> {
     const balances = new Map<ExchangeType, number>();
-    
+
     for (const [exchangeType, adapter] of adapters) {
       try {
-        const deployable = await this.getDeployableCapital(adapter, exchangeType);
+        const deployable = await this.getDeployableCapital(
+          adapter,
+          exchangeType,
+        );
         balances.set(exchangeType, deployable);
       } catch (error: any) {
-        this.logger.debug(`Failed to get deployable capital for ${exchangeType}: ${error.message}`);
+        this.logger.debug(
+          `Failed to get deployable capital for ${exchangeType}: ${error.message}`,
+        );
         balances.set(exchangeType, 0);
       }
     }
-    
+
     return balances;
   }
 
@@ -242,7 +260,10 @@ export class BalanceManager implements IBalanceManager {
         const adapter = adapters.get(exchange);
         if (!adapter) continue;
 
-        const depositAmount = Math.min(amountPerExchange, remainingWalletBalance);
+        const depositAmount = Math.min(
+          amountPerExchange,
+          remainingWalletBalance,
+        );
         if (depositAmount < 5) {
           // Minimum deposit is usually $5
           this.logger.debug(
@@ -321,6 +342,14 @@ export class BalanceManager implements IBalanceManager {
     const longExchange = opportunity.longExchange;
     const shortExchange = opportunity.shortExchange;
     const longAdapter = adapters.get(longExchange);
+    if (!shortExchange) {
+      return Result.failure(
+        new ValidationException(
+          'shortExchange is required',
+          'MISSING_SHORT_EXCHANGE',
+        ),
+      );
+    }
     const shortAdapter = adapters.get(shortExchange);
 
     if (!longAdapter || !shortAdapter) {
@@ -417,13 +446,14 @@ export class BalanceManager implements IBalanceManager {
             this.logger.debug(
               `Transferring $${transferAmount.toFixed(2)} from ${unusedExchange} to ${longExchange}`,
             );
-            const txHash = await this.balanceRebalancer.transferBetweenExchanges(
-              unusedExchange,
-              longExchange,
-              transferAmount,
-              adapters.get(unusedExchange)!,
-              adapters.get(longExchange)!,
-            );
+            const txHash =
+              await this.balanceRebalancer.transferBetweenExchanges(
+                unusedExchange,
+                longExchange,
+                transferAmount,
+                adapters.get(unusedExchange)!,
+                adapters.get(longExchange)!,
+              );
             const success = !!txHash;
             if (success) {
               remainingLongNeeded -= transferAmount;
@@ -443,13 +473,14 @@ export class BalanceManager implements IBalanceManager {
             this.logger.debug(
               `Transferring $${transferAmount.toFixed(2)} from ${unusedExchange} to ${shortExchange}`,
             );
-            const txHash = await this.balanceRebalancer.transferBetweenExchanges(
-              unusedExchange,
-              shortExchange,
-              transferAmount,
-              adapters.get(unusedExchange)!,
-              adapters.get(shortExchange)!,
-            );
+            const txHash =
+              await this.balanceRebalancer.transferBetweenExchanges(
+                unusedExchange,
+                shortExchange!,
+                transferAmount,
+                adapters.get(unusedExchange)!,
+                adapters.get(shortExchange)!,
+              );
             const success = !!txHash;
             if (success) {
               remainingShortNeeded -= transferAmount;
@@ -488,7 +519,9 @@ export class BalanceManager implements IBalanceManager {
         );
         const success = !!txHash;
         if (success) {
-          this.logger.debug('Rebalancing successful via exchange-to-exchange transfer');
+          this.logger.debug(
+            'Rebalancing successful via exchange-to-exchange transfer',
+          );
           return Result.success(true);
         }
       } catch (error: any) {
@@ -513,7 +546,9 @@ export class BalanceManager implements IBalanceManager {
         );
         const success = !!txHash;
         if (success) {
-          this.logger.debug('Rebalancing successful via exchange-to-exchange transfer');
+          this.logger.debug(
+            'Rebalancing successful via exchange-to-exchange transfer',
+          );
           return Result.success(true);
         }
       } catch (error: any) {
@@ -533,19 +568,25 @@ export class BalanceManager implements IBalanceManager {
       } else {
         const walletBalance = walletBalanceResult.value;
         if (walletBalance > 0) {
-          const totalRemainingDeficit = Math.max(remainingLongNeeded, remainingShortNeeded);
-          if (totalRemainingDeficit > 0 && walletBalance >= totalRemainingDeficit) {
+          const totalRemainingDeficit = Math.max(
+            remainingLongNeeded,
+            remainingShortNeeded,
+          );
+          if (
+            totalRemainingDeficit > 0 &&
+            walletBalance >= totalRemainingDeficit
+          ) {
             this.logger.debug(
               `Depositing $${totalRemainingDeficit.toFixed(2)} from wallet to cover remaining deficit`,
             );
-            
+
             if (remainingLongNeeded > 0) {
               await longAdapter.depositExternal(remainingLongNeeded, 'USDC');
             }
             if (remainingShortNeeded > 0) {
               await shortAdapter.depositExternal(remainingShortNeeded, 'USDC');
             }
-            
+
             return Result.success(true);
           }
         }
@@ -567,9 +608,3 @@ export class BalanceManager implements IBalanceManager {
     );
   }
 }
-
-
-
-
-
-

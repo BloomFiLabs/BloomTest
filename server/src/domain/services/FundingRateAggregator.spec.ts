@@ -60,34 +60,48 @@ describe('FundingRateAggregator', () => {
       mockLighterProvider.getOpenInterest.mockResolvedValue(2000000);
 
       mockHyperliquidProvider.getCurrentFundingRate.mockResolvedValue(0.00015);
-      mockHyperliquidProvider.getPredictedFundingRate.mockResolvedValue(0.00015);
+      mockHyperliquidProvider.getPredictedFundingRate.mockResolvedValue(
+        0.00015,
+      );
       mockHyperliquidProvider.getMarkPrice.mockResolvedValue(3002);
       mockHyperliquidProvider.getOpenInterest.mockResolvedValue(1500000);
 
       const rates = await aggregator.getFundingRates('ETHUSDT');
 
       expect(rates).toHaveLength(3);
-      expect(rates.find((r) => r.exchange === ExchangeType.ASTER)).toBeDefined();
-      expect(rates.find((r) => r.exchange === ExchangeType.LIGHTER)).toBeDefined();
-      expect(rates.find((r) => r.exchange === ExchangeType.HYPERLIQUID)).toBeDefined();
+      expect(
+        rates.find((r) => r.exchange === ExchangeType.ASTER),
+      ).toBeDefined();
+      expect(
+        rates.find((r) => r.exchange === ExchangeType.LIGHTER),
+      ).toBeDefined();
+      expect(
+        rates.find((r) => r.exchange === ExchangeType.HYPERLIQUID),
+      ).toBeDefined();
     });
 
     it('should handle exchange failures gracefully', async () => {
-      mockAsterProvider.getCurrentFundingRate.mockRejectedValue(new Error('API error'));
+      mockAsterProvider.getCurrentFundingRate.mockRejectedValue(
+        new Error('API error'),
+      );
       mockLighterProvider.getMarketIndex.mockResolvedValue(0);
       mockLighterProvider.getCurrentFundingRate.mockResolvedValue(0.0002);
       mockLighterProvider.getPredictedFundingRate.mockResolvedValue(0.0002);
       mockLighterProvider.getMarkPrice.mockResolvedValue(3001);
       mockLighterProvider.getOpenInterest.mockResolvedValue(2000000);
       mockHyperliquidProvider.getCurrentFundingRate.mockResolvedValue(0.00015);
-      mockHyperliquidProvider.getPredictedFundingRate.mockResolvedValue(0.00015);
+      mockHyperliquidProvider.getPredictedFundingRate.mockResolvedValue(
+        0.00015,
+      );
       mockHyperliquidProvider.getMarkPrice.mockResolvedValue(3002);
       mockHyperliquidProvider.getOpenInterest.mockResolvedValue(1500000);
 
       const rates = await aggregator.getFundingRates('ETHUSDT');
 
       expect(rates).toHaveLength(2);
-      expect(rates.find((r) => r.exchange === ExchangeType.ASTER)).toBeUndefined();
+      expect(
+        rates.find((r) => r.exchange === ExchangeType.ASTER),
+      ).toBeUndefined();
     });
   });
 
@@ -105,7 +119,9 @@ describe('FundingRateAggregator', () => {
       mockLighterProvider.getOpenInterest.mockResolvedValue(2000000);
 
       mockHyperliquidProvider.getCurrentFundingRate.mockResolvedValue(0.00005);
-      mockHyperliquidProvider.getPredictedFundingRate.mockResolvedValue(0.00005);
+      mockHyperliquidProvider.getPredictedFundingRate.mockResolvedValue(
+        0.00005,
+      );
       mockHyperliquidProvider.getMarkPrice.mockResolvedValue(3002);
       mockHyperliquidProvider.getOpenInterest.mockResolvedValue(1500000);
 
@@ -133,11 +149,16 @@ describe('FundingRateAggregator', () => {
       mockLighterProvider.getOpenInterest.mockResolvedValue(2000000);
 
       mockHyperliquidProvider.getCurrentFundingRate.mockResolvedValue(-0.0001);
-      mockHyperliquidProvider.getPredictedFundingRate.mockResolvedValue(-0.0001);
+      mockHyperliquidProvider.getPredictedFundingRate.mockResolvedValue(
+        -0.0001,
+      );
       mockHyperliquidProvider.getMarkPrice.mockResolvedValue(3002);
       mockHyperliquidProvider.getOpenInterest.mockResolvedValue(1500000);
 
-      const opportunities = await aggregator.findArbitrageOpportunities(['ETHUSDT'], 0.0001);
+      const opportunities = await aggregator.findArbitrageOpportunities(
+        ['ETHUSDT'],
+        0.0001,
+      );
 
       expect(opportunities.length).toBeGreaterThan(0);
       expect(opportunities[0].longExchange).toBe(ExchangeType.LIGHTER);
@@ -162,12 +183,57 @@ describe('FundingRateAggregator', () => {
       mockHyperliquidProvider.getMarkPrice.mockResolvedValue(3002);
       mockHyperliquidProvider.getOpenInterest.mockResolvedValue(1500000);
 
-      const opportunities = await aggregator.findArbitrageOpportunities(['ETHUSDT'], 0.0001);
+      const opportunities = await aggregator.findArbitrageOpportunities(
+        ['ETHUSDT'],
+        0.0001,
+      );
 
       // Spread is only 0.00001, which is less than minSpread of 0.0001
       expect(opportunities.length).toBe(0);
     });
   });
+
+  describe('findPerpSpotOpportunities', () => {
+    it('should find perp-spot opportunities for exchanges with spot support', async () => {
+      // Mock funding rates
+      mockHyperliquidProvider.getCurrentFundingRate.mockResolvedValue({
+        currentRate: 0.0001, // 0.01% per hour = positive funding
+        predictedRate: 0.0001,
+        markPrice: 3000,
+        openInterest: 1000000,
+        volume24h: 5000000,
+      });
+
+      const opportunities = await aggregator.findPerpSpotOpportunities(
+        ['ETH'],
+        0.0001,
+        false,
+      );
+
+      expect(opportunities.length).toBeGreaterThan(0);
+      const opp = opportunities[0];
+      expect(opp.strategyType).toBe('perp-spot');
+      expect(opp.spotExchange).toBe(ExchangeType.HYPERLIQUID);
+      expect(opp.longExchange).toBe(ExchangeType.HYPERLIQUID);
+      expect(opp.shortRate).toBeDefined();
+    });
+
+    it('should not find opportunities below minimum spread', async () => {
+      mockHyperliquidProvider.getCurrentFundingRate.mockResolvedValue({
+        currentRate: 0.00001, // Very small rate
+        predictedRate: 0.00001,
+        markPrice: 3000,
+        openInterest: 1000000,
+        volume24h: 5000000,
+      });
+
+      const opportunities = await aggregator.findPerpSpotOpportunities(
+        ['ETH'],
+        0.0001, // Min spread higher than rate
+        false,
+      );
+
+      expect(opportunities.length).toBe(0);
+    });
+  });
 });
-
-

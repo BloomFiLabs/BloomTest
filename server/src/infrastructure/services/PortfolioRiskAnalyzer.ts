@@ -43,36 +43,42 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
     hasIssues: boolean;
   } {
     const warnings: string[] = [];
-    
+
     // Check VaR: Need at least 2 months of matched data
     let totalMatchedMonths = 0;
     for (const item of input.opportunities) {
       const allocation = input.allocations.get(item.opportunity.symbol) || 0;
       if (allocation <= 0) continue;
-      
+
       const longData = this.historicalService.getHistoricalData(
         item.opportunity.symbol,
         item.opportunity.longExchange,
       );
+      if (!item.opportunity.shortExchange) {
+        continue; // Skip perp-spot opportunities
+      }
       const shortData = this.historicalService.getHistoricalData(
         item.opportunity.symbol,
         item.opportunity.shortExchange,
       );
-      
+
       if (longData.length === 0 || shortData.length === 0) continue;
-      
+
       // Count matched months
       const matchedSpreads: Array<{ timestamp: Date }> = [];
       for (const longPoint of longData) {
         for (const shortPoint of shortData) {
-          const timeDiff = Math.abs(longPoint.timestamp.getTime() - shortPoint.timestamp.getTime());
-          if (timeDiff <= 4 * 60 * 60 * 1000) { // 4 hour window for Aster
+          const timeDiff = Math.abs(
+            longPoint.timestamp.getTime() - shortPoint.timestamp.getTime(),
+          );
+          if (timeDiff <= 4 * 60 * 60 * 1000) {
+            // 4 hour window for Aster
             matchedSpreads.push({ timestamp: longPoint.timestamp });
             break;
           }
         }
       }
-      
+
       const monthlyGroups = new Set<string>();
       for (const { timestamp } of matchedSpreads) {
         const monthKey = `${timestamp.getFullYear()}-${timestamp.getMonth()}`;
@@ -82,15 +88,19 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
     }
     const hasSufficientDataForVaR = totalMatchedMonths >= 2;
     if (!hasSufficientDataForVaR) {
-      warnings.push(`VaR calculation requires 2+ months of matched data (found ${totalMatchedMonths} months)`);
+      warnings.push(
+        `VaR calculation requires 2+ months of matched data (found ${totalMatchedMonths} months)`,
+      );
     }
-    
+
     // Check Drawdown: Need at least 1 month of matched data
     const hasSufficientDataForDrawdown = totalMatchedMonths >= 1;
     if (!hasSufficientDataForDrawdown) {
-      warnings.push(`Drawdown calculation requires 1+ month of matched data (found ${totalMatchedMonths} months)`);
+      warnings.push(
+        `Drawdown calculation requires 1+ month of matched data (found ${totalMatchedMonths} months)`,
+      );
     }
-    
+
     // Check Correlation: Need at least 10 matched pairs
     let totalMatchedPairs = 0;
     for (const item of input.opportunities) {
@@ -98,16 +108,21 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
         item.opportunity.symbol,
         item.opportunity.longExchange,
       );
+      if (!item.opportunity.shortExchange) {
+        continue; // Skip perp-spot opportunities
+      }
       const shortData = this.historicalService.getHistoricalData(
         item.opportunity.symbol,
         item.opportunity.shortExchange,
       );
-      
+
       if (longData.length === 0 || shortData.length === 0) continue;
-      
+
       for (const longPoint of longData) {
         for (const shortPoint of shortData) {
-          const timeDiff = Math.abs(longPoint.timestamp.getTime() - shortPoint.timestamp.getTime());
+          const timeDiff = Math.abs(
+            longPoint.timestamp.getTime() - shortPoint.timestamp.getTime(),
+          );
           if (timeDiff <= 4 * 60 * 60 * 1000) {
             totalMatchedPairs++;
             break;
@@ -117,15 +132,19 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
     }
     const hasSufficientDataForCorrelation = totalMatchedPairs >= 10;
     if (!hasSufficientDataForCorrelation) {
-      warnings.push(`Correlation analysis requires 10+ matched pairs (found ${totalMatchedPairs} pairs)`);
+      warnings.push(
+        `Correlation analysis requires 10+ matched pairs (found ${totalMatchedPairs} pairs)`,
+      );
     }
-    
+
     // Check Backtest: Need at least 2 months of data
     const hasSufficientDataForBacktest = totalMatchedMonths >= 2;
     if (!hasSufficientDataForBacktest) {
-      warnings.push(`Historical backtest requires 2+ months of matched data (found ${totalMatchedMonths} months)`);
+      warnings.push(
+        `Historical backtest requires 2+ months of matched data (found ${totalMatchedMonths} months)`,
+      );
     }
-    
+
     // Check Confidence Interval: Need at least some volatility data
     let hasVolatilityData = false;
     for (const item of input.opportunities) {
@@ -136,9 +155,11 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
     }
     const hasSufficientDataForConfidenceInterval = hasVolatilityData;
     if (!hasSufficientDataForConfidenceInterval) {
-      warnings.push(`Confidence interval requires volatility data (stdDevSpread > 0)`);
+      warnings.push(
+        `Confidence interval requires volatility data (stdDevSpread > 0)`,
+      );
     }
-    
+
     return {
       hasSufficientDataForVaR,
       hasSufficientDataForDrawdown,
@@ -153,18 +174,17 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
   /**
    * Main entry point: Calculate all portfolio risk metrics
    */
-  async calculatePortfolioRiskMetrics(input: PortfolioRiskInput): Promise<PortfolioRiskMetrics & { dataQuality: DataQualityAssessment }> {
+  async calculatePortfolioRiskMetrics(
+    input: PortfolioRiskInput,
+  ): Promise<PortfolioRiskMetrics & { dataQuality: DataQualityAssessment }> {
     const dataQuality = this.assessDataQuality(input);
-    const {
-      allocations,
-      opportunities,
-      aggregateAPY,
-      totalPortfolio,
-    } = input;
+    const { allocations, opportunities, aggregateAPY, totalPortfolio } = input;
 
     // Filter to only opportunities with allocations
     const activeOpportunities = opportunities.filter(
-      (item) => allocations.has(item.opportunity.symbol) && allocations.get(item.opportunity.symbol)! > 0
+      (item) =>
+        allocations.has(item.opportunity.symbol) &&
+        allocations.get(item.opportunity.symbol)! > 0,
     );
 
     if (activeOpportunities.length === 0) {
@@ -176,36 +196,80 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
     }
 
     // Calculate all metrics
-    const worstCaseAPY = this.calculateWorstCaseScenario(activeOpportunities, allocations, totalPortfolio);
-    const confidenceInterval = this.calculateConfidenceIntervals(activeOpportunities, allocations, aggregateAPY, totalPortfolio);
-    const var95 = this.calculateValueAtRisk(activeOpportunities, allocations, totalPortfolio);
-    const maxDrawdown = this.calculateMaximumDrawdown(activeOpportunities, allocations, totalPortfolio);
-    const sharpeRatio = this.calculateSharpeRatio(aggregateAPY, activeOpportunities, allocations, totalPortfolio);
-    const historicalBacktest = await this.calculateHistoricalBacktest(activeOpportunities, allocations, totalPortfolio);
-    const stressTests = this.calculateStressTestScenarios(activeOpportunities, allocations, totalPortfolio);
-    const correlationRisk = this.calculateCorrelationAnalysis(activeOpportunities);
-    const concentrationRisk = this.calculateConcentrationRisk(allocations, totalPortfolio);
-    const volatilityBreakdown = this.calculateVolatilityBreakdown(activeOpportunities, allocations, totalPortfolio);
+    const worstCaseAPY = this.calculateWorstCaseScenario(
+      activeOpportunities,
+      allocations,
+      totalPortfolio,
+    );
+    const confidenceInterval = this.calculateConfidenceIntervals(
+      activeOpportunities,
+      allocations,
+      aggregateAPY,
+      totalPortfolio,
+    );
+    const var95 = this.calculateValueAtRisk(
+      activeOpportunities,
+      allocations,
+      totalPortfolio,
+    );
+    const maxDrawdown = this.calculateMaximumDrawdown(
+      activeOpportunities,
+      allocations,
+      totalPortfolio,
+    );
+    const sharpeRatio = this.calculateSharpeRatio(
+      aggregateAPY,
+      activeOpportunities,
+      allocations,
+      totalPortfolio,
+    );
+    const historicalBacktest = await this.calculateHistoricalBacktest(
+      activeOpportunities,
+      allocations,
+      totalPortfolio,
+    );
+    const stressTests = this.calculateStressTestScenarios(
+      activeOpportunities,
+      allocations,
+      totalPortfolio,
+    );
+    const correlationRisk =
+      this.calculateCorrelationAnalysis(activeOpportunities);
+    const concentrationRisk = this.calculateConcentrationRisk(
+      allocations,
+      totalPortfolio,
+    );
+    const volatilityBreakdown = this.calculateVolatilityBreakdown(
+      activeOpportunities,
+      allocations,
+      totalPortfolio,
+    );
 
     return {
       expectedAPY: aggregateAPY,
       expectedAPYConfidenceInterval: confidenceInterval,
       worstCaseAPY,
       valueAtRisk95: dataQuality.hasSufficientDataForVaR ? var95 : 0,
-      maximumDrawdown: dataQuality.hasSufficientDataForDrawdown ? maxDrawdown : 0,
+      maximumDrawdown: dataQuality.hasSufficientDataForDrawdown
+        ? maxDrawdown
+        : 0,
       sharpeRatio,
-      historicalBacktest: dataQuality.hasSufficientDataForBacktest ? historicalBacktest : {
-        last30Days: { apy: 0, realized: false },
-        last90Days: { apy: 0, realized: false },
-        worstMonth: { apy: 0, month: 'N/A' },
-        bestMonth: { apy: 0, month: 'N/A' },
-      },
+      historicalBacktest: dataQuality.hasSufficientDataForBacktest
+        ? historicalBacktest
+        : {
+            last30Days: { apy: 0, realized: false },
+            last90Days: { apy: 0, realized: false },
+            worstMonth: { apy: 0, month: 'N/A' },
+            bestMonth: { apy: 0, month: 'N/A' },
+          },
       stressTests,
-      correlationRisk: dataQuality.hasSufficientDataForCorrelation ? correlationRisk : {
-        averageCorrelation: 0,
-        maxCorrelation: 0,
-        correlatedPairs: [],
-      },
+      correlationRisk: dataQuality.hasSufficientDataForCorrelation
+        ? correlationRisk
+        : {
+            averageCorrelation: 0,
+            maxCorrelation: 0,
+            correlatedPairs: [],
+          },
       concentrationRisk,
       volatilityBreakdown,
       dataQuality,
@@ -233,7 +297,10 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
       if (volatilityMetrics) {
         // Use minimum spread from history (could be negative), or assume spread reverses
         // Worst case: spread becomes negative (reverses) or drops to minimum
-        worstCaseSpread = Math.min(volatilityMetrics.minSpread, -Math.abs(volatilityMetrics.averageSpread));
+        worstCaseSpread = Math.min(
+          volatilityMetrics.minSpread,
+          -Math.abs(volatilityMetrics.averageSpread),
+        );
       } else {
         // No historical data: assume spread reverses (becomes negative of current spread)
         worstCaseSpread = -Math.abs(opportunity.spread.toDecimal());
@@ -243,7 +310,7 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
       // If spread is negative, APY will be negative (we're paying instead of receiving)
       // Costs are still incurred even in worst case
       const worstCaseGrossAPY = worstCaseSpread * this.periodsPerYear; // Don't use Math.abs - keep sign
-      
+
       // Estimate costs (fees + slippage) - use conservative 2% total cost
       const estimatedCosts = 0.02;
       const worstCaseNetAPY = worstCaseGrossAPY - estimatedCosts; // Will be negative if spread reversed
@@ -265,7 +332,11 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
   ): { lower: number; upper: number; confidence: number } {
     // Calculate portfolio-weighted volatility
     let portfolioVariance = 0;
-    const weights: Array<{ symbol: string; weight: number; volatility: number }> = [];
+    const weights: Array<{
+      symbol: string;
+      weight: number;
+      volatility: number;
+    }> = [];
 
     for (const item of opportunities) {
       const allocation = allocations.get(item.opportunity.symbol) || 0;
@@ -282,7 +353,13 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
     const avgCorrelation = 0.2;
     for (let i = 0; i < weights.length; i++) {
       for (let j = i + 1; j < weights.length; j++) {
-        portfolioVariance += 2 * weights[i].weight * weights[j].weight * avgCorrelation * weights[i].volatility * weights[j].volatility;
+        portfolioVariance +=
+          2 *
+          weights[i].weight *
+          weights[j].weight *
+          avgCorrelation *
+          weights[i].volatility *
+          weights[j].volatility;
       }
     }
 
@@ -296,7 +373,7 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
     // If margin is too large (indicating poor data quality), cap it
     const maxMargin = aggregateAPY * 0.5; // Max 50% margin (e.g., 35% ± 17.5%)
     const cappedMargin = Math.min(margin, maxMargin);
-    
+
     const lowerBound = Math.max(0, aggregateAPY - cappedMargin); // Don't go below 0% for investor report
     const upperBound = Math.min(aggregateAPY * 2, aggregateAPY + cappedMargin); // Cap at 2x expected APY (e.g., 35% → 70% max)
 
@@ -331,6 +408,12 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
         opportunity.symbol,
         opportunity.longExchange,
       );
+      if (!opportunity.shortExchange) {
+        continue; // Skip perp-spot opportunities
+      }
+      if (!opportunity.shortExchange) {
+        continue; // Skip perp-spot opportunities
+      }
       const shortData = this.historicalService.getHistoricalData(
         opportunity.symbol,
         opportunity.shortExchange,
@@ -341,7 +424,8 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
         if (volatilityMetrics) {
           // Simulate worst-case: spread drops to minSpread
           const worstSpread = volatilityMetrics.minSpread;
-          const worstMonthlyReturn = (worstSpread * hoursPerMonth * allocation) / totalPortfolio;
+          const worstMonthlyReturn =
+            (worstSpread * hoursPerMonth * allocation) / totalPortfolio;
           monthlyReturns.push(worstMonthlyReturn);
         }
         continue;
@@ -351,8 +435,11 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
       const matchedSpreads: Array<{ spread: number; timestamp: Date }> = [];
       for (const longPoint of longData) {
         for (const shortPoint of shortData) {
-          const timeDiff = Math.abs(longPoint.timestamp.getTime() - shortPoint.timestamp.getTime());
-          if (timeDiff <= 3600 * 1000) { // 1 hour window
+          const timeDiff = Math.abs(
+            longPoint.timestamp.getTime() - shortPoint.timestamp.getTime(),
+          );
+          if (timeDiff <= 3600 * 1000) {
+            // 1 hour window
             matchedSpreads.push({
               spread: longPoint.rate - shortPoint.rate,
               timestamp: longPoint.timestamp,
@@ -376,7 +463,8 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
 
       // Calculate monthly returns (as APY percentage, not USD)
       for (const spreads of monthlyGroups.values()) {
-        const avgSpread = spreads.reduce((sum, s) => sum + s, 0) / spreads.length;
+        const avgSpread =
+          spreads.reduce((sum, s) => sum + s, 0) / spreads.length;
         // Calculate monthly APY: avgSpread * hoursPerMonth / hoursPerYear
         const monthlyAPY = (avgSpread * hoursPerMonth) / (24 * 365); // Convert to monthly return rate
         monthlyReturns.push(monthlyAPY);
@@ -391,7 +479,8 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
     // Find 95th percentile worst month (lowest return)
     monthlyReturns.sort((a, b) => a - b);
     const percentile95Index = Math.floor(monthlyReturns.length * 0.05);
-    const worstMonthlyAPY = monthlyReturns[percentile95Index] || monthlyReturns[0] || 0;
+    const worstMonthlyAPY =
+      monthlyReturns[percentile95Index] || monthlyReturns[0] || 0;
 
     // Convert to USD loss: worst monthly APY * portfolio value
     // If worstMonthlyAPY is negative, this will be a loss
@@ -424,6 +513,12 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
         opportunity.symbol,
         opportunity.longExchange,
       );
+      if (!opportunity.shortExchange) {
+        continue; // Skip perp-spot opportunities
+      }
+      if (!opportunity.shortExchange) {
+        continue; // Skip perp-spot opportunities
+      }
       const shortData = this.historicalService.getHistoricalData(
         opportunity.symbol,
         opportunity.shortExchange,
@@ -434,7 +529,9 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
       // Match spreads and calculate hourly returns
       for (const longPoint of longData) {
         for (const shortPoint of shortData) {
-          const timeDiff = Math.abs(longPoint.timestamp.getTime() - shortPoint.timestamp.getTime());
+          const timeDiff = Math.abs(
+            longPoint.timestamp.getTime() - shortPoint.timestamp.getTime(),
+          );
           if (timeDiff <= 3600 * 1000) {
             const spread = longPoint.rate - shortPoint.rate;
             const hourlyReturn = (spread * allocation) / totalPortfolio;
@@ -532,6 +629,12 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
         opportunity.symbol,
         opportunity.longExchange,
       );
+      if (!opportunity.shortExchange) {
+        continue; // Skip perp-spot opportunities
+      }
+      if (!opportunity.shortExchange) {
+        continue; // Skip perp-spot opportunities
+      }
       const shortData = this.historicalService.getHistoricalData(
         opportunity.symbol,
         opportunity.shortExchange,
@@ -546,7 +649,9 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
 
         if (age <= days90) {
           for (const shortPoint of shortData) {
-            const timeDiff = Math.abs(timestamp - shortPoint.timestamp.getTime());
+            const timeDiff = Math.abs(
+              timestamp - shortPoint.timestamp.getTime(),
+            );
             if (timeDiff <= 3600 * 1000) {
               const spread = longPoint.rate - shortPoint.rate;
               const hourlyReturn = (spread * allocation) / totalPortfolio;
@@ -558,7 +663,7 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
 
               // Group by month - accumulate hourly returns, then annualize
               const monthKey = `${longPoint.timestamp.getFullYear()}-${longPoint.timestamp.getMonth()}`;
-              const existing = monthlyReturns.find(m => m.month === monthKey);
+              const existing = monthlyReturns.find((m) => m.month === monthKey);
               if (existing) {
                 // Accumulate hourly returns (will be annualized later)
                 existing.apy += hourlyReturn;
@@ -574,12 +679,16 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
     }
 
     // Calculate APY for 30/90 days
-    const apy30 = returns30.length > 0
-      ? (returns30.reduce((sum, r) => sum + r, 0) / returns30.length) * this.periodsPerYear
-      : 0;
-    const apy90 = returns90.length > 0
-      ? (returns90.reduce((sum, r) => sum + r, 0) / returns90.length) * this.periodsPerYear
-      : 0;
+    const apy30 =
+      returns30.length > 0
+        ? (returns30.reduce((sum, r) => sum + r, 0) / returns30.length) *
+          this.periodsPerYear
+        : 0;
+    const apy90 =
+      returns90.length > 0
+        ? (returns90.reduce((sum, r) => sum + r, 0) / returns90.length) *
+          this.periodsPerYear
+        : 0;
 
     // Find best/worst month - annualize the accumulated hourly returns
     let worstMonth = { apy: 0, month: 'N/A' };
@@ -587,16 +696,16 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
 
     if (monthlyReturns.length > 0) {
       // Annualize monthly returns (they're accumulated hourly returns)
-      const annualizedMonthlyReturns = monthlyReturns.map(m => ({
+      const annualizedMonthlyReturns = monthlyReturns.map((m) => ({
         apy: m.apy * this.periodsPerYear,
         month: m.month,
       }));
 
       worstMonth = annualizedMonthlyReturns.reduce((worst, current) =>
-        current.apy < worst.apy ? current : worst
+        current.apy < worst.apy ? current : worst,
       );
       bestMonth = annualizedMonthlyReturns.reduce((best, current) =>
-        current.apy > best.apy ? current : best
+        current.apy > best.apy ? current : best,
       );
     }
 
@@ -624,14 +733,16 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
       const allocation = allocations.get(item.opportunity.symbol) || 0;
       if (allocation <= 0) continue;
       const reducedSpread = item.opportunity.spread.toDecimal() * 0.5;
-      scenario1APY += (reducedSpread * this.periodsPerYear * allocation) / totalPortfolio;
+      scenario1APY +=
+        (reducedSpread * this.periodsPerYear * allocation) / totalPortfolio;
     }
     scenarios.push({
       scenario: 'Spread Drop 50%',
       description: 'All spreads reduce by 50%',
       apy: scenario1APY,
       timeToRecover: scenario1APY > 0 ? '2-3 months' : '3-6 months',
-      riskLevel: scenario1APY > 0.15 ? 'MEDIUM' : scenario1APY > 0 ? 'HIGH' : 'CRITICAL',
+      riskLevel:
+        scenario1APY > 0.15 ? 'MEDIUM' : scenario1APY > 0 ? 'HIGH' : 'CRITICAL',
     });
 
     // Scenario 2: Spreads reverse
@@ -640,7 +751,8 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
       const allocation = allocations.get(item.opportunity.symbol) || 0;
       if (allocation <= 0) continue;
       const reversedSpread = -item.opportunity.spread;
-      scenario2APY += (reversedSpread * this.periodsPerYear * allocation) / totalPortfolio;
+      scenario2APY +=
+        (reversedSpread * this.periodsPerYear * allocation) / totalPortfolio;
     }
     scenarios.push({
       scenario: 'Spread Reversal',
@@ -668,7 +780,8 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
       if (volatilityMetrics) {
         // Use minimum spread from history
         const worstSpread = volatilityMetrics.minSpread;
-        scenario4APY += (worstSpread * this.periodsPerYear * allocation) / totalPortfolio;
+        scenario4APY +=
+          (worstSpread * this.periodsPerYear * allocation) / totalPortfolio;
       }
     }
     scenarios.push({
@@ -676,7 +789,8 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
       description: 'Use worst historical volatility period',
       apy: scenario4APY,
       timeToRecover: scenario4APY > 0.1 ? '1-2 months' : '2-4 months',
-      riskLevel: scenario4APY > 0.15 ? 'MEDIUM' : scenario4APY > 0 ? 'HIGH' : 'CRITICAL',
+      riskLevel:
+        scenario4APY > 0.15 ? 'MEDIUM' : scenario4APY > 0 ? 'HIGH' : 'CRITICAL',
     });
 
     // Scenario 5: Correlated failure (all correlated pairs fail together)
@@ -697,7 +811,11 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
   private calculateCorrelationAnalysis(
     opportunities: PortfolioRiskInput['opportunities'],
   ): PortfolioRiskMetrics['correlationRisk'] {
-    const correlations: Array<{ pair1: string; pair2: string; correlation: number }> = [];
+    const correlations: Array<{
+      pair1: string;
+      pair2: string;
+      correlation: number;
+    }> = [];
 
     // Calculate correlation between all pairs
     for (let i = 0; i < opportunities.length; i++) {
@@ -718,15 +836,20 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
       }
     }
 
-    const avgCorrelation = correlations.length > 0
-      ? correlations.reduce((sum, c) => sum + c.correlation, 0) / correlations.length
-      : 0;
+    const avgCorrelation =
+      correlations.length > 0
+        ? correlations.reduce((sum, c) => sum + c.correlation, 0) /
+          correlations.length
+        : 0;
 
-    const maxCorrelation = correlations.length > 0
-      ? Math.max(...correlations.map(c => Math.abs(c.correlation)))
-      : 0;
+    const maxCorrelation =
+      correlations.length > 0
+        ? Math.max(...correlations.map((c) => Math.abs(c.correlation)))
+        : 0;
 
-    const correlatedPairs = correlations.filter(c => Math.abs(c.correlation) > 0.7);
+    const correlatedPairs = correlations.filter(
+      (c) => Math.abs(c.correlation) > 0.7,
+    );
 
     return {
       averageCorrelation: avgCorrelation,
@@ -743,12 +866,32 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
     opp2: ArbitrageOpportunity,
   ): number {
     // Get historical spreads for both opportunities
-    const long1Data = this.historicalService.getHistoricalData(opp1.symbol, opp1.longExchange);
-    const short1Data = this.historicalService.getHistoricalData(opp1.symbol, opp1.shortExchange);
-    const long2Data = this.historicalService.getHistoricalData(opp2.symbol, opp2.longExchange);
-    const short2Data = this.historicalService.getHistoricalData(opp2.symbol, opp2.shortExchange);
+    if (!opp1.shortExchange || !opp2.shortExchange) {
+      return 0; // Perp-spot opportunities have no correlation with perp-perp
+    }
+    const long1Data = this.historicalService.getHistoricalData(
+      opp1.symbol,
+      opp1.longExchange,
+    );
+    const short1Data = this.historicalService.getHistoricalData(
+      opp1.symbol,
+      opp1.shortExchange,
+    );
+    const long2Data = this.historicalService.getHistoricalData(
+      opp2.symbol,
+      opp2.longExchange,
+    );
+    const short2Data = this.historicalService.getHistoricalData(
+      opp2.symbol,
+      opp2.shortExchange,
+    );
 
-    if (long1Data.length === 0 || short1Data.length === 0 || long2Data.length === 0 || short2Data.length === 0) {
+    if (
+      long1Data.length === 0 ||
+      short1Data.length === 0 ||
+      long2Data.length === 0 ||
+      short2Data.length === 0
+    ) {
       return 0; // No data = no correlation
     }
 
@@ -758,16 +901,22 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
 
     for (const long1 of long1Data) {
       for (const short1 of short1Data) {
-        const timeDiff1 = Math.abs(long1.timestamp.getTime() - short1.timestamp.getTime());
+        const timeDiff1 = Math.abs(
+          long1.timestamp.getTime() - short1.timestamp.getTime(),
+        );
         if (timeDiff1 <= 3600 * 1000) {
           const spread1 = long1.rate - short1.rate;
 
           // Find matching timestamp in opp2
           for (const long2 of long2Data) {
-            const timeDiff2 = Math.abs(long1.timestamp.getTime() - long2.timestamp.getTime());
+            const timeDiff2 = Math.abs(
+              long1.timestamp.getTime() - long2.timestamp.getTime(),
+            );
             if (timeDiff2 <= 3600 * 1000) {
               for (const short2 of short2Data) {
-                const timeDiff3 = Math.abs(long2.timestamp.getTime() - short2.timestamp.getTime());
+                const timeDiff3 = Math.abs(
+                  long2.timestamp.getTime() - short2.timestamp.getTime(),
+                );
                 if (timeDiff3 <= 3600 * 1000) {
                   const spread2 = long2.rate - short2.rate;
                   spreads1.push(spread1);
@@ -824,15 +973,20 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
     }
 
     const allocationPercents = Array.from(allocations.values())
-      .map(amount => (amount / totalPortfolio) * 100)
+      .map((amount) => (amount / totalPortfolio) * 100)
       .sort((a, b) => b - a);
 
     const maxAllocationPercent = allocationPercents[0] || 0;
-    const top3AllocationPercent = allocationPercents.slice(0, 3).reduce((sum, p) => sum + p, 0);
+    const top3AllocationPercent = allocationPercents
+      .slice(0, 3)
+      .reduce((sum, p) => sum + p, 0);
 
     // Calculate Herfindahl-Hirschman Index (HHI)
     // HHI = Σ(allocationPercent_i^2) / 10000 (normalized to 0-1)
-    const hhi = allocationPercents.reduce((sum, p) => sum + (p / 100) * (p / 100), 0);
+    const hhi = allocationPercents.reduce(
+      (sum, p) => sum + (p / 100) * (p / 100),
+      0,
+    );
 
     // Risk levels: HHI > 0.25 = HIGH, > 0.15 = MEDIUM, else LOW
     let riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
@@ -870,9 +1024,15 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
       const stabilityScore = item.volatilityMetrics?.stabilityScore || 0.5;
 
       let riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
-      if (stabilityScore < 0.5 || (item.volatilityMetrics?.spreadReversals || 0) > 10) {
+      if (
+        stabilityScore < 0.5 ||
+        (item.volatilityMetrics?.spreadReversals || 0) > 10
+      ) {
         riskLevel = 'HIGH';
-      } else if (stabilityScore < 0.7 || (item.volatilityMetrics?.spreadDropsToZero || 0) > 0) {
+      } else if (
+        stabilityScore < 0.7 ||
+        (item.volatilityMetrics?.spreadDropsToZero || 0) > 0
+      ) {
         riskLevel = 'MEDIUM';
       } else {
         riskLevel = 'LOW';
@@ -899,9 +1059,13 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
   ): PortfolioRiskMetrics {
     return {
       expectedAPY: aggregateAPY,
-      expectedAPYConfidenceInterval: { lower: aggregateAPY, upper: aggregateAPY, confidence: 0.95 },
+      expectedAPYConfidenceInterval: {
+        lower: aggregateAPY,
+        upper: aggregateAPY,
+        confidence: 0.95,
+      },
       worstCaseAPY: -0.05,
-      valueAtRisk95: totalPortfolio * -0.10,
+      valueAtRisk95: totalPortfolio * -0.1,
       maximumDrawdown: totalPortfolio * -0.15,
       sharpeRatio: 0,
       historicalBacktest: {
@@ -926,4 +1090,3 @@ export class PortfolioRiskAnalyzer implements IPortfolioRiskAnalyzer {
     };
   }
 }
-
