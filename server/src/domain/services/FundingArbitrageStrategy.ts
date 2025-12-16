@@ -124,7 +124,9 @@ export class FundingArbitrageStrategy {
   > = new Map();
 
   // Filtered opportunities: opportunities that failed after 5 retries
-  private readonly filteredOpportunities: Set<string> = new Set(); // key: `${symbol}-${longExchange}-${shortExchange}`
+  // Now includes timestamp for expiry (opportunities can be retried after 30 minutes)
+  private readonly filteredOpportunities: Map<string, Date> = new Map(); // key: `${symbol}-${longExchange}-${shortExchange}`, value: timestamp when filtered
+  private readonly FILTER_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes before retry
 
   // Failed orders tracking: orders that have exhausted retries
   private readonly failedOrders: Map<
@@ -725,15 +727,46 @@ export class FundingArbitrageStrategy {
         );
       }
 
-      result.opportunitiesEvaluated = filteredOpportunities.length;
+      // EARLY FILTERING: Remove opportunities that failed recently (with expiry check)
+      // This prevents wasting time evaluating opportunities that will be skipped later
+      const now = Date.now();
+      const opportunitiesAfterFailedFilter = filteredOpportunities.filter((opp) => {
+        if (!opp.shortExchange) return true; // Keep perp-spot opportunities
+        
+        const filterKey = this.getRetryKey(
+          opp.symbol,
+          opp.longExchange,
+          opp.shortExchange,
+        );
+        const filteredTime = this.filteredOpportunities.get(filterKey);
+        if (filteredTime) {
+          const timeSinceFilter = now - filteredTime.getTime();
+          if (timeSinceFilter < this.FILTER_EXPIRY_MS) {
+            return false; // Still filtered
+          } else {
+            // Filter expired - remove it
+            this.filteredOpportunities.delete(filterKey);
+          }
+        }
+        return true;
+      });
+
+      const failedFilterCount = filteredOpportunities.length - opportunitiesAfterFailedFilter.length;
+      if (failedFilterCount > 0) {
+        this.logger.log(
+          `⏳ Skipped ${failedFilterCount} recently failed opportunities (will retry after ${this.FILTER_EXPIRY_MS / 60000}m cooldown)`,
+        );
+      }
+
+      result.opportunitiesEvaluated = opportunitiesAfterFailedFilter.length;
 
       this.logger.debug(
-        `Found ${filteredOpportunities.length} arbitrage opportunities (after blacklist filter)`,
+        `Found ${opportunitiesAfterFailedFilter.length} arbitrage opportunities (after blacklist + failed filter)`,
       );
 
-      // Emit events for discovered opportunities (only non-blacklisted)
+      // Emit events for discovered opportunities (only non-blacklisted and non-failed)
       if (this.eventBus) {
-        for (const opportunity of filteredOpportunities) {
+        for (const opportunity of opportunitiesAfterFailedFilter) {
           await this.eventBus.publish(
             new ArbitrageOpportunityDiscoveredEvent(
               opportunity,
@@ -743,14 +776,19 @@ export class FundingArbitrageStrategy {
         }
       }
 
-      if (filteredOpportunities.length === 0) {
+      if (opportunitiesAfterFailedFilter.length === 0) {
+        if (failedFilterCount > 0) {
+          this.logger.warn(
+            `⚠️ All opportunities are in cooldown from recent failures. Will retry in up to ${this.FILTER_EXPIRY_MS / 60000} minutes.`,
+          );
+        }
         return result;
       }
 
       // Pre-fetch balances for all unique exchanges to reduce API calls
       // This batches balance calls instead of calling for each opportunity
       const uniqueExchanges = new Set<ExchangeType>();
-      filteredOpportunities.forEach((opp) => {
+      opportunitiesAfterFailedFilter.forEach((opp) => {
         uniqueExchanges.add(opp.longExchange);
         if (opp.shortExchange) {
           uniqueExchanges.add(opp.shortExchange);
@@ -849,7 +887,7 @@ export class FundingArbitrageStrategy {
 
       // PROACTIVE REBALANCING: Redistribute capital across exchanges before evaluating opportunities
       // This ensures all exchanges have sufficient balance to execute opportunities
-      if (this.balanceRebalancer && filteredOpportunities.length > 0) {
+      if (this.balanceRebalancer && opportunitiesAfterFailedFilter.length > 0) {
         try {
           this.logger.log('⚖️ Proactively rebalancing capital across exchanges...');
           
@@ -859,7 +897,7 @@ export class FundingArbitrageStrategy {
             0,
           );
           const uniqueExchangesForRebalance = new Set<ExchangeType>();
-          filteredOpportunities.forEach((opp) => {
+          opportunitiesAfterFailedFilter.forEach((opp) => {
             uniqueExchangesForRebalance.add(opp.longExchange);
             if (opp.shortExchange) {
               uniqueExchangesForRebalance.add(opp.shortExchange);
@@ -897,7 +935,7 @@ export class FundingArbitrageStrategy {
               // Execute rebalancing
               const rebalanceResult = await this.balanceRebalancer.rebalance(
                 adapters,
-                filteredOpportunities,
+                opportunitiesAfterFailedFilter,
               );
 
               if (rebalanceResult.success && rebalanceResult.totalTransferred > 0) {
@@ -974,8 +1012,8 @@ export class FundingArbitrageStrategy {
         shortBidAsk: { bestBid: number; bestAsk: number } | null;
       }> = [];
 
-      for (let i = 0; i < filteredOpportunities.length; i++) {
-        const opportunity = filteredOpportunities[i];
+      for (let i = 0; i < opportunitiesAfterFailedFilter.length; i++) {
+        const opportunity = opportunitiesAfterFailedFilter[i];
 
         try {
           // Use pre-fetched balances instead of calling getBalance() in createExecutionPlan
@@ -1636,16 +1674,28 @@ export class FundingArbitrageStrategy {
       const ladderOpportunities = allEvaluatedOpportunities
         .filter((item) => {
           // Filter out opportunities that are marked as filtered (failed after 5 retries)
+          // But allow retry after FILTER_EXPIRY_MS (30 minutes)
           const filterKey = this.getRetryKey(
             item.opportunity.symbol,
             item.opportunity.longExchange,
             item.opportunity.shortExchange!,
           );
-          if (this.filteredOpportunities.has(filterKey)) {
-            this.logger.debug(
-              `Skipping filtered opportunity ${item.opportunity.symbol} (${item.opportunity.longExchange}/${item.opportunity.shortExchange})`,
-            );
-            return false;
+          const filteredTime = this.filteredOpportunities.get(filterKey);
+          if (filteredTime) {
+            const timeSinceFilter = Date.now() - filteredTime.getTime();
+            if (timeSinceFilter < this.FILTER_EXPIRY_MS) {
+              const remainingMinutes = Math.ceil((this.FILTER_EXPIRY_MS - timeSinceFilter) / 60000);
+              this.logger.debug(
+                `Skipping filtered opportunity ${item.opportunity.symbol} (${item.opportunity.longExchange}/${item.opportunity.shortExchange}) - retry in ${remainingMinutes}m`,
+              );
+              return false;
+            } else {
+              // Filter expired - remove and allow retry
+              this.filteredOpportunities.delete(filterKey);
+              this.logger.log(
+                `🔄 Retrying previously filtered opportunity ${item.opportunity.symbol} (filter expired)`,
+              );
+            }
           }
 
           // Must have a valid execution plan OR acceptable break-even time
@@ -2033,17 +2083,17 @@ export class FundingArbitrageStrategy {
                   `Will try again next cycle.`,
               );
 
-              // After 5 retries, filter out this opportunity
+              // After 5 retries, filter out this opportunity (with expiry)
               if (retryInfo.retryCount >= 5) {
                 const filterKey = this.getRetryKey(
                   retryInfo.opportunity.symbol,
                   retryInfo.longExchange,
                   retryInfo.shortExchange,
                 );
-                this.filteredOpportunities.add(filterKey);
+                this.filteredOpportunities.set(filterKey, new Date());
                 this.logger.error(
                   `❌ Filtering out ${retryInfo.opportunity.symbol} (${retryInfo.longExchange}/${retryInfo.shortExchange}) ` +
-                    `after 5 failed retry attempts. Moving to next opportunity.`,
+                    `after 5 failed retry attempts. Will retry in ${this.FILTER_EXPIRY_MS / 60000} minutes.`,
                 );
                 // Close the single-leg position since we're giving up
                 await this.closeSingleLegPosition(
