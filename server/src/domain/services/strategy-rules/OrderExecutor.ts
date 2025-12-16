@@ -34,6 +34,7 @@ import {
   OrderExecutionException,
   InsufficientBalanceException,
 } from '../../exceptions/DomainException';
+import { DiagnosticsService } from '../../../infrastructure/services/DiagnosticsService';
 
 /**
  * Order executor for funding arbitrage strategy
@@ -52,7 +53,25 @@ export class OrderExecutor implements IOrderExecutor {
     @Optional()
     @Inject('IPerpKeeperPerformanceLogger')
     private readonly performanceLogger?: IPerpKeeperPerformanceLogger,
+    @Optional()
+    private readonly diagnosticsService?: DiagnosticsService,
   ) {}
+
+  /**
+   * Record an error to diagnostics service
+   */
+  private recordError(type: string, message: string, exchange?: ExchangeType, symbol?: string, context?: Record<string, any>): void {
+    if (this.diagnosticsService) {
+      this.diagnosticsService.recordError({
+        type,
+        message,
+        exchange,
+        symbol,
+        timestamp: new Date(),
+        context,
+      });
+    }
+  }
 
   async waitForOrderFill(
     adapter: IPerpExchangeAdapter,
@@ -256,6 +275,14 @@ export class OrderExecutor implements IOrderExecutor {
     this.logger.warn(
       `⚠️ ${operationType} order ${orderId} did not fill after ${maxRetries} attempts ` +
         `(~${Math.round(totalTime / 1000)}s). Order may still be resting on the order book.`,
+    );
+    
+    this.recordError(
+      'ORDER_FILL_TIMEOUT',
+      `${operationType} order did not fill after ${maxRetries} attempts (~${Math.round(totalTime / 1000)}s)`,
+      exchangeType,
+      symbol,
+      { orderId, maxRetries, totalTimeMs: totalTime },
     );
 
     // Return a response indicating the order is still pending

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpTransport, ExchangeClient, InfoClient } from '@nktkas/hyperliquid';
 import { SymbolConverter, formatSize, formatPrice } from '@nktkas/hyperliquid/utils';
@@ -16,6 +16,7 @@ import {
 import { PerpPosition } from '../../../domain/entities/PerpPosition';
 import { IPerpExchangeAdapter, ExchangeError, FundingPayment } from '../../../domain/ports/IPerpExchangeAdapter';
 import { HyperLiquidDataProvider } from './HyperLiquidDataProvider';
+import { DiagnosticsService } from '../../services/DiagnosticsService';
 
 /**
  * HyperliquidExchangeAdapter - Implements IPerpExchangeAdapter for Hyperliquid
@@ -40,6 +41,7 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
   constructor(
     private readonly configService: ConfigService,
     private readonly dataProvider: HyperLiquidDataProvider,
+    @Optional() private readonly diagnosticsService?: DiagnosticsService,
   ) {
     const privateKey = this.configService.get<string>('PRIVATE_KEY') || this.configService.get<string>('HYPERLIQUID_PRIVATE_KEY');
     const isTestnet = this.configService.get<boolean>('HYPERLIQUID_TESTNET') || false;
@@ -79,6 +81,22 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
     // This prevents rate limiting during startup
 
     // Removed adapter initialization log - only execution logs shown
+  }
+
+  /**
+   * Record an error to diagnostics service
+   */
+  private recordError(type: string, message: string, symbol?: string, context?: Record<string, any>): void {
+    if (this.diagnosticsService) {
+      this.diagnosticsService.recordError({
+        type,
+        message,
+        exchange: ExchangeType.HYPERLIQUID,
+        symbol,
+        timestamp: new Date(),
+        context,
+      });
+    }
   }
 
   /**
@@ -360,6 +378,7 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
       throw new Error('Unknown response format from Hyperliquid');
     } catch (error: any) {
       this.logger.error(`Failed to place order: ${error.message}`);
+      this.recordError('HYPERLIQUID_ORDER_FAILED', error.message, request.symbol);
       throw new ExchangeError(
         `Failed to place order: ${error.message}`,
         ExchangeType.HYPERLIQUID,
@@ -550,6 +569,7 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
       }
     } catch (error: any) {
       this.logger.error(`Failed to cancel order: ${error.message}`);
+      this.recordError('HYPERLIQUID_CANCEL_FAILED', error.message);
       throw new ExchangeError(
         `Failed to cancel order: ${error.message}`,
         ExchangeType.HYPERLIQUID,

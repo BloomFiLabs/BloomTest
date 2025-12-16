@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
 import { ethers } from 'ethers';
@@ -14,6 +14,7 @@ import {
 } from '../../../domain/value-objects/PerpOrder';
 import { PerpPosition } from '../../../domain/entities/PerpPosition';
 import { IPerpExchangeAdapter, ExchangeError, FundingPayment } from '../../../domain/ports/IPerpExchangeAdapter';
+import { DiagnosticsService } from '../../services/DiagnosticsService';
 
 /**
  * AsterExchangeAdapter - Implements IPerpExchangeAdapter for Aster DEX
@@ -33,7 +34,10 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
   private symbolPricePrecisionCache: Map<string, number> = new Map(); // Cache price precision per symbol
   private symbolTickSizeCache: Map<string, number> = new Map(); // Cache tickSize per symbol
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    @Optional() private readonly diagnosticsService?: DiagnosticsService,
+  ) {
     // Load configuration from environment
     // Remove trailing slash if present (causes 403 errors)
     let baseUrl = this.configService.get<string>('ASTER_BASE_URL') || 'https://fapi.asterdex.com';
@@ -100,6 +104,22 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
 
   getExchangeType(): string {
     return ExchangeType.ASTER;
+  }
+
+  /**
+   * Record an error to diagnostics service
+   */
+  private recordError(type: string, message: string, symbol?: string, context?: Record<string, any>): void {
+    if (this.diagnosticsService) {
+      this.diagnosticsService.recordError({
+        type,
+        message,
+        exchange: ExchangeType.ASTER,
+        symbol,
+        timestamp: new Date(),
+        context,
+      });
+    }
   }
 
   /**
@@ -475,6 +495,7 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
       } else {
         this.logger.error(`Failed to place order: ${error.message}`);
       }
+      this.recordError('ASTER_ORDER_FAILED', error.message, request.symbol);
       throw new ExchangeError(
         `Failed to place order: ${error.message}`,
         ExchangeType.ASTER,

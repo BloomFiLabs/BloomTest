@@ -74,9 +74,9 @@ import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTrack
     // Keep original adapters for backward compatibility (will be replaced in PerpKeeperService)
     {
       provide: AsterExchangeAdapter,
-      useFactory: (configService: ConfigService) => {
+      useFactory: (configService: ConfigService, diagnosticsService: DiagnosticsService) => {
         try {
-          return new AsterExchangeAdapter(configService);
+          return new AsterExchangeAdapter(configService, diagnosticsService);
         } catch (error: any) {
           const logger = new Logger('PerpKeeperModule');
           logger.warn(`Failed to create Aster adapter: ${error.message}`);
@@ -84,24 +84,24 @@ import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTrack
           return null;
         }
       },
-      inject: [ConfigService],
+      inject: [ConfigService, DiagnosticsService],
     },
     {
       provide: 'ASTER_ADAPTER',
-      useFactory: (configService: ConfigService) => {
+      useFactory: (configService: ConfigService, diagnosticsService: DiagnosticsService) => {
         try {
-          return new AsterExchangeAdapter(configService);
+          return new AsterExchangeAdapter(configService, diagnosticsService);
         } catch (error: any) {
           return null;
         }
       },
-      inject: [ConfigService],
+      inject: [ConfigService, DiagnosticsService],
     },
     {
       provide: LighterExchangeAdapter,
-      useFactory: (configService: ConfigService) => {
+      useFactory: (configService: ConfigService, diagnosticsService: DiagnosticsService) => {
         try {
-          return new LighterExchangeAdapter(configService);
+          return new LighterExchangeAdapter(configService, diagnosticsService);
         } catch (error: any) {
           const logger = new Logger('PerpKeeperModule');
           logger.warn(`Failed to create Lighter adapter: ${error.message}`);
@@ -109,24 +109,24 @@ import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTrack
           return null;
         }
       },
-      inject: [ConfigService],
+      inject: [ConfigService, DiagnosticsService],
     },
     {
       provide: 'LIGHTER_ADAPTER',
-      useFactory: (configService: ConfigService) => {
+      useFactory: (configService: ConfigService, diagnosticsService: DiagnosticsService) => {
         try {
-          return new LighterExchangeAdapter(configService);
+          return new LighterExchangeAdapter(configService, diagnosticsService);
         } catch (error: any) {
           return null;
         }
       },
-      inject: [ConfigService],
+      inject: [ConfigService, DiagnosticsService],
     },
     {
       provide: HyperliquidExchangeAdapter,
-      useFactory: (configService: ConfigService, dataProvider: HyperLiquidDataProvider) => {
+      useFactory: (configService: ConfigService, dataProvider: HyperLiquidDataProvider, diagnosticsService: DiagnosticsService) => {
         try {
-          return new HyperliquidExchangeAdapter(configService, dataProvider);
+          return new HyperliquidExchangeAdapter(configService, dataProvider, diagnosticsService);
         } catch (error: any) {
           const logger = new Logger('PerpKeeperModule');
           logger.warn(`Failed to create Hyperliquid adapter: ${error.message}`);
@@ -134,18 +134,18 @@ import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTrack
           return null;
         }
       },
-      inject: [ConfigService, HyperLiquidDataProvider],
+      inject: [ConfigService, HyperLiquidDataProvider, DiagnosticsService],
     },
     {
       provide: 'HYPERLIQUID_ADAPTER',
-      useFactory: (configService: ConfigService, dataProvider: HyperLiquidDataProvider) => {
+      useFactory: (configService: ConfigService, dataProvider: HyperLiquidDataProvider, diagnosticsService: DiagnosticsService) => {
         try {
-          return new HyperliquidExchangeAdapter(configService, dataProvider);
+          return new HyperliquidExchangeAdapter(configService, dataProvider, diagnosticsService);
         } catch (error: any) {
           return null;
         }
       },
-      inject: [ConfigService, HyperLiquidDataProvider],
+      inject: [ConfigService, HyperLiquidDataProvider, DiagnosticsService],
     },
     {
       provide: ExtendedExchangeAdapter,
@@ -365,10 +365,14 @@ import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTrack
     // Profit tracking and reward harvesting
     {
       provide: ProfitTracker,
-      useFactory: (configService: ConfigService, keeperService: PerpKeeperService) => {
-        return new ProfitTracker(configService, keeperService);
+      useFactory: (
+        configService: ConfigService,
+        keeperService: PerpKeeperService,
+        realFundingService: RealFundingPaymentsService,
+      ) => {
+        return new ProfitTracker(configService, keeperService, realFundingService);
       },
-      inject: [ConfigService, PerpKeeperService],
+      inject: [ConfigService, PerpKeeperService, RealFundingPaymentsService],
     },
     {
       provide: RewardHarvester,

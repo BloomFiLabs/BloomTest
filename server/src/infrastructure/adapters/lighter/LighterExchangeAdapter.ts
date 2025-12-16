@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SignerClient, OrderType as LighterOrderType, ApiClient, OrderApi, MarketHelper } from '@reservoir0x/lighter-ts-sdk';
 import axios from 'axios';
@@ -14,6 +14,7 @@ import {
 } from '../../../domain/value-objects/PerpOrder';
 import { PerpPosition } from '../../../domain/entities/PerpPosition';
 import { IPerpExchangeAdapter, ExchangeError, FundingPayment } from '../../../domain/ports/IPerpExchangeAdapter';
+import { DiagnosticsService } from '../../services/DiagnosticsService';
 
 /**
  * LighterExchangeAdapter - Implements IPerpExchangeAdapter for Lighter Protocol
@@ -38,7 +39,10 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
   private orderMutex: Promise<void> = Promise.resolve();
   private orderMutexRelease: (() => void) | null = null;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    @Optional() private readonly diagnosticsService?: DiagnosticsService,
+  ) {
     const baseUrl = this.configService.get<string>('LIGHTER_API_BASE_URL') || 'https://mainnet.zklighter.elliot.ai';
     const apiKey = this.configService.get<string>('LIGHTER_API_KEY');
     const accountIndex = parseInt(this.configService.get<string>('LIGHTER_ACCOUNT_INDEX') || '1000');
@@ -67,6 +71,22 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
     );
 
     // Removed adapter initialization log - only execution logs shown
+  }
+
+  /**
+   * Record an error to diagnostics service
+   */
+  private recordError(type: string, message: string, symbol?: string, context?: Record<string, any>): void {
+    if (this.diagnosticsService) {
+      this.diagnosticsService.recordError({
+        type,
+        message,
+        exchange: ExchangeType.LIGHTER,
+        symbol,
+        timestamp: new Date(),
+        context,
+      });
+    }
   }
 
   private async ensureInitialized(): Promise<void> {
@@ -572,6 +592,7 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
           const errorMsg = result.mainOrder.error || 'Order creation failed';
           this.logger.error(`❌ Lighter order creation failed: ${errorMsg}`);
           this.logger.error(`Order params: ${JSON.stringify(orderParams)}`);
+          this.recordError('LIGHTER_ORDER_CREATION_FAILED', errorMsg, request.symbol, { orderParams });
           throw new Error(errorMsg);
         }
 
@@ -584,6 +605,7 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
         } catch (error: any) {
           // Transaction wait might fail, but order may still be submitted
           this.logger.warn(`Order transaction wait failed: ${error.message}`);
+          this.recordError('LIGHTER_TX_WAIT_FAILED', error.message, request.symbol, { orderId });
         }
 
         // CRITICAL: Wait a short time and check if order was immediately filled or canceled
@@ -679,6 +701,7 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
             `⚠️ Lighter nonce error for ${request.symbol}: ${errorMsg}. ` +
             `Re-syncing nonce and retrying (attempt ${attempt + 1}/${maxRetries})...`
           );
+          this.recordError('LIGHTER_NONCE_ERROR', errorMsg, request.symbol, { attempt: attempt + 1 });
           
           // Reset the SignerClient to get a fresh nonce from the server
           await this.resetSignerClient();
@@ -695,6 +718,7 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
             `This indicates the account may need margin mode configured. ` +
             `Please check your Lighter account settings or contact support.`
           );
+          this.recordError('LIGHTER_MARGIN_MODE_ERROR', errorMsg, request.symbol);
           throw new ExchangeError(
             `Invalid margin mode: Account may need margin mode configured. ${errorMsg}`,
             ExchangeType.LIGHTER,
@@ -705,6 +729,7 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
         
         // Not retryable or max retries reached
         this.logger.error(`Failed to place order: ${errorMsg}`);
+        this.recordError('LIGHTER_ORDER_FAILED', errorMsg, request.symbol, { attempt: attempt + 1, maxRetries });
         throw new ExchangeError(
           `Failed to place order: ${errorMsg}`,
           ExchangeType.LIGHTER,
@@ -722,6 +747,7 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
         if (lastError?.stack) {
           this.logger.error(`Final error stack: ${lastError.stack}`);
         }
+        this.recordError('LIGHTER_ORDER_MAX_RETRIES', finalErrorMsg, request.symbol, { maxRetries });
         
         throw new ExchangeError(
           `Failed to place order after ${maxRetries} attempts: ${finalErrorMsg}`,
