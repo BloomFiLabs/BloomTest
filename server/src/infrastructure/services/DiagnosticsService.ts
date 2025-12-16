@@ -229,6 +229,12 @@ export class DiagnosticsService {
     unrealizedPnl: number;
     byExchange: Record<string, number>;
   } = { count: 0, totalValue: 0, unrealizedPnl: 0, byExchange: {} };
+  
+  // Position time tracking for single-leg percentage calculation
+  // Tracks cumulative time spent in positions (both full and single-leg)
+  private totalPositionTimeMs: number = 0;
+  private lastPositionCheckTime: Date | null = null;
+  private lastPositionCount: number = 0;
 
   // Injected services for enhanced diagnostics
   private circuitBreaker?: CircuitBreakerService;
@@ -395,6 +401,7 @@ export class DiagnosticsService {
 
   /**
    * Update position data (called by PerformanceLogger or Orchestrator)
+   * Also tracks cumulative time spent in positions for single-leg % calculation
    */
   updatePositionData(data: {
     count: number;
@@ -402,6 +409,19 @@ export class DiagnosticsService {
     unrealizedPnl: number;
     byExchange: Record<string, number>;
   }): void {
+    const now = new Date();
+    
+    // Track time spent in positions
+    if (this.lastPositionCheckTime && this.lastPositionCount > 0) {
+      // We had positions since last check - accumulate that time
+      const elapsedMs = now.getTime() - this.lastPositionCheckTime.getTime();
+      this.totalPositionTimeMs += elapsedMs;
+    }
+    
+    // Update tracking state
+    this.lastPositionCheckTime = now;
+    this.lastPositionCount = data.count;
+    
     this.positionData = data;
   }
 
@@ -775,30 +795,34 @@ export class DiagnosticsService {
 
   /**
    * Calculate percentage of time spent in single-leg state
-   * This measures how much of our position time is exposed to directional risk
+   * This measures how much of our POSITION time is exposed to directional risk
+   * (single-leg time / total time in positions, NOT total uptime)
    */
   private calculateSingleLegTimePercent(): number {
     // Sum up all resolution times (time spent in single-leg state)
-    let totalSingleLegMinutes = 0;
+    let totalSingleLegMs = 0;
     for (const bucket of this.hourlyBuckets.values()) {
-      totalSingleLegMinutes += bucket.singleLegs.resolutionTimesMin.reduce((a, b) => a + b, 0);
+      // Convert minutes to ms
+      totalSingleLegMs += bucket.singleLegs.resolutionTimesMin.reduce((a, b) => a + b, 0) * 60000;
     }
     
     // Also count time for currently active single-legs
     const now = Date.now();
     for (const sl of this.activeSingleLegs.values()) {
-      totalSingleLegMinutes += (now - sl.startedAt.getTime()) / 60000;
+      totalSingleLegMs += now - sl.startedAt.getTime();
     }
     
-    // Calculate total position time (24h = 1440 minutes, but we only count when we have positions)
-    // For simplicity, use uptime as the denominator
-    const uptimeMinutes = (now - this.startTime.getTime()) / 60000;
-    if (uptimeMinutes === 0) return 0;
+    // Get total time spent in positions (tracked via updatePositionData calls)
+    // Add current period if we have positions now
+    let totalPositionMs = this.totalPositionTimeMs;
+    if (this.lastPositionCheckTime && this.lastPositionCount > 0) {
+      totalPositionMs += now - this.lastPositionCheckTime.getTime();
+    }
     
-    // Cap at 24h worth of data
-    const maxMinutes = Math.min(uptimeMinutes, 24 * 60);
+    // If no position time tracked, return 0
+    if (totalPositionMs === 0) return 0;
     
-    const percent = (totalSingleLegMinutes / maxMinutes) * 100;
+    const percent = (totalSingleLegMs / totalPositionMs) * 100;
     return Math.round(percent * 10) / 10; // Return as percentage with 1 decimal
   }
 
@@ -922,6 +946,9 @@ export class DiagnosticsService {
     this.recentErrors.length = 0;
     this.apyData = { estimated: 0, realized: 0, byExchange: {} };
     this.positionData = { count: 0, totalValue: 0, unrealizedPnl: 0, byExchange: {} };
+    this.totalPositionTimeMs = 0;
+    this.lastPositionCheckTime = null;
+    this.lastPositionCount = 0;
   }
 }
 
