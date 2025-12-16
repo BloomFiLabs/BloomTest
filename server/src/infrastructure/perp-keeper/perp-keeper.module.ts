@@ -50,6 +50,7 @@ import { BalanceManager } from '../../domain/services/strategy-rules/BalanceMana
 import { OpportunityEvaluator } from '../../domain/services/strategy-rules/OpportunityEvaluator';
 import { ExecutionPlanBuilder } from '../../domain/services/strategy-rules/ExecutionPlanBuilder';
 import { CostCalculator } from '../../domain/services/strategy-rules/CostCalculator';
+import { IdleFundsManager } from '../../domain/services/strategy-rules/IdleFundsManager';
 import { PerpSpotBalanceManager } from '../../domain/services/strategy-rules/PerpSpotBalanceManager';
 import { PerpSpotExecutionPlanBuilder } from '../../domain/services/strategy-rules/PerpSpotExecutionPlanBuilder';
 import { StrategyConfig } from '../../domain/value-objects/StrategyConfig';
@@ -303,6 +304,23 @@ import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTrack
         CostCalculator,
         StrategyConfig,
       ],
+    },
+    
+    // Idle funds manager - handles reallocation of unused capital
+    {
+      provide: IdleFundsManager,
+      useFactory: (
+        config: StrategyConfig,
+        executionPlanBuilder: ExecutionPlanBuilder,
+        costCalculator: CostCalculator,
+      ) => {
+        return new IdleFundsManager(config, executionPlanBuilder, costCalculator);
+      },
+      inject: [StrategyConfig, ExecutionPlanBuilder, CostCalculator],
+    },
+    {
+      provide: 'IIdleFundsManager',
+      useExisting: IdleFundsManager,
     },
     
     // Event bus

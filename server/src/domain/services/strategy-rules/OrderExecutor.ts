@@ -949,7 +949,7 @@ export class OrderExecutor implements IOrderExecutor {
       `⚠️ ${operationType} order ${orderId} did not fill after ${maxRetries} attempts ` +
         `(~${Math.round(totalTime / 1000)}s). Order may still be resting on the order book.`,
     );
-    
+
     // CRITICAL: Cancel the unfilled order to prevent orphaned orders on the order book
     // This is especially important for GTC (Good Till Cancel) orders on Lighter
     try {
@@ -1243,11 +1243,11 @@ export class OrderExecutor implements IOrderExecutor {
           shortOrder,
           opportunity.longExchange,
           opportunity.shortExchange!,
-        );
+          );
       } catch (err: any) {
         // If placeOrderPair throws, we need to determine which order failed
         // For sequential execution, the first failure stops execution
-        const errorMsg = err?.message || String(err);
+          const errorMsg = err?.message || String(err);
         
         // Check if we have partial results (long succeeded, short failed)
         // This can happen in sequential execution
@@ -1268,35 +1268,35 @@ export class OrderExecutor implements IOrderExecutor {
             errorMsg,
             new Date(),
           );
-        } else {
+      } else {
           // Long order failed
           longError = err;
           this.logger.error(
             `❌ Failed to place LONG order on ${opportunity.longExchange}: ${errorMsg}`,
           );
-          longResponse = new PerpOrderResponse(
-            'error',
-            OrderStatus.REJECTED,
-            opportunity.symbol,
-            OrderSide.LONG,
-            undefined,
-            undefined,
-            undefined,
-            errorMsg,
-            new Date(),
-          );
+        longResponse = new PerpOrderResponse(
+          'error',
+          OrderStatus.REJECTED,
+          opportunity.symbol,
+          OrderSide.LONG,
+          undefined,
+          undefined,
+          undefined,
+          errorMsg,
+          new Date(),
+        );
           // Short was never attempted
-          shortResponse = new PerpOrderResponse(
+        shortResponse = new PerpOrderResponse(
             'not-attempted',
-            OrderStatus.REJECTED,
-            opportunity.symbol,
-            OrderSide.SHORT,
-            undefined,
-            undefined,
-            undefined,
+          OrderStatus.REJECTED,
+          opportunity.symbol,
+          OrderSide.SHORT,
+          undefined,
+          undefined,
+          undefined,
             'Not attempted due to long order failure',
-            new Date(),
-          );
+          new Date(),
+        );
         }
       }
 

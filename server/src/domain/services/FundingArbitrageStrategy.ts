@@ -166,6 +166,7 @@ export class FundingArbitrageStrategy {
     @Optional() private readonly balanceRebalancer?: ExchangeBalanceRebalancer,
     @Optional() private readonly eventBus?: IEventBus,
     @Optional()
+    @Inject('IIdleFundsManager')
     private readonly idleFundsManager?: any, // IIdleFundsManager - using any to avoid circular dependency
     @Optional()
     @Inject('IOptimalLeverageService')

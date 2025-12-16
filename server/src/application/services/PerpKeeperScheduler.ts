@@ -1096,6 +1096,103 @@ export class PerpKeeperScheduler implements OnModuleInit {
   }
 
   /**
+   * Check for idle capital and try to deploy it to best opportunities
+   * Runs every 2 minutes to ensure capital is always working
+   * This is more aggressive than the hourly execution cycle
+   */
+  @Interval(120000) // Every 2 minutes (120000 ms)
+  async checkAndDeployIdleCapital(): Promise<void> {
+    // Skip if main execution is running
+    if (this.isRunning) {
+      return;
+    }
+
+    // Try to acquire global lock
+    const threadId = this.executionLockService?.generateThreadId() || `idle-capital-${Date.now()}`;
+    if (this.executionLockService && !this.executionLockService.tryAcquireGlobalLock(threadId, 'checkAndDeployIdleCapital')) {
+      return;
+    }
+
+    try {
+      const adapters = this.keeperService.getExchangeAdapters();
+      if (adapters.size === 0) {
+        return;
+      }
+
+      // Get current positions
+      const positionsResult = await this.orchestrator.getAllPositionsWithMetrics();
+      const allPositions = positionsResult.positions.filter(p => Math.abs(p.size) > 0.0001);
+
+      // Calculate total margin used
+      let totalMarginUsed = 0;
+      for (const position of allPositions) {
+        const positionValue = Math.abs(position.size) * (position.markPrice || position.entryPrice);
+        const leverage = 2.0; // Default leverage
+        totalMarginUsed += positionValue / leverage;
+      }
+
+      // Get total balance across all exchanges
+      let totalBalance = 0;
+      for (const [, adapter] of adapters) {
+        try {
+          const balance = await adapter.getBalance();
+          totalBalance += balance;
+        } catch {
+          // Skip failed exchanges
+        }
+      }
+
+      // Calculate idle capital (balance not used as margin)
+      const idleCapital = totalBalance - totalMarginUsed;
+      const idlePercentage = totalBalance > 0 ? (idleCapital / totalBalance) * 100 : 0;
+
+      // Only deploy if we have significant idle capital (> 20% of total or > $50)
+      const MIN_IDLE_PERCENTAGE = 20;
+      const MIN_IDLE_AMOUNT = 50;
+
+      if (idleCapital < MIN_IDLE_AMOUNT && idlePercentage < MIN_IDLE_PERCENTAGE) {
+        return; // Capital is well deployed
+      }
+
+      this.logger.log(
+        `💰 Idle capital detected: $${idleCapital.toFixed(2)} (${idlePercentage.toFixed(1)}% of total). ` +
+        `Searching for opportunities...`
+      );
+
+      // Execute strategy to deploy idle capital
+      const symbolsToExecute = this.symbols.filter(s => !this.isBlacklisted(s));
+
+      if (symbolsToExecute.length === 0) {
+        this.logger.warn('No symbols available for idle capital deployment');
+        return;
+      }
+
+      const result = await this.orchestrator.executeArbitrageStrategy(
+        symbolsToExecute,
+        this.minSpread,
+        this.maxPositionSizeUsd,
+      );
+
+      if (result.opportunitiesExecuted > 0) {
+        this.logger.log(
+          `✅ Deployed idle capital: ${result.opportunitiesExecuted} position(s) opened, ` +
+          `expected return: $${result.totalExpectedReturn.toFixed(4)}/period`
+        );
+      } else if (result.errors.length > 0) {
+        this.logger.warn(
+          `⚠️ Failed to deploy idle capital: ${result.errors.slice(0, 3).join(', ')}`
+        );
+      }
+    } catch (error: any) {
+      this.logger.debug(`Error checking idle capital: ${error.message}`);
+    } finally {
+      if (this.executionLockService) {
+        this.executionLockService.releaseGlobalLock(threadId);
+      }
+    }
+  }
+
+  /**
    * Periodic wallet balance check - runs every 10 minutes
    * Checks for new USDC in wallet and deposits to exchanges if needed
    */

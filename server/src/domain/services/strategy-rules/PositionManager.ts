@@ -213,10 +213,52 @@ export class PositionManager implements IPositionManager {
           continue;
         }
 
+        // CRITICAL FIX: Fetch FRESH position size before closing to avoid size mismatch
+        // The position data passed in may be stale - always get the latest from the exchange
+        let currentPositionSize = Math.abs(position.size);
+        try {
+          const freshPositions = await adapter.getPositions();
+          const freshPosition = freshPositions.find(
+            (p) => p.symbol === position.symbol && p.exchangeType === position.exchangeType
+          );
+          if (freshPosition) {
+            currentPositionSize = Math.abs(freshPosition.size);
+            if (Math.abs(currentPositionSize - Math.abs(position.size)) > 0.0001) {
+              this.logger.warn(
+                `⚠️ Position size changed: expected ${Math.abs(position.size).toFixed(4)}, ` +
+                `actual ${currentPositionSize.toFixed(4)} for ${position.symbol} on ${position.exchangeType}`
+              );
+            }
+          } else {
+            // Position no longer exists - mark as closed and continue
+            this.logger.log(
+              `✅ Position ${position.symbol} on ${position.exchangeType} no longer exists - already closed`
+            );
+            this.markAsClosed(position.exchangeType, position.symbol);
+            closed.push(position);
+            continue;
+          }
+        } catch (fetchError: any) {
+          this.logger.warn(
+            `⚠️ Failed to fetch fresh position for ${position.symbol}: ${fetchError.message}. ` +
+            `Using original size: ${currentPositionSize.toFixed(4)}`
+          );
+        }
+
+        // Skip if position size is negligible
+        if (currentPositionSize < 0.0001) {
+          this.logger.log(
+            `✅ Position ${position.symbol} on ${position.exchangeType} has negligible size - treating as closed`
+          );
+          this.markAsClosed(position.exchangeType, position.symbol);
+          closed.push(position);
+          continue;
+        }
+
         // Close position with progressive price improvement (especially for Lighter)
         // Try progressively worse prices to ensure fill
         const closeSide = position.side === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG;
-        const positionSize = Math.abs(position.size);
+        const positionSize = currentPositionSize;
         
         // Progressive price improvement: start with market, then try worse prices
         const priceImprovements = [0, 0.001, 0.005, 0.01, 0.02, 0.05]; // 0%, 0.1%, 0.5%, 1%, 2%, 5% worse
@@ -789,18 +831,50 @@ export class PositionManager implements IPositionManager {
     result: ArbitrageExecutionResult,
   ): Promise<Result<void, DomainException>> {
     try {
+      // CRITICAL FIX: Fetch FRESH position size to avoid "size exceeds position" errors
+      let actualSize = size;
+      try {
+        const positions = await adapter.getPositions();
+        const position = positions.find(
+          (p) => p.symbol === symbol && 
+                 p.exchangeType === exchangeType &&
+                 ((side === 'LONG' && p.side === OrderSide.LONG) || 
+                  (side === 'SHORT' && p.side === OrderSide.SHORT))
+        );
+        
+        if (!position || Math.abs(position.size) < 0.0001) {
+          this.logger.log(
+            `✅ Position ${symbol} ${side} on ${exchangeType} no longer exists - already closed`
+          );
+          return Result.success(undefined);
+        }
+        
+        actualSize = Math.abs(position.size);
+        if (Math.abs(actualSize - size) > 0.0001) {
+          this.logger.warn(
+            `⚠️ Position size changed: expected ${size.toFixed(4)}, ` +
+            `actual ${actualSize.toFixed(4)} for ${symbol} ${side} on ${exchangeType}`
+          );
+        }
+      } catch (fetchError: any) {
+        this.logger.warn(
+          `⚠️ Failed to fetch fresh position for ${symbol}: ${fetchError.message}. ` +
+          `Using original size: ${size.toFixed(4)}`
+        );
+      }
+
       const closeOrder = new PerpOrderRequest(
         symbol,
         side === 'LONG' ? OrderSide.SHORT : OrderSide.LONG,
         OrderType.MARKET,
-        size,
+        actualSize,
         0, // No limit price for market orders
         TimeInForce.IOC, // Immediate or cancel
         true, // Reduce only
       );
 
       this.logger.log(
-        `📤 Closing ${side} position: ${symbol} ${size.toFixed(4)}`,
+        `📤 Closing ${side} position: ${symbol} ${actualSize.toFixed(4)}`,
       );
 
       const closeResponse = await adapter.placeOrder(closeOrder);

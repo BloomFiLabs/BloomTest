@@ -514,19 +514,32 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter, OnModuleDes
     }
     
     // Also validate that order size doesn't exceed position size
-    if (request.size > Math.abs(matchingPosition.size) * 1.01) { // 1% tolerance for rounding
-      const errorMsg = `ReduceOnly order size ${request.size} exceeds position size ${Math.abs(matchingPosition.size)}`;
-      this.logger.warn(`⚠️ ${errorMsg}`);
-      this.recordError('LIGHTER_REDUCE_ONLY_SIZE_EXCEEDS', errorMsg, request.symbol, {
-        orderSize: request.size,
-        positionSize: Math.abs(matchingPosition.size),
-      });
-      // Don't throw - just warn and let it proceed (exchange will handle partial close)
+    const actualPositionSize = Math.abs(matchingPosition.size);
+    if (request.size > actualPositionSize * 1.01) { // 1% tolerance for rounding
+      this.logger.warn(
+        `⚠️ ReduceOnly order size ${request.size.toFixed(4)} exceeds position size ${actualPositionSize.toFixed(4)}. ` +
+        `Will use position size instead.`
+      );
+      this.recordError('LIGHTER_REDUCE_ONLY_SIZE_EXCEEDS', 
+        `ReduceOnly size ${request.size.toFixed(4)} exceeds position ${actualPositionSize.toFixed(4)} - will auto-correct`, 
+        request.symbol, {
+          originalSize: request.size,
+          positionSize: actualPositionSize,
+        }
+      );
+      // Note: We can't modify request.size here as it's readonly
+      // The caller should fetch fresh position size before calling
+      // We'll throw to force the caller to retry with correct size
+      throw new ExchangeError(
+        `ReduceOnly order size ${request.size.toFixed(4)} exceeds position size ${actualPositionSize.toFixed(4)}. ` +
+        `Please retry with correct size.`,
+        ExchangeType.LIGHTER,
+      );
     }
     
     this.logger.debug(
-      `✅ ReduceOnly validation passed: Closing ${matchingPosition.side} position of ${matchingPosition.size} ` +
-      `with ${request.side} order of ${request.size}`
+      `✅ ReduceOnly validation passed: Closing ${matchingPosition.side} position of ${actualPositionSize.toFixed(4)} ` +
+      `with ${request.side} order of ${request.size.toFixed(4)}`
     );
   }
 
