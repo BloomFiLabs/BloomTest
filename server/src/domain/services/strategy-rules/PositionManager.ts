@@ -30,11 +30,99 @@ import {
 export class PositionManager implements IPositionManager {
   private readonly logger = new Logger(PositionManager.name);
 
+  // Track positions currently being closed to prevent double-close attempts
+  // Key format: "EXCHANGE:SYMBOL" (e.g., "LIGHTER:ETHUSDC")
+  private readonly closingPositions: Set<string> = new Set();
+  
+  // Track recently closed positions to prevent immediate re-close attempts
+  // Key format: "EXCHANGE:SYMBOL", Value: timestamp when closed
+  private readonly recentlyClosedPositions: Map<string, number> = new Map();
+  private readonly RECENTLY_CLOSED_TTL_MS = 30000; // 30 seconds
+
   constructor(
     private readonly config: StrategyConfig,
     @Inject(forwardRef(() => 'IOrderExecutor'))
     private readonly orderExecutor: IOrderExecutor,
   ) {}
+
+  /**
+   * Generate a unique key for a position
+   */
+  private getPositionKey(exchangeType: ExchangeType, symbol: string): string {
+    const normalizedSymbol = symbol
+      .replace('USDC', '')
+      .replace('USDT', '')
+      .replace('-PERP', '')
+      .replace('PERP', '')
+      .toUpperCase();
+    return `${exchangeType}:${normalizedSymbol}`;
+  }
+
+  /**
+   * Check if a position is currently being closed
+   */
+  private isPositionBeingClosed(exchangeType: ExchangeType, symbol: string): boolean {
+    return this.closingPositions.has(this.getPositionKey(exchangeType, symbol));
+  }
+
+  /**
+   * Check if a position was recently closed
+   */
+  private wasRecentlyClosed(exchangeType: ExchangeType, symbol: string): boolean {
+    const key = this.getPositionKey(exchangeType, symbol);
+    const closedAt = this.recentlyClosedPositions.get(key);
+    if (!closedAt) return false;
+    
+    const elapsed = Date.now() - closedAt;
+    if (elapsed > this.RECENTLY_CLOSED_TTL_MS) {
+      // Expired, remove from map
+      this.recentlyClosedPositions.delete(key);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Mark a position as being closed (acquire lock)
+   * Returns true if lock acquired, false if already being closed
+   */
+  private markAsClosing(exchangeType: ExchangeType, symbol: string): boolean {
+    const key = this.getPositionKey(exchangeType, symbol);
+    if (this.closingPositions.has(key)) {
+      return false; // Already being closed
+    }
+    this.closingPositions.add(key);
+    return true;
+  }
+
+  /**
+   * Mark a position as closed (release lock and record)
+   */
+  private markAsClosed(exchangeType: ExchangeType, symbol: string): void {
+    const key = this.getPositionKey(exchangeType, symbol);
+    this.closingPositions.delete(key);
+    this.recentlyClosedPositions.set(key, Date.now());
+  }
+
+  /**
+   * Release closing lock without marking as closed (for failed closes)
+   */
+  private releaseClosingLock(exchangeType: ExchangeType, symbol: string): void {
+    const key = this.getPositionKey(exchangeType, symbol);
+    this.closingPositions.delete(key);
+  }
+
+  /**
+   * Clean up expired entries from recentlyClosedPositions
+   */
+  private cleanupRecentlyClosed(): void {
+    const now = Date.now();
+    for (const [key, closedAt] of this.recentlyClosedPositions) {
+      if (now - closedAt > this.RECENTLY_CLOSED_TTL_MS) {
+        this.recentlyClosedPositions.delete(key);
+      }
+    }
+  }
 
   async getAllPositions(
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
@@ -84,6 +172,9 @@ export class PositionManager implements IPositionManager {
     const closed: PerpPosition[] = [];
     const stillOpen: PerpPosition[] = [];
 
+    // Clean up expired entries
+    this.cleanupRecentlyClosed();
+
     for (const position of positions) {
       try {
         const adapter = adapters.get(position.exchangeType);
@@ -95,6 +186,30 @@ export class PositionManager implements IPositionManager {
             `No adapter found for ${position.exchangeType}`,
           );
           stillOpen.push(position);
+          continue;
+        }
+
+        // IDEMPOTENT CHECK: Skip if position is already being closed
+        if (this.isPositionBeingClosed(position.exchangeType, position.symbol)) {
+          this.logger.warn(
+            `⚠️ Position ${position.symbol} on ${position.exchangeType} is already being closed, skipping`,
+          );
+          continue; // Don't add to stillOpen - another process is handling it
+        }
+
+        // IDEMPOTENT CHECK: Skip if position was recently closed
+        if (this.wasRecentlyClosed(position.exchangeType, position.symbol)) {
+          this.logger.debug(
+            `Position ${position.symbol} on ${position.exchangeType} was recently closed, skipping`,
+          );
+          continue; // Position was already closed
+        }
+
+        // Acquire closing lock
+        if (!this.markAsClosing(position.exchangeType, position.symbol)) {
+          this.logger.warn(
+            `⚠️ Failed to acquire closing lock for ${position.symbol} on ${position.exchangeType}`,
+          );
           continue;
         }
 
@@ -234,6 +349,9 @@ export class PositionManager implements IPositionManager {
         }
 
         if (positionClosed) {
+          // Mark as closed (release lock and record)
+          this.markAsClosed(position.exchangeType, position.symbol);
+          
           if (!finalResponse || finalResponse.isSuccess()) {
             this.logger.log(
               `✅ Successfully closed position: ${position.symbol} on ${position.exchangeType}`,
@@ -304,11 +422,15 @@ export class PositionManager implements IPositionManager {
                 );
 
                 if (!stillExists && fallbackResponse.isSuccess()) {
+                  // Mark as closed (release lock and record)
+                  this.markAsClosed(position.exchangeType, position.symbol);
                   this.logger.log(
                     `✅ Successfully closed position with final fallback market order: ${position.symbol} on ${position.exchangeType}`,
                   );
                   closed.push(position);
                 } else {
+                  // Release lock without marking as closed
+                  this.releaseClosingLock(position.exchangeType, position.symbol);
                   this.logger.error(
                     `❌ Final fallback market order failed: ${position.symbol} on ${position.exchangeType}. ` +
                       `Position still exists. Margin remains locked.`,
@@ -319,13 +441,16 @@ export class PositionManager implements IPositionManager {
                   stillOpen.push(position);
                 }
               } else {
-                // Position disappeared between checks
+                // Position disappeared between checks - mark as closed
+                this.markAsClosed(position.exchangeType, position.symbol);
                 this.logger.log(
                   `✅ Position ${position.symbol} on ${position.exchangeType} closed (disappeared during fallback check)`,
                 );
                 closed.push(position);
               }
             } catch (fallbackError: any) {
+              // Release lock on fallback error
+              this.releaseClosingLock(position.exchangeType, position.symbol);
               this.logger.error(
                 `❌ Final fallback market order error for ${position.symbol} on ${position.exchangeType}: ${fallbackError.message}`,
               );
@@ -335,6 +460,8 @@ export class PositionManager implements IPositionManager {
               stillOpen.push(position);
             }
           } else {
+            // Release lock - position doesn't exist
+            this.releaseClosingLock(position.exchangeType, position.symbol);
             this.logger.warn(
               `⚠️ Failed to close position ${position.symbol} on ${position.exchangeType}: ${finalResponse?.error || 'order not filled'}`,
             );
@@ -348,6 +475,8 @@ export class PositionManager implements IPositionManager {
         // Small delay between closes to avoid rate limits
         await new Promise((resolve) => setTimeout(resolve, 200));
       } catch (error: any) {
+        // Release lock on any error
+        this.releaseClosingLock(position.exchangeType, position.symbol);
         this.logger.error(
           `Error closing position ${position.symbol} on ${position.exchangeType}: ${error.message}`,
         );

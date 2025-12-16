@@ -1063,6 +1063,65 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
     }
   }
 
+  /**
+   * Get available margin for opening new positions
+   * Aster provides availableBalance in the account response
+   */
+  async getAvailableMargin(): Promise<number> {
+    try {
+      let params: Record<string, any>;
+      let headers: Record<string, string> = {};
+
+      if (this.apiKey && this.apiSecret) {
+        params = this.signParamsWithApiKey({});
+        headers['X-MBX-APIKEY'] = this.apiKey;
+      } else if (this.wallet) {
+        const nonce = Math.floor(Date.now() * 1000);
+        params = this.signParams({}, nonce);
+      } else {
+        throw new Error('No authentication method available');
+      }
+
+      const queryParams: string[] = [];
+      const signatureParam: string[] = [];
+      
+      for (const [key, value] of Object.entries(params)) {
+        if (key === 'signature') {
+          signatureParam.push(`signature=${value}`);
+        } else {
+          queryParams.push(`${key}=${encodeURIComponent(String(value))}`);
+        }
+      }
+      queryParams.sort();
+      const queryString = queryParams.join('&') + (signatureParam.length > 0 ? `&${signatureParam[0]}` : '');
+
+      const response = await this.client.get(`/fapi/v2/account?${queryString}`, {
+        headers,
+      });
+
+      // Aster provides availableBalance which is margin available for new positions
+      const availableBalance = parseFloat(response.data.availableBalance || '0');
+      
+      // Apply 15% safety buffer (10% maintenance + 5% execution)
+      const availableMargin = availableBalance * 0.85;
+      
+      this.logger.debug(
+        `Aster available margin: availableBalance=$${availableBalance.toFixed(2)}, ` +
+        `withBuffer=$${Math.max(0, availableMargin).toFixed(2)}`
+      );
+      
+      return Math.max(0, availableMargin);
+    } catch (error: any) {
+      this.logger.warn(`Failed to get available margin: ${error.message}, falling back to getBalance`);
+      try {
+        const balance = await this.getBalance();
+        return balance * 0.7; // 30% buffer as fallback
+      } catch {
+        return 0;
+      }
+    }
+  }
+
   async isReady(): Promise<boolean> {
     try {
       await this.testConnection();

@@ -124,6 +124,16 @@ export interface IPerpExchangeAdapter {
   getEquity(): Promise<number>;
 
   /**
+   * Get available margin for opening new positions
+   * This accounts for margin already used by existing positions and applies safety buffers.
+   * Use this instead of getBalance() when determining position sizing.
+   * 
+   * @returns Available margin in USD for new positions
+   * @throws ExchangeError if calculation fails
+   */
+  getAvailableMargin?(): Promise<number>;
+
+  /**
    * Check if the exchange adapter is connected and ready
    * @returns True if adapter is ready
    */

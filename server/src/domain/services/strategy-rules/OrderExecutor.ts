@@ -91,6 +91,29 @@ export class OrderExecutor implements IOrderExecutor {
   }
 
   /**
+   * Get available margin from an adapter
+   * Uses getAvailableMargin() if available, falls back to getBalance() with buffer
+   * 
+   * This prevents "not enough margin" errors by using a more accurate margin calculation
+   * that accounts for existing positions and applies safety buffers.
+   */
+  private async getAdapterAvailableMargin(adapter: IPerpExchangeAdapter): Promise<number> {
+    try {
+      // Try to use getAvailableMargin if the adapter supports it
+      if (typeof adapter.getAvailableMargin === 'function') {
+        return await adapter.getAvailableMargin();
+      }
+      
+      // Fallback to getBalance with a conservative 30% buffer
+      const balance = await adapter.getBalance();
+      return balance * 0.7;
+    } catch (error: any) {
+      this.logger.warn(`Failed to get available margin: ${error.message}`);
+      return 0;
+    }
+  }
+
+  /**
    * Place a pair of orders (long and short) with intelligent execution strategy
    * 
    * - If either exchange is Lighter, execute SEQUENTIALLY to avoid nonce conflicts
@@ -440,43 +463,44 @@ export class OrderExecutor implements IOrderExecutor {
     }
 
     // PRE-FLIGHT CHECK: Scale position to available capital
+    // Use getAvailableMargin() which accounts for existing positions and applies safety buffers
     try {
-      const [longBalance, shortBalance] = await Promise.all([
-        longAdapter.getBalance(),
-        shortAdapter.getBalance(),
+      const [longMargin, shortMargin] = await Promise.all([
+        this.getAdapterAvailableMargin(longAdapter),
+        this.getAdapterAvailableMargin(shortAdapter),
       ]);
       const avgPrice =
         ((plan.longOrder.price || 0) + (plan.shortOrder.price || 0)) / 2;
       const leverage = this.config?.leverage || 2;
       const originalPositionUsd = plan.positionSize.toUSD(avgPrice);
       const originalRequiredMargin = originalPositionUsd / leverage;
-      const minBalance = Math.min(longBalance, shortBalance);
+      const minMargin = Math.min(longMargin, shortMargin);
 
-      // Scale down position to fit available capital (use 90% for safety margin)
+      // Scale down position to fit available margin
+      // Note: getAvailableMargin already applies safety buffers, so we use 100% of it
       let actualPositionUsd = originalPositionUsd;
       let actualRequiredMargin = originalRequiredMargin;
 
-      if (minBalance < originalRequiredMargin) {
+      if (minMargin < originalRequiredMargin) {
         // Not enough for original position - scale down
-        const usableBalance = minBalance * 0.9;
-        actualPositionUsd = usableBalance * leverage;
-        actualRequiredMargin = usableBalance;
+        actualPositionUsd = minMargin * leverage;
+        actualRequiredMargin = minMargin;
 
         // Check if scaled position is too small
         if (actualPositionUsd < this.config.minPositionSizeUsd) {
           const insufficientExchange =
-            longBalance < shortBalance
+            longMargin < shortMargin
               ? opportunity.longExchange
               : opportunity.shortExchange;
           return Result.failure(
             new InsufficientBalanceException(
               this.config.minPositionSizeUsd / leverage,
-              minBalance,
+              minMargin,
               'USDC',
               {
                 symbol: opportunity.symbol,
                 exchange: insufficientExchange,
-                message: `Cannot scale down to available capital. Min position: $${this.config.minPositionSizeUsd}, Available: $${minBalance.toFixed(2)}`,
+                message: `Cannot scale down to available margin. Min position: $${this.config.minPositionSizeUsd}, Available margin: $${minMargin.toFixed(2)}`,
               },
             ),
           );
@@ -484,7 +508,7 @@ export class OrderExecutor implements IOrderExecutor {
 
         this.logger.log(
           `📉 Scaling ${opportunity.symbol} from $${originalPositionUsd.toFixed(2)} to $${actualPositionUsd.toFixed(2)} ` +
-            `(available collateral: $${usableBalance.toFixed(2)} per exchange)`,
+            `(available margin: $${minMargin.toFixed(2)} per exchange)`,
         );
       }
 
@@ -519,21 +543,22 @@ export class OrderExecutor implements IOrderExecutor {
       // Use plan.longOrder/shortOrder which we already updated above
 
       // Validation checks (now just validation since we already scaled)
-      if (longBalance < actualRequiredMargin * 0.95) {
+      // Note: getAvailableMargin already applies safety buffers, so we use 95% threshold
+      if (longMargin < actualRequiredMargin * 0.95) {
         return Result.failure(
           new InsufficientBalanceException(
             actualRequiredMargin,
-            longBalance,
+            longMargin,
             'USDC',
             { symbol: opportunity.symbol, exchange: opportunity.longExchange },
           ),
         );
       }
-      if (shortBalance < actualRequiredMargin * 0.95) {
+      if (shortMargin < actualRequiredMargin * 0.95) {
         return Result.failure(
           new InsufficientBalanceException(
             actualRequiredMargin,
-            shortBalance,
+            shortMargin,
             'USDC',
             { symbol: opportunity.symbol, exchange: opportunity.shortExchange },
           ),
@@ -804,9 +829,10 @@ export class OrderExecutor implements IOrderExecutor {
             }
 
             // PRE-FLIGHT CHECK: Verify both exchanges have sufficient margin
-            const [longBalance, shortBalance] = await Promise.all([
-              longAdapter.getBalance(),
-              shortAdapter.getBalance(),
+            // Use getAvailableMargin() which accounts for existing positions
+            const [longMargin, shortMargin] = await Promise.all([
+              this.getAdapterAvailableMargin(longAdapter),
+              this.getAdapterAvailableMargin(shortAdapter),
             ]);
             // Check if this is a perp-spot plan
             if ('perpOrder' in plan && 'spotOrder' in plan) {
@@ -830,32 +856,32 @@ export class OrderExecutor implements IOrderExecutor {
             const leverage = this.config?.leverage || 2;
             const requiredMargin = scaledPositionUsd / leverage;
 
-            // Check if we have sufficient balance (allow small buffer for fees)
-            const minBalance = Math.min(longBalance, shortBalance);
-            if (minBalance < requiredMargin * 0.95) {
+            // Check if we have sufficient margin
+            // Note: getAvailableMargin already applies safety buffers
+            const minMargin = Math.min(longMargin, shortMargin);
+            if (minMargin < requiredMargin) {
               // Not enough for the scaled position - scale down to what we can afford
-              const actualCollateral = minBalance * 0.9; // Use 90% of available
-              const actualPositionUsd = actualCollateral * leverage;
+              const actualPositionUsd = minMargin * leverage;
 
               if (actualPositionUsd < this.config.minPositionSizeUsd) {
                 const insufficientExchange =
-                  longBalance < shortBalance
+                  longMargin < shortMargin
                     ? opportunity.longExchange
                     : opportunity.shortExchange;
                 this.logger.warn(
                   `⚠️ Insufficient margin for ${opportunity.symbol} on ${insufficientExchange}: ` +
-                    `need $${requiredMargin.toFixed(2)}, have $${minBalance.toFixed(2)} (min position: $${this.config.minPositionSizeUsd})`,
+                    `need $${requiredMargin.toFixed(2)}, have $${minMargin.toFixed(2)} (min position: $${this.config.minPositionSizeUsd})`,
                 );
                 result.errors.push(
-                  `Insufficient margin for ${opportunity.symbol}: need $${requiredMargin.toFixed(2)}, have $${minBalance.toFixed(2)}`,
+                  `Insufficient margin for ${opportunity.symbol}: need $${requiredMargin.toFixed(2)}, have $${minMargin.toFixed(2)}`,
                 );
                 break; // Skip this opportunity, move to next
               }
 
-              // Scale down the position to fit available capital
+              // Scale down the position to fit available margin
               this.logger.log(
                 `📉 Scaling ${opportunity.symbol} from $${scaledPositionUsd.toFixed(2)} to $${actualPositionUsd.toFixed(2)} ` +
-                  `(available collateral: $${actualCollateral.toFixed(2)})`,
+                  `(available margin: $${minMargin.toFixed(2)})`,
               );
 
               // Update the maxPortfolioFor35APY to reflect actual size

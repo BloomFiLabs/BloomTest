@@ -970,6 +970,40 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
     }
   }
 
+  /**
+   * Get available margin for opening new positions
+   * Hyperliquid provides this directly via marginSummary
+   */
+  async getAvailableMargin(): Promise<number> {
+    try {
+      const clearinghouseState = await this.infoClient.clearinghouseState({ user: this.walletAddress });
+      const marginSummary = clearinghouseState.marginSummary;
+      
+      // Hyperliquid provides availableMargin directly
+      // This is the margin available for new positions, accounting for existing positions
+      const accountValue = parseFloat(marginSummary.accountValue || '0');
+      const totalMarginUsed = parseFloat(marginSummary.totalMarginUsed || '0');
+      
+      // Apply a 15% safety buffer (10% maintenance + 5% execution)
+      const availableMargin = (accountValue - totalMarginUsed) * 0.85;
+      
+      this.logger.debug(
+        `Hyperliquid available margin: accountValue=$${accountValue.toFixed(2)}, ` +
+        `marginUsed=$${totalMarginUsed.toFixed(2)}, available=$${Math.max(0, availableMargin).toFixed(2)}`
+      );
+      
+      return Math.max(0, availableMargin);
+    } catch (error: any) {
+      this.logger.warn(`Failed to get available margin: ${error.message}, falling back to getBalance`);
+      try {
+        const balance = await this.getBalance();
+        return balance * 0.7; // 30% buffer as fallback
+      } catch {
+        return 0;
+      }
+    }
+  }
+
   async isReady(): Promise<boolean> {
     try {
       await this.testConnection();

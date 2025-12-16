@@ -151,10 +151,10 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
   }
 
   /**
-   * Reset the SignerClient to force re-initialization
-   * This is useful when nonce gets out of sync with the server
+   * Fully recreate the SignerClient to get a fresh nonce from the server
+   * This is more robust than just resetting - it destroys all state and creates a new client
    * 
-   * IMPORTANT: This blocks all new orders until reset is complete
+   * IMPORTANT: This blocks all new orders until recreation is complete
    */
   private async resetSignerClient(): Promise<void> {
     // Prevent multiple concurrent resets
@@ -165,7 +165,11 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
     }
     
     this.nonceResetInProgress = true;
-    this.logger.warn('🔄 Resetting Lighter SignerClient to re-sync nonce...');
+    const resetStartTime = Date.now();
+    this.logger.warn(
+      `🔄 Recreating Lighter SignerClient to re-sync nonce ` +
+      `(consecutive errors: ${this.consecutiveNonceErrors})...`
+    );
     
     try {
       // NOTE: This method is called from within placeOrderInternal which already holds the mutex.
@@ -173,22 +177,39 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
       // The nonceResetInProgress flag will block any NEW orders from acquiring the mutex
       // until we're done resetting.
       
-      // Close existing client if it has a close method
-      if (this.signerClient && typeof (this.signerClient as any).close === 'function') {
+      // Step 1: Close and destroy existing client completely
+      if (this.signerClient) {
         try {
-          await (this.signerClient as any).close();
+          // Try to close gracefully if method exists
+          if (typeof (this.signerClient as any).close === 'function') {
+            await (this.signerClient as any).close();
+          }
+          // Try to destroy if method exists
+          if (typeof (this.signerClient as any).destroy === 'function') {
+            await (this.signerClient as any).destroy();
+          }
         } catch (e) {
-          // Ignore close errors
+          // Ignore close/destroy errors - we're recreating anyway
         }
       }
       
-      // Clear the client to force re-initialization
+      // Step 2: Clear ALL client state to ensure fresh start
       this.signerClient = null;
+      this.orderApi = null;
       
-      // Re-initialize - this fetches fresh nonce from server
+      // Step 3: Wait for server state to settle
+      // The delay increases with consecutive errors (1s base + 500ms per error, max 5s)
+      const settleDelay = Math.min(1000 + (this.consecutiveNonceErrors * 500), 5000);
+      this.logger.debug(`Waiting ${settleDelay}ms for server state to settle before re-initialization...`);
+      await new Promise(resolve => setTimeout(resolve, settleDelay));
+      
+      // Step 4: Re-initialize with fresh client - this fetches fresh nonce from server
       await this.ensureInitialized();
       
-      this.logger.log('✅ Lighter SignerClient reset complete - nonce re-synced from server');
+      const resetDuration = Date.now() - resetStartTime;
+      this.logger.log(
+        `✅ Lighter SignerClient recreated in ${resetDuration}ms - nonce re-synced from server`
+      );
     } finally {
       // Release all waiting operations
       this.nonceResetInProgress = false;
@@ -388,6 +409,12 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
       `@ ${request.price || 'market'} (type: ${request.type}, reduceOnly: ${request.reduceOnly})`
     );
     
+    // CRITICAL: Validate reduceOnly orders BEFORE acquiring mutex
+    // This prevents "invalid reduce only direction" errors from the blockchain
+    if (request.reduceOnly) {
+      await this.validateReduceOnlyOrder(request);
+    }
+    
     // Acquire mutex to prevent concurrent order placements
     // Lighter uses sequential nonces - concurrent orders cause "invalid nonce" errors
     const releaseMutex = await this.acquireOrderMutex();
@@ -398,6 +425,74 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
       // Always release the mutex when done
       releaseMutex();
     }
+  }
+
+  /**
+   * Validate that a reduceOnly order can be placed
+   * Checks that a position exists and the order direction is correct for closing it
+   * 
+   * @throws Error if no position exists or direction is wrong
+   */
+  private async validateReduceOnlyOrder(request: PerpOrderRequest): Promise<void> {
+    const positions = await this.getPositions();
+    
+    // Normalize symbol for comparison
+    const normalizedRequestSymbol = request.symbol
+      .replace('USDC', '')
+      .replace('USDT', '')
+      .replace('-PERP', '')
+      .replace('PERP', '')
+      .toUpperCase();
+    
+    const matchingPosition = positions.find(p => {
+      const normalizedPosSymbol = p.symbol
+        .replace('USDC', '')
+        .replace('USDT', '')
+        .replace('-PERP', '')
+        .replace('PERP', '')
+        .toUpperCase();
+      return normalizedPosSymbol === normalizedRequestSymbol && Math.abs(p.size) > 0.0001;
+    });
+    
+    if (!matchingPosition) {
+      const errorMsg = `Cannot place reduceOnly order: No position exists for ${request.symbol}`;
+      this.logger.warn(`⚠️ ${errorMsg}`);
+      this.recordError('LIGHTER_REDUCE_ONLY_NO_POSITION', errorMsg, request.symbol);
+      throw new ExchangeError(errorMsg, ExchangeType.LIGHTER);
+    }
+    
+    // Verify direction matches - to close a position, we need the opposite side
+    // LONG position -> need SHORT order to close
+    // SHORT position -> need LONG order to close
+    const expectedCloseSide = matchingPosition.side === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG;
+    
+    if (request.side !== expectedCloseSide) {
+      const errorMsg = `Invalid reduceOnly direction: Position is ${matchingPosition.side}, ` +
+        `order side is ${request.side}, expected ${expectedCloseSide} to close`;
+      this.logger.warn(`⚠️ ${errorMsg}`);
+      this.recordError('LIGHTER_REDUCE_ONLY_WRONG_DIRECTION', errorMsg, request.symbol, {
+        positionSide: matchingPosition.side,
+        orderSide: request.side,
+        expectedSide: expectedCloseSide,
+      });
+      throw new ExchangeError(errorMsg, ExchangeType.LIGHTER);
+    }
+    
+    // Also validate that order size doesn't exceed position size
+    if (request.size > Math.abs(matchingPosition.size) * 1.01) { // 1% tolerance for rounding
+      const errorMsg = `ReduceOnly order size ${request.size} exceeds position size ${Math.abs(matchingPosition.size)}`;
+      this.logger.warn(`⚠️ ${errorMsg}`);
+      this.recordError('LIGHTER_REDUCE_ONLY_SIZE_EXCEEDS', errorMsg, request.symbol, {
+        orderSize: request.size,
+        positionSize: Math.abs(matchingPosition.size),
+      });
+      // Don't throw - just warn and let it proceed (exchange will handle partial close)
+    }
+    
+    this.logger.debug(
+      `✅ ReduceOnly validation passed: Closing ${matchingPosition.side} position of ${matchingPosition.size} ` +
+      `with ${request.side} order of ${request.size}`
+    );
   }
 
   /**
@@ -758,32 +853,53 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
           continue;
         }
         
-        // Nonce errors - reset client and retry
+        // Nonce errors - reset client and retry (with max consecutive error limit)
+        const MAX_CONSECUTIVE_NONCE_ERRORS = 10; // Stop retrying after 10 consecutive nonce errors
         if (isNonceError && attempt < maxRetries - 1) {
           this.consecutiveNonceErrors++;
           const timeSinceLastSuccess = this.lastSuccessfulOrderTime 
             ? `${Math.round((Date.now() - this.lastSuccessfulOrderTime.getTime()) / 1000)}s ago`
             : 'never';
           
-          this.logger.warn(
-            `⚠️ Lighter nonce error #${this.consecutiveNonceErrors} for ${request.symbol}: ${errorMsg}. ` +
-            `Last successful order: ${timeSinceLastSuccess}. ` +
-            `Re-syncing nonce and retrying (attempt ${attempt + 1}/${maxRetries})...`
-          );
-          this.recordError('LIGHTER_NONCE_ERROR', errorMsg, request.symbol, { 
-            attempt: attempt + 1,
-            consecutiveNonceErrors: this.consecutiveNonceErrors,
-            lastSuccessfulOrder: timeSinceLastSuccess,
-          });
-          
-          // Reset the SignerClient to get a fresh nonce from the server
-          await this.resetSignerClient();
-          
-          // Progressive backoff for nonce errors: 1s, 2s, 3s...
-          const nonceBackoff = Math.min(1000 * (this.consecutiveNonceErrors), 5000);
-          this.logger.debug(`Waiting ${nonceBackoff}ms before retry after nonce error`);
-          await new Promise(resolve => setTimeout(resolve, nonceBackoff));
-          continue;
+          // If we've hit too many consecutive nonce errors, something is fundamentally wrong
+          // Stop retrying and let the error propagate
+          if (this.consecutiveNonceErrors >= MAX_CONSECUTIVE_NONCE_ERRORS) {
+            this.logger.error(
+              `❌ Lighter nonce error limit reached (${this.consecutiveNonceErrors} consecutive errors). ` +
+              `Stopping retries. Last successful order: ${timeSinceLastSuccess}. ` +
+              `This may indicate a fundamental issue with the Lighter SDK or account state.`
+            );
+            this.recordError('LIGHTER_NONCE_ERROR_LIMIT', 
+              `Consecutive nonce error limit (${MAX_CONSECUTIVE_NONCE_ERRORS}) reached`, 
+              request.symbol, {
+                consecutiveNonceErrors: this.consecutiveNonceErrors,
+                lastSuccessfulOrder: timeSinceLastSuccess,
+                originalError: errorMsg,
+              }
+            );
+            // Don't continue - let it fall through to the final error handling
+          } else {
+            this.logger.warn(
+              `⚠️ Lighter nonce error #${this.consecutiveNonceErrors} for ${request.symbol}: ${errorMsg}. ` +
+              `Last successful order: ${timeSinceLastSuccess}. ` +
+              `Re-syncing nonce and retrying (attempt ${attempt + 1}/${maxRetries})...`
+            );
+            this.recordError('LIGHTER_NONCE_ERROR', errorMsg, request.symbol, { 
+              attempt: attempt + 1,
+              consecutiveNonceErrors: this.consecutiveNonceErrors,
+              lastSuccessfulOrder: timeSinceLastSuccess,
+            });
+            
+            // Fully recreate the SignerClient to get a fresh nonce from the server
+            await this.resetSignerClient();
+            
+            // Progressive backoff for nonce errors with exponential increase
+            // 1s, 2s, 4s, 8s... capped at 10s
+            const nonceBackoff = Math.min(1000 * Math.pow(2, this.consecutiveNonceErrors - 1), 10000);
+            this.logger.debug(`Waiting ${nonceBackoff}ms before retry after nonce error`);
+            await new Promise(resolve => setTimeout(resolve, nonceBackoff));
+            continue;
+          }
         }
         
         // Margin mode errors are not retryable - account configuration issue
@@ -1813,6 +1929,68 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter {
         undefined,
         error,
       );
+    }
+  }
+
+  /**
+   * Get available margin for new positions
+   * 
+   * This calculates the margin available for opening new positions by:
+   * 1. Getting the total balance
+   * 2. Subtracting margin used by existing positions
+   * 3. Applying a safety buffer for maintenance margin
+   * 
+   * This prevents "not enough margin to create the order" errors by ensuring
+   * we only try to open positions we can actually afford.
+   */
+  async getAvailableMargin(): Promise<number> {
+    try {
+      const totalBalance = await this.getBalance();
+      const positions = await this.getPositions();
+      
+      // Calculate margin used by existing positions
+      let marginUsed = 0;
+      for (const pos of positions) {
+        // Estimate margin based on position value and leverage
+        // Lighter typically uses cross margin, so we estimate based on notional value
+        const positionValue = Math.abs(pos.size) * pos.markPrice;
+        
+        // Use position's leverage if available, otherwise assume 10x (Lighter default)
+        const leverage = pos.leverage || 10;
+        const estimatedMargin = positionValue / leverage;
+        marginUsed += estimatedMargin;
+        
+        this.logger.debug(
+          `Position ${pos.symbol}: value=$${positionValue.toFixed(2)}, ` +
+          `leverage=${leverage}x, margin=$${estimatedMargin.toFixed(2)}`
+        );
+      }
+      
+      // Apply safety buffers:
+      // 1. 10% buffer for maintenance margin requirements
+      // 2. Additional 5% buffer for price movements during order execution
+      const MAINTENANCE_BUFFER = 0.10; // 10%
+      const EXECUTION_BUFFER = 0.05;   // 5%
+      const TOTAL_BUFFER = MAINTENANCE_BUFFER + EXECUTION_BUFFER; // 15%
+      
+      const availableMargin = (totalBalance - marginUsed) * (1 - TOTAL_BUFFER);
+      
+      this.logger.debug(
+        `Available margin calculation: totalBalance=$${totalBalance.toFixed(2)}, ` +
+        `marginUsed=$${marginUsed.toFixed(2)}, buffer=${(TOTAL_BUFFER * 100).toFixed(0)}%, ` +
+        `available=$${Math.max(0, availableMargin).toFixed(2)}`
+      );
+      
+      return Math.max(0, availableMargin);
+    } catch (error: any) {
+      this.logger.warn(`Failed to calculate available margin: ${error.message}, falling back to getBalance`);
+      // Fallback to total balance with a conservative buffer
+      try {
+        const balance = await this.getBalance();
+        return balance * 0.7; // 30% buffer as fallback
+      } catch {
+        return 0;
+      }
     }
   }
 
