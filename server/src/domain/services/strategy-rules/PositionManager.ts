@@ -281,6 +281,8 @@ export class PositionManager implements IPositionManager {
             // Wait and retry if order didn't fill immediately
             let response = closeResponse;
             if (!closeResponse.isFilled() && closeResponse.orderId) {
+              // Determine the order side for the close order (opposite of position side)
+              const closeSide: 'LONG' | 'SHORT' = position.side === OrderSide.LONG ? 'SHORT' : 'LONG';
               response = await this.orderExecutor.waitForOrderFill(
                 adapter,
                 closeResponse.orderId,
@@ -290,6 +292,7 @@ export class PositionManager implements IPositionManager {
                 this.config.maxOrderWaitRetries,
                 this.config.orderWaitBaseInterval,
                 true, // isClosingPosition = true (enables longer backoff)
+                closeSide,
               );
             }
             
@@ -803,6 +806,8 @@ export class PositionManager implements IPositionManager {
       const closeResponse = await adapter.placeOrder(closeOrder);
 
       if (!closeResponse.isFilled() && closeResponse.orderId) {
+        // Determine the order side for the close order (opposite of position side)
+        const closeSide: 'LONG' | 'SHORT' = side === 'LONG' ? 'SHORT' : 'LONG';
         await this.orderExecutor.waitForOrderFill(
           adapter,
           closeResponse.orderId,
@@ -812,6 +817,7 @@ export class PositionManager implements IPositionManager {
           this.config.maxOrderWaitRetries,
           this.config.orderWaitBaseInterval,
           true, // isClosingPosition
+          closeSide,
         );
       }
 

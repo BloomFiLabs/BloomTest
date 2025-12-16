@@ -15,6 +15,7 @@ import { WithdrawalFulfiller } from '../../infrastructure/adapters/blockchain/Wi
 import { NAVReporter } from '../../infrastructure/adapters/blockchain/NAVReporter';
 import { RealFundingPaymentsService } from '../../infrastructure/services/RealFundingPaymentsService';
 import { PositionStateRepository, PersistedPositionState } from '../../infrastructure/repositories/PositionStateRepository';
+import { ExecutionLockService } from '../../infrastructure/services/ExecutionLockService';
 
 /**
  * PerpKeeperScheduler - Scheduled execution for funding rate arbitrage
@@ -59,6 +60,7 @@ export class PerpKeeperScheduler implements OnModuleInit {
     @Optional() private readonly navReporter?: NAVReporter,
     @Optional() private readonly fundingPaymentsService?: RealFundingPaymentsService,
     @Optional() private readonly positionStateRepository?: PositionStateRepository,
+    @Optional() private readonly executionLockService?: ExecutionLockService,
   ) {
     // Initialize orchestrator with exchange adapters
     const adapters = this.keeperService.getExchangeAdapters();
@@ -490,6 +492,13 @@ export class PerpKeeperScheduler implements OnModuleInit {
       return;
     }
 
+    // Acquire global lock to prevent concurrent executions
+    const threadId = this.executionLockService?.generateThreadId() || `hourly-${Date.now()}`;
+    if (this.executionLockService && !this.executionLockService.tryAcquireGlobalLock(threadId, 'executeHourly')) {
+      this.logger.warn('⏳ Another execution is in progress - skipping hourly execution');
+      return;
+    }
+
     this.isRunning = true;
     const startTime = Date.now();
 
@@ -708,6 +717,10 @@ export class PerpKeeperScheduler implements OnModuleInit {
       this.logger.error(`Hourly execution failed: ${error.message}`, error.stack);
     } finally {
       this.isRunning = false;
+      // Release global lock
+      if (this.executionLockService) {
+        this.executionLockService.releaseGlobalLock(threadId);
+      }
     }
   }
 
@@ -818,6 +831,19 @@ export class PerpKeeperScheduler implements OnModuleInit {
    */
   @Interval(300000) // Every 5 minutes (300000 ms)
   async checkAndRetrySingleLegPositions(): Promise<void> {
+    // Skip if main execution is running (prevents race conditions)
+    if (this.isRunning) {
+      this.logger.debug('Skipping single-leg check - main execution is running');
+      return;
+    }
+    
+    // Try to acquire global lock to prevent concurrent executions
+    const threadId = this.executionLockService?.generateThreadId() || `single-leg-${Date.now()}`;
+    if (this.executionLockService && !this.executionLockService.tryAcquireGlobalLock(threadId, 'checkAndRetrySingleLegPositions')) {
+      this.logger.debug('Skipping single-leg check - another execution is in progress');
+      return;
+    }
+    
     try {
       const positionsResult = await this.orchestrator.getAllPositionsWithMetrics();
       // Filter out positions with very small sizes (likely rounding errors or stale data)
@@ -896,6 +922,11 @@ export class PerpKeeperScheduler implements OnModuleInit {
     } catch (error: any) {
       // Silently fail to avoid spam
       this.logger.debug(`Error in checkAndRetrySingleLegPositions: ${error.message}`);
+    } finally {
+      // Release global lock
+      if (this.executionLockService) {
+        this.executionLockService.releaseGlobalLock(threadId);
+      }
     }
   }
   

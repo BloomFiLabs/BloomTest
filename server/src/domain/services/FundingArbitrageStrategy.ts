@@ -2424,6 +2424,7 @@ export class FundingArbitrageStrategy {
     maxRetries: number = 10,
     pollIntervalMs: number = 2000,
     isClosingPosition: boolean = false,
+    orderSide?: 'LONG' | 'SHORT',
   ): Promise<PerpOrderResponse> {
     return this.orderExecutor.waitForOrderFill(
       adapter,
@@ -2434,6 +2435,7 @@ export class FundingArbitrageStrategy {
       maxRetries,
       pollIntervalMs,
       isClosingPosition,
+      orderSide,
     );
   }
 

@@ -63,7 +63,17 @@ export class PerpKeeperService implements IPerpKeeperService {
       const aster = asterAdapter || new AsterExchangeAdapter(this.configService);
       const lighter = lighterAdapter || new LighterExchangeAdapter(this.configService);
       const hyperliquid = hyperliquidAdapter || new HyperliquidExchangeAdapter(this.configService, null as any);
-      const extended = extendedAdapter || new ExtendedExchangeAdapter(this.configService);
+      
+      // Extended adapter is optional - only create if API key is available
+      let extended: ExtendedExchangeAdapter | null = extendedAdapter;
+      if (!extended) {
+        try {
+          extended = new ExtendedExchangeAdapter(this.configService);
+        } catch (e: any) {
+          this.logger.warn(`Extended adapter not available in test mode: ${e.message}`);
+          extended = null;
+        }
+      }
       
       this.adapters.set(
         ExchangeType.ASTER, 

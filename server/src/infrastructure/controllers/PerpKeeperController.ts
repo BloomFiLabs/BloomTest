@@ -5,6 +5,7 @@ import { ExchangeType } from '../../domain/value-objects/ExchangeConfig';
 import { PerpKeeperService } from '../../application/services/PerpKeeperService';
 import { PerpKeeperPerformanceLogger } from '../logging/PerpKeeperPerformanceLogger';
 import { DiagnosticsService } from '../services/DiagnosticsService';
+import { ExecutionLockService } from '../services/ExecutionLockService';
 
 @Controller('keeper')
 export class PerpKeeperController {
@@ -14,6 +15,7 @@ export class PerpKeeperController {
     private readonly keeperService: PerpKeeperService,
     private readonly performanceLogger: PerpKeeperPerformanceLogger,
     @Optional() private readonly diagnosticsService?: DiagnosticsService,
+    @Optional() private readonly executionLockService?: ExecutionLockService,
   ) {}
 
   /**
@@ -166,7 +168,7 @@ export class PerpKeeperController {
    * Ideal for AI context windows and quick health checks.
    */
   @Get('diagnostics')
-  async getDiagnostics() {
+  async getDiagnostics(): Promise<any> {
     if (!this.diagnosticsService) {
       return {
         error: 'DiagnosticsService not available',
@@ -231,6 +233,45 @@ export class PerpKeeperController {
       // Continue with stale APY data
     }
 
-    return this.diagnosticsService.getDiagnostics();
+    // Get base diagnostics
+    const diagnostics = this.diagnosticsService.getDiagnostics();
+    
+    // Add execution lock diagnostics if available
+    if (this.executionLockService) {
+      const lockDiagnostics = this.executionLockService.getFullDiagnostics();
+      return {
+        ...diagnostics,
+        executionLocks: {
+          globalLock: lockDiagnostics.globalLock,
+          symbolLocks: lockDiagnostics.symbolLocks,
+          activeOrders: lockDiagnostics.activeOrders,
+          recentOrderHistory: lockDiagnostics.recentOrderHistory,
+        },
+      };
+    }
+
+    return diagnostics;
+  }
+  
+  /**
+   * Get execution lock status
+   * GET /keeper/locks
+   * 
+   * Returns the current state of all execution locks and active orders.
+   * Useful for debugging race conditions and concurrent execution issues.
+   */
+  @Get('locks')
+  async getLocks() {
+    if (!this.executionLockService) {
+      return {
+        error: 'ExecutionLockService not available',
+        timestamp: new Date(),
+      };
+    }
+    
+    return {
+      ...this.executionLockService.getFullDiagnostics(),
+      timestamp: new Date(),
+    };
   }
 }

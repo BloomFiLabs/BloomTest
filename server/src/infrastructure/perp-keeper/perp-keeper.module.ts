@@ -33,6 +33,7 @@ import { RealFundingPaymentsService } from '../services/RealFundingPaymentsServi
 import { OptimalLeverageService } from '../services/OptimalLeverageService';
 import { DiagnosticsService } from '../services/DiagnosticsService';
 import { CircuitBreakerService } from '../services/CircuitBreakerService';
+import { ExecutionLockService } from '../services/ExecutionLockService';
 import { PositionStateRepository } from '../repositories/PositionStateRepository';
 import { RateLimiterService } from '../services/RateLimiterService';
 import { ProfitTracker } from '../services/ProfitTracker';
@@ -367,6 +368,9 @@ import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTrack
     
     // Circuit breaker for error rate protection
     CircuitBreakerService,
+    
+    // Execution lock service for symbol-level locking
+    ExecutionLockService,
     
     // Position state persistence for recovery
     PositionStateRepository,

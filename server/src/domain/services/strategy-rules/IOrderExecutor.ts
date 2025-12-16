@@ -16,6 +16,7 @@ export interface IOrderExecutor {
     maxRetries?: number,
     pollIntervalMs?: number,
     isClosingPosition?: boolean,
+    orderSide?: 'LONG' | 'SHORT',
   ): Promise<PerpOrderResponse>;
 
   executeSinglePosition(

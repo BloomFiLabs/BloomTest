@@ -36,6 +36,7 @@ import {
 } from '../../exceptions/DomainException';
 import { DiagnosticsService } from '../../../infrastructure/services/DiagnosticsService';
 import { CircuitBreakerService, CircuitState } from '../../../infrastructure/services/CircuitBreakerService';
+import { ExecutionLockService } from '../../../infrastructure/services/ExecutionLockService';
 import { 
   ExecutionAnalytics, 
   OrderExecutionMetrics, 
@@ -86,6 +87,8 @@ export class OrderExecutor implements IOrderExecutor {
     private readonly diagnosticsService?: DiagnosticsService,
     @Optional()
     private readonly circuitBreaker?: CircuitBreakerService,
+    @Optional()
+    private readonly executionLockService?: ExecutionLockService,
   ) {
     // Initialize execution analytics
     this.executionAnalytics = new ExecutionAnalytics();
@@ -413,6 +416,7 @@ export class OrderExecutor implements IOrderExecutor {
    * - Otherwise, execute in PARALLEL for speed
    * 
    * Features:
+   * - Order registry to prevent race conditions across threads
    * - Retry logic with exponential backoff for transient failures
    * - Execution metrics tracking (slippage, fill time)
    * - Dynamic timeout adjustment based on historical performance
@@ -427,6 +431,61 @@ export class OrderExecutor implements IOrderExecutor {
     longExchange: ExchangeType,
     shortExchange: ExchangeType,
   ): Promise<[PerpOrderResponse, PerpOrderResponse]> {
+    // Generate thread ID for order tracking
+    const threadId = this.executionLockService?.generateThreadId() || `order-${Date.now()}`;
+    
+    // RACE CONDITION CHECK: Verify no active orders exist for this symbol/side
+    if (this.executionLockService) {
+      const longActive = this.executionLockService.hasActiveOrder(longExchange, longOrder.symbol, 'LONG');
+      const shortActive = this.executionLockService.hasActiveOrder(shortExchange, shortOrder.symbol, 'SHORT');
+      
+      if (longActive || shortActive) {
+        const msg = `Race condition detected: Active orders exist for ${longOrder.symbol} ` +
+          `(LONG active: ${longActive}, SHORT active: ${shortActive})`;
+        this.logger.error(`🚨 ${msg}`);
+        throw new ExchangeException(msg, longExchange, { symbol: longOrder.symbol });
+      }
+      
+      // Register orders as PLACING
+      const longRegistered = this.executionLockService.registerOrderPlacing(
+        `pending-long-${Date.now()}`,
+        longOrder.symbol,
+        longExchange,
+        'LONG',
+        threadId,
+        longOrder.size,
+        longOrder.price,
+      );
+      
+      if (!longRegistered) {
+        throw new ExchangeException(
+          `Failed to register LONG order - another order is active`,
+          longExchange,
+          { symbol: longOrder.symbol },
+        );
+      }
+      
+      const shortRegistered = this.executionLockService.registerOrderPlacing(
+        `pending-short-${Date.now()}`,
+        shortOrder.symbol,
+        shortExchange,
+        'SHORT',
+        threadId,
+        shortOrder.size,
+        shortOrder.price,
+      );
+      
+      if (!shortRegistered) {
+        // Clean up long registration since short failed
+        this.executionLockService.forceClearOrder(longExchange, longOrder.symbol, 'LONG');
+        throw new ExchangeException(
+          `Failed to register SHORT order - another order is active`,
+          shortExchange,
+          { symbol: shortOrder.symbol },
+        );
+      }
+    }
+    
     // Determine if sequential execution is required
     const requiresSequential = 
       longExchange === shortExchange ||
@@ -435,125 +494,166 @@ export class OrderExecutor implements IOrderExecutor {
 
     const startTime = Date.now();
 
-    if (requiresSequential) {
+    try {
+      if (requiresSequential) {
+        this.logger.debug(
+          `📋 Sequential order placement for ${longOrder.symbol}: ` +
+          `${longExchange} -> ${shortExchange} (Lighter or same exchange)`
+        );
+        
+        // Execute sequentially with retry - long first, then short
+        let longAttempts = 0;
+        let shortAttempts = 0;
+        
+        const longResponse = await this.executeWithRetry(
+          async () => {
+            longAttempts++;
+            return longAdapter.placeOrder(longOrder);
+          },
+          'Place LONG order',
+          longExchange,
+          longOrder.symbol,
+        );
+        
+        // Update order registry with actual order ID
+        if (this.executionLockService) {
+          this.executionLockService.updateOrderStatus(
+            longExchange,
+            longOrder.symbol,
+            'LONG',
+            longResponse.isSuccess() ? 'PLACED' : 'FAILED',
+            longResponse.orderId,
+          );
+        }
+        
+        const longFillTime = Date.now() - startTime;
+        
+        // Record long order metrics
+        this.recordOrderMetrics(
+          longOrder.symbol,
+          longExchange,
+          'LONG',
+          longOrder.size,
+          longResponse.filledSize || longOrder.size,
+          longOrder.price || 0,
+          longResponse.averageFillPrice || longOrder.price || 0,
+          longFillTime,
+          longAttempts,
+          longResponse.isSuccess(),
+        );
+        
+        // Record long order to diagnostics
+        this.recordOrderToDiagnostics(
+          longResponse.orderId || 'unknown',
+          longOrder.symbol,
+          longExchange,
+          'LONG',
+          longResponse.isSuccess() ? (longResponse.isFilled() ? 'FILLED' : 'PLACED') : 'FAILED',
+          longFillTime,
+          longResponse.error,
+        );
+        
+        const shortStartTime = Date.now();
+        const shortResponse = await this.executeWithRetry(
+          async () => {
+            shortAttempts++;
+            return shortAdapter.placeOrder(shortOrder);
+          },
+          'Place SHORT order',
+          shortExchange,
+          shortOrder.symbol,
+        );
+        
+        // Update order registry with actual order ID
+        if (this.executionLockService) {
+          this.executionLockService.updateOrderStatus(
+            shortExchange,
+            shortOrder.symbol,
+            'SHORT',
+            shortResponse.isSuccess() ? 'PLACED' : 'FAILED',
+            shortResponse.orderId,
+          );
+        }
+        
+        const shortFillTime = Date.now() - shortStartTime;
+        
+        // Record short order metrics
+        this.recordOrderMetrics(
+          shortOrder.symbol,
+          shortExchange,
+          'SHORT',
+          shortOrder.size,
+          shortResponse.filledSize || shortOrder.size,
+          shortOrder.price || 0,
+          shortResponse.averageFillPrice || shortOrder.price || 0,
+          shortFillTime,
+          shortAttempts,
+          shortResponse.isSuccess(),
+        );
+        
+        // Record short order to diagnostics
+        this.recordOrderToDiagnostics(
+          shortResponse.orderId || 'unknown',
+          shortOrder.symbol,
+          shortExchange,
+          'SHORT',
+          shortResponse.isSuccess() ? (shortResponse.isFilled() ? 'FILLED' : 'PLACED') : 'FAILED',
+          shortFillTime,
+          shortResponse.error,
+        );
+        
+        return [longResponse, shortResponse];
+      }
+
+      // Different exchanges (non-Lighter) can be executed in parallel with retry
       this.logger.debug(
-        `📋 Sequential order placement for ${longOrder.symbol}: ` +
-        `${longExchange} -> ${shortExchange} (Lighter or same exchange)`
+        `📋 Parallel order placement for ${longOrder.symbol}: ` +
+        `${longExchange} || ${shortExchange}`
       );
       
-      // Execute sequentially with retry - long first, then short
       let longAttempts = 0;
       let shortAttempts = 0;
       
-      const longResponse = await this.executeWithRetry(
-        async () => {
-          longAttempts++;
-          return longAdapter.placeOrder(longOrder);
-        },
-        'Place LONG order',
-        longExchange,
-        longOrder.symbol,
-      );
+      const [longResponse, shortResponse] = await Promise.all([
+        this.executeWithRetry(
+          async () => {
+            longAttempts++;
+            return longAdapter.placeOrder(longOrder);
+          },
+          'Place LONG order',
+          longExchange,
+          longOrder.symbol,
+        ),
+        this.executeWithRetry(
+          async () => {
+            shortAttempts++;
+            return shortAdapter.placeOrder(shortOrder);
+          },
+          'Place SHORT order',
+          shortExchange,
+          shortOrder.symbol,
+        ),
+      ]);
       
-      const longFillTime = Date.now() - startTime;
+      // Update order registry with actual order IDs
+      if (this.executionLockService) {
+        this.executionLockService.updateOrderStatus(
+          longExchange,
+          longOrder.symbol,
+          'LONG',
+          longResponse.isSuccess() ? 'PLACED' : 'FAILED',
+          longResponse.orderId,
+        );
+        this.executionLockService.updateOrderStatus(
+          shortExchange,
+          shortOrder.symbol,
+          'SHORT',
+          shortResponse.isSuccess() ? 'PLACED' : 'FAILED',
+          shortResponse.orderId,
+        );
+      }
       
-      // Record long order metrics
-      this.recordOrderMetrics(
-        longOrder.symbol,
-        longExchange,
-        'LONG',
-        longOrder.size,
-        longResponse.filledSize || longOrder.size,
-        longOrder.price || 0,
-        longResponse.averageFillPrice || longOrder.price || 0,
-        longFillTime,
-        longAttempts,
-        longResponse.isSuccess(),
-      );
-      
-      // Record long order to diagnostics
-      this.recordOrderToDiagnostics(
-        longResponse.orderId || 'unknown',
-        longOrder.symbol,
-        longExchange,
-        'LONG',
-        longResponse.isSuccess() ? (longResponse.isFilled() ? 'FILLED' : 'PLACED') : 'FAILED',
-        longFillTime,
-        longResponse.error,
-      );
-      
-      const shortStartTime = Date.now();
-      const shortResponse = await this.executeWithRetry(
-        async () => {
-          shortAttempts++;
-          return shortAdapter.placeOrder(shortOrder);
-        },
-        'Place SHORT order',
-        shortExchange,
-        shortOrder.symbol,
-      );
-      
-      const shortFillTime = Date.now() - shortStartTime;
-      
-      // Record short order metrics
-      this.recordOrderMetrics(
-        shortOrder.symbol,
-        shortExchange,
-        'SHORT',
-        shortOrder.size,
-        shortResponse.filledSize || shortOrder.size,
-        shortOrder.price || 0,
-        shortResponse.averageFillPrice || shortOrder.price || 0,
-        shortFillTime,
-        shortAttempts,
-        shortResponse.isSuccess(),
-      );
-      
-      // Record short order to diagnostics
-      this.recordOrderToDiagnostics(
-        shortResponse.orderId || 'unknown',
-        shortOrder.symbol,
-        shortExchange,
-        'SHORT',
-        shortResponse.isSuccess() ? (shortResponse.isFilled() ? 'FILLED' : 'PLACED') : 'FAILED',
-        shortFillTime,
-        shortResponse.error,
-      );
-      
-      return [longResponse, shortResponse];
-    }
-
-    // Different exchanges (non-Lighter) can be executed in parallel with retry
-    this.logger.debug(
-      `📋 Parallel order placement for ${longOrder.symbol}: ` +
-      `${longExchange} || ${shortExchange}`
-    );
-    
-    let longAttempts = 0;
-    let shortAttempts = 0;
-    
-    const [longResponse, shortResponse] = await Promise.all([
-      this.executeWithRetry(
-        async () => {
-          longAttempts++;
-          return longAdapter.placeOrder(longOrder);
-        },
-        'Place LONG order',
-        longExchange,
-        longOrder.symbol,
-      ),
-      this.executeWithRetry(
-        async () => {
-          shortAttempts++;
-          return shortAdapter.placeOrder(shortOrder);
-        },
-        'Place SHORT order',
-        shortExchange,
-        shortOrder.symbol,
-      ),
-    ]);
-    
-    const totalTime = Date.now() - startTime;
+      const totalTime = Date.now() - startTime;
     
     // Record metrics for both orders
     this.recordOrderMetrics(
@@ -582,28 +682,36 @@ export class OrderExecutor implements IOrderExecutor {
       shortResponse.isSuccess(),
     );
     
-    // Record both orders to diagnostics (parallel execution)
-    this.recordOrderToDiagnostics(
-      longResponse.orderId || 'unknown',
-      longOrder.symbol,
-      longExchange,
-      'LONG',
-      longResponse.isSuccess() ? (longResponse.isFilled() ? 'FILLED' : 'PLACED') : 'FAILED',
-      totalTime,
-      longResponse.error,
-    );
-    
-    this.recordOrderToDiagnostics(
-      shortResponse.orderId || 'unknown',
-      shortOrder.symbol,
-      shortExchange,
-      'SHORT',
-      shortResponse.isSuccess() ? (shortResponse.isFilled() ? 'FILLED' : 'PLACED') : 'FAILED',
-      totalTime,
-      shortResponse.error,
-    );
-    
-    return [longResponse, shortResponse];
+      // Record both orders to diagnostics (parallel execution)
+      this.recordOrderToDiagnostics(
+        longResponse.orderId || 'unknown',
+        longOrder.symbol,
+        longExchange,
+        'LONG',
+        longResponse.isSuccess() ? (longResponse.isFilled() ? 'FILLED' : 'PLACED') : 'FAILED',
+        totalTime,
+        longResponse.error,
+      );
+      
+      this.recordOrderToDiagnostics(
+        shortResponse.orderId || 'unknown',
+        shortOrder.symbol,
+        shortExchange,
+        'SHORT',
+        shortResponse.isSuccess() ? (shortResponse.isFilled() ? 'FILLED' : 'PLACED') : 'FAILED',
+        totalTime,
+        shortResponse.error,
+      );
+      
+      return [longResponse, shortResponse];
+    } catch (error: any) {
+      // On error, clean up order registry
+      if (this.executionLockService) {
+        this.executionLockService.forceClearOrder(longExchange, longOrder.symbol, 'LONG');
+        this.executionLockService.forceClearOrder(shortExchange, shortOrder.symbol, 'SHORT');
+      }
+      throw error;
+    }
   }
 
   async waitForOrderFill(
@@ -615,8 +723,20 @@ export class OrderExecutor implements IOrderExecutor {
     maxRetries: number = 10,
     pollIntervalMs: number = 2000,
     isClosingPosition: boolean = false,
+    orderSide?: 'LONG' | 'SHORT',
   ): Promise<PerpOrderResponse> {
     const operationType = isClosingPosition ? 'CLOSE' : 'OPEN';
+    
+    // Update order registry to WAITING_FILL status
+    if (this.executionLockService && orderSide) {
+      this.executionLockService.updateOrderStatus(
+        exchangeType,
+        symbol,
+        orderSide,
+        'WAITING_FILL',
+        orderId,
+      );
+    }
     const isLighter = exchangeType === ExchangeType.LIGHTER;
 
     this.logger.log(
@@ -757,6 +877,16 @@ export class OrderExecutor implements IOrderExecutor {
             `✅ ${operationType} order ${orderId} filled on attempt ${attempt + 1}/${maxRetries} ` +
               `(filled: ${statusResponse.filledSize || expectedSize})`,
           );
+          // Update order registry to FILLED status
+          if (this.executionLockService && orderSide) {
+            this.executionLockService.updateOrderStatus(
+              exchangeType,
+              symbol,
+              orderSide,
+              'FILLED',
+              orderId,
+            );
+          }
           return statusResponse;
         }
 
@@ -768,6 +898,16 @@ export class OrderExecutor implements IOrderExecutor {
             `⚠️ ${operationType} order ${orderId} was cancelled or has error: ` +
               `${statusResponse.error || 'cancelled'}`,
           );
+          // Update order registry to CANCELLED status
+          if (this.executionLockService && orderSide) {
+            this.executionLockService.updateOrderStatus(
+              exchangeType,
+              symbol,
+              orderSide,
+              'CANCELLED',
+              orderId,
+            );
+          }
           return statusResponse;
         }
 
@@ -831,6 +971,17 @@ export class OrderExecutor implements IOrderExecutor {
       { orderId, maxRetries, totalTimeMs: totalTime },
     );
 
+    // Update order registry to CANCELLED status
+    if (this.executionLockService && orderSide) {
+      this.executionLockService.updateOrderStatus(
+        exchangeType,
+        symbol,
+        orderSide,
+        'CANCELLED',
+        orderId,
+      );
+    }
+
     // Return a response indicating the order was cancelled due to timeout
     return new PerpOrderResponse(
       orderId,
@@ -845,6 +996,51 @@ export class OrderExecutor implements IOrderExecutor {
   }
 
   async executeSinglePosition(
+    bestOpportunity: {
+      plan: ArbitrageExecutionPlan;
+      opportunity: ArbitrageOpportunity;
+    },
+    adapters: Map<ExchangeType, IPerpExchangeAdapter>,
+    result: ArbitrageExecutionResult,
+  ): Promise<Result<ArbitrageExecutionResult, DomainException>> {
+    const { plan, opportunity } = bestOpportunity;
+
+    // SYMBOL-LEVEL LOCK: Prevent concurrent execution on the same symbol
+    // This prevents race conditions where multiple threads try to execute the same symbol
+    const threadId = this.executionLockService?.generateThreadId() || `thread-${Date.now()}`;
+    if (this.executionLockService) {
+      const lockAcquired = this.executionLockService.tryAcquireSymbolLock(
+        opportunity.symbol,
+        threadId,
+        'executeSinglePosition',
+      );
+      if (!lockAcquired) {
+        this.logger.warn(
+          `⏳ Symbol ${opportunity.symbol} is already being executed by another thread - skipping`
+        );
+        result.errors.push(`Symbol ${opportunity.symbol} locked by another execution`);
+        return Result.success(result);
+      }
+    }
+
+    try {
+      return await this.executeSinglePositionInternal(
+        bestOpportunity,
+        adapters,
+        result,
+      );
+    } finally {
+      // Always release the symbol lock
+      if (this.executionLockService) {
+        this.executionLockService.releaseSymbolLock(opportunity.symbol, threadId);
+      }
+    }
+  }
+
+  /**
+   * Internal implementation of executeSinglePosition (called after acquiring symbol lock)
+   */
+  private async executeSinglePositionInternal(
     bestOpportunity: {
       plan: ArbitrageExecutionPlan;
       opportunity: ArbitrageOpportunity;
@@ -1223,6 +1419,9 @@ export class OrderExecutor implements IOrderExecutor {
 
     this.logger.log(`\n🚀 Executing ${opportunities.length} positions...`);
 
+    // Track which symbols we've locked in this batch
+    const lockedSymbols: Map<string, string> = new Map(); // symbol -> threadId
+
     try {
       for (let i = 0; i < opportunities.length; i++) {
         const item = opportunities[i];
@@ -1230,6 +1429,26 @@ export class OrderExecutor implements IOrderExecutor {
         if (!item.plan) {
           this.logger.warn(`Skipping ${item.opportunity.symbol}: invalid plan`);
           continue;
+        }
+
+        const { opportunity, plan } = item;
+
+        // SYMBOL-LEVEL LOCK: Prevent concurrent execution on the same symbol
+        const threadId = this.executionLockService?.generateThreadId() || `batch-${Date.now()}-${i}`;
+        if (this.executionLockService) {
+          const lockAcquired = this.executionLockService.tryAcquireSymbolLock(
+            opportunity.symbol,
+            threadId,
+            'executeMultiplePositions',
+          );
+          if (!lockAcquired) {
+            this.logger.warn(
+              `⏳ Symbol ${opportunity.symbol} is already being executed - skipping in batch`
+            );
+            result.errors.push(`Symbol ${opportunity.symbol} locked by another execution`);
+            continue;
+          }
+          lockedSymbols.set(opportunity.symbol, threadId);
         }
 
         // Retry loop for this opportunity
@@ -1243,8 +1462,6 @@ export class OrderExecutor implements IOrderExecutor {
           executionAttempt++;
 
           try {
-            const { opportunity, plan } = item;
-
             // Get adapters
             if (!opportunity.shortExchange) {
               result.errors.push(
@@ -1433,6 +1650,7 @@ export class OrderExecutor implements IOrderExecutor {
                 this.config.maxOrderWaitRetries,
                 this.config.orderWaitBaseInterval,
                 false,
+                'LONG',
               );
             }
 
@@ -1449,6 +1667,7 @@ export class OrderExecutor implements IOrderExecutor {
                 this.config.maxOrderWaitRetries,
                 this.config.orderWaitBaseInterval,
                 false,
+                'SHORT',
               );
             }
 
@@ -1702,6 +1921,13 @@ export class OrderExecutor implements IOrderExecutor {
           { error: error.message, opportunitiesCount: opportunities.length },
         ),
       );
+    } finally {
+      // Release all symbol locks acquired in this batch
+      if (this.executionLockService) {
+        for (const [symbol, threadId] of lockedSymbols.entries()) {
+          this.executionLockService.releaseSymbolLock(symbol, threadId);
+        }
+      }
     }
   }
 

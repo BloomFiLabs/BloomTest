@@ -1225,10 +1225,145 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter, OnModuleDes
     try {
       await this.ensureInitialized();
       
-      // Lighter uses order hash for cancellation
-      // SDK signature may require different parameters - cast to any for now
-      await (this.signerClient!.cancelOrder as any)(orderId);
-      return true;
+      // CRITICAL FIX: Lighter's cancelOrder requires { marketIndex, orderIndex }
+      // NOT the transaction hash! We need to find the actual order from open orders.
+      
+      // First, check if orderId is a transaction hash (64+ chars hex) or a numeric order index
+      const isTransactionHash = orderId.length > 20 && /^[0-9a-f]+$/i.test(orderId);
+      
+      if (isTransactionHash) {
+        // Transaction hash passed - we need to find the actual order to cancel
+        // This happens when we're trying to cancel an order we just placed
+        this.logger.warn(
+          `⚠️ cancelOrder called with transaction hash ${orderId.substring(0, 16)}... - ` +
+          `Lighter requires numeric orderIndex. Looking up open orders...`
+        );
+        
+        if (!symbol) {
+          this.logger.error('❌ Cannot cancel order: symbol is required when using transaction hash');
+          throw new ExchangeError(
+            'Symbol is required to cancel Lighter order by transaction hash',
+            ExchangeType.LIGHTER,
+          );
+        }
+        
+        // Get market index for the symbol
+        const marketIndex = await this.getMarketIndex(symbol);
+        
+        // Get open orders for this market
+        const authToken = await this.signerClient!.createAuthTokenWithExpiry(600);
+        const response = await axios.get(`${this.config.baseUrl}/api/v1/accountActiveOrders`, {
+          params: {
+            auth: authToken,
+            market_id: marketIndex,
+            account_index: this.config.accountIndex,
+          },
+          timeout: 10000,
+          headers: { accept: 'application/json' },
+        });
+        
+        if (!response.data || response.data.code !== 200) {
+          this.logger.warn(`No open orders found for ${symbol} - order may have already filled/cancelled`);
+          return true; // Consider it "cancelled" if no orders exist
+        }
+        
+        const orders = response.data.orders || [];
+        if (orders.length === 0) {
+          this.logger.warn(`No open orders found for ${symbol} - order may have already filled/cancelled`);
+          return true;
+        }
+        
+        // Cancel all orders for this market (since we can't match by tx hash)
+        // This is the safest approach when we don't know which specific order to cancel
+        this.logger.log(`🗑️ Found ${orders.length} open order(s) for ${symbol} - cancelling all...`);
+        
+        let cancelledCount = 0;
+        for (const order of orders) {
+          const orderIndex = parseInt(order.order_id || order.order_index || '0');
+          if (orderIndex <= 0) continue;
+          
+          try {
+            this.logger.debug(`Cancelling order ${orderIndex} for market ${marketIndex}...`);
+            // SDK types are incorrect - it actually accepts { marketIndex, orderIndex } object
+            const [tx, txHash, error] = await (this.signerClient as any).cancelOrder({
+              marketIndex,
+              orderIndex,
+            });
+            
+            if (error) {
+              this.logger.warn(`Failed to cancel order ${orderIndex}: ${error}`);
+              continue;
+            }
+            
+            // Wait for cancellation to be processed
+            try {
+              await this.signerClient!.waitForTransaction(txHash, 15000, 2000);
+            } catch (waitError: any) {
+              this.logger.debug(`Cancel wait timeout (may still succeed): ${waitError.message}`);
+            }
+            
+            cancelledCount++;
+            this.logger.log(`✅ Cancelled order ${orderIndex} (tx: ${txHash.substring(0, 16)}...)`);
+          } catch (cancelError: any) {
+            this.logger.warn(`Error cancelling order ${orderIndex}: ${cancelError.message}`);
+          }
+        }
+        
+        if (cancelledCount === 0) {
+          this.logger.warn(`⚠️ No orders were successfully cancelled for ${symbol}`);
+        } else {
+          this.logger.log(`✅ Successfully cancelled ${cancelledCount}/${orders.length} order(s) for ${symbol}`);
+        }
+        
+        return cancelledCount > 0;
+      } else {
+        // Numeric order index passed - cancel directly
+        const orderIndex = parseInt(orderId);
+        if (isNaN(orderIndex) || orderIndex <= 0) {
+          this.logger.error(`❌ Invalid order index: ${orderId}`);
+          throw new ExchangeError(
+            `Invalid order index: ${orderId}`,
+            ExchangeType.LIGHTER,
+          );
+        }
+        
+        // Need market index - get from symbol
+        if (!symbol) {
+          this.logger.error('❌ Cannot cancel order: symbol is required');
+          throw new ExchangeError(
+            'Symbol is required to cancel Lighter order',
+            ExchangeType.LIGHTER,
+          );
+        }
+        
+        const marketIndex = await this.getMarketIndex(symbol);
+        
+        this.logger.log(`🗑️ Cancelling Lighter order ${orderIndex} for market ${marketIndex}...`);
+        
+        // SDK types are incorrect - it actually accepts { marketIndex, orderIndex } object
+        const [tx, txHash, error] = await (this.signerClient as any).cancelOrder({
+          marketIndex,
+          orderIndex,
+        });
+        
+        if (error) {
+          this.logger.error(`❌ Cancel order failed: ${error}`);
+          throw new ExchangeError(
+            `Failed to cancel order: ${error}`,
+            ExchangeType.LIGHTER,
+          );
+        }
+        
+        // Wait for cancellation to be processed
+        try {
+          await this.signerClient!.waitForTransaction(txHash, 15000, 2000);
+        } catch (waitError: any) {
+          this.logger.debug(`Cancel wait timeout (may still succeed): ${waitError.message}`);
+        }
+        
+        this.logger.log(`✅ Order ${orderIndex} cancelled successfully (tx: ${txHash.substring(0, 16)}...)`);
+        return true;
+      }
     } catch (error: any) {
       this.logger.error(`Failed to cancel order: ${error.message}`);
       throw new ExchangeError(
@@ -1246,14 +1381,68 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter, OnModuleDes
       
       const marketIndex = await this.getMarketIndex(symbol);
       
-      // Cancel all orders for the market
-      // SDK requires timeInForce and time parameters - use current time
-      const timeInForce = 0; // GTC
-      const time = Math.floor(Date.now() / 1000);
-      await this.signerClient!.cancelAllOrders(timeInForce, time);
+      // Get open orders for this specific market first
+      const authToken = await this.signerClient!.createAuthTokenWithExpiry(600);
+      const response = await axios.get(`${this.config.baseUrl}/api/v1/accountActiveOrders`, {
+        params: {
+          auth: authToken,
+          market_id: marketIndex,
+          account_index: this.config.accountIndex,
+        },
+        timeout: 10000,
+        headers: { accept: 'application/json' },
+      });
       
-      // Lighter doesn't return count, so we return 1 as a placeholder
-      return 1;
+      if (!response.data || response.data.code !== 200) {
+        this.logger.debug(`No open orders found for ${symbol}`);
+        return 0;
+      }
+      
+      const orders = response.data.orders || [];
+      if (orders.length === 0) {
+        this.logger.debug(`No open orders to cancel for ${symbol}`);
+        return 0;
+      }
+      
+      this.logger.log(`🗑️ Cancelling ${orders.length} order(s) for ${symbol}...`);
+      
+      // Cancel each order individually (more reliable than cancelAllOrders which affects ALL markets)
+      let cancelledCount = 0;
+      for (const order of orders) {
+        const orderIndex = parseInt(order.order_id || order.order_index || '0');
+        if (orderIndex <= 0) continue;
+        
+        try {
+          // SDK types are incorrect - it actually accepts { marketIndex, orderIndex } object
+          const [tx, txHash, error] = await (this.signerClient as any).cancelOrder({
+            marketIndex,
+            orderIndex,
+          });
+          
+          if (error) {
+            this.logger.warn(`Failed to cancel order ${orderIndex}: ${error}`);
+            continue;
+          }
+          
+          // Wait briefly for cancellation
+          try {
+            await this.signerClient!.waitForTransaction(txHash, 10000, 2000);
+          } catch (waitError: any) {
+            this.logger.debug(`Cancel wait timeout: ${waitError.message}`);
+          }
+          
+          cancelledCount++;
+          this.logger.debug(`Cancelled order ${orderIndex}`);
+        } catch (cancelError: any) {
+          this.logger.warn(`Error cancelling order ${orderIndex}: ${cancelError.message}`);
+        }
+      }
+      
+      if (cancelledCount > 0) {
+        this.logger.log(`✅ Cancelled ${cancelledCount}/${orders.length} order(s) for ${symbol}`);
+      }
+      
+      return cancelledCount;
     } catch (error: any) {
       this.logger.error(`Failed to cancel all orders: ${error.message}`);
       throw new ExchangeError(

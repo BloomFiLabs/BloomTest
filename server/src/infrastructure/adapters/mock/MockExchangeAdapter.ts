@@ -84,8 +84,35 @@ export class MockExchangeAdapter implements IPerpExchangeAdapter {
         this.realAdapter = hyperliquidAdapter;
         break;
       case ExchangeType.EXTENDED:
-        if (!extendedAdapter) throw new Error('Extended adapter required for mock');
-        this.realAdapter = extendedAdapter;
+        if (!extendedAdapter) {
+          // Extended adapter is optional - use a stub that returns empty data
+          this.logger.warn('Extended adapter not available - mock will return empty market data');
+          this.realAdapter = {
+            getBalance: async () => 0,
+            getPositions: async () => [],
+            getPosition: async () => null,
+            placeOrder: async () => { throw new Error('Extended adapter not configured'); },
+            cancelOrder: async () => { throw new Error('Extended adapter not configured'); },
+            cancelAllOrders: async () => 0,
+            getOpenOrders: async () => [],
+            getOrderStatus: async () => ({ status: 'UNKNOWN' } as any),
+            getBestBidAsk: async () => ({ bestBid: 0, bestAsk: 0 }),
+            getAvailableMargin: async () => 0,
+            getAccountInfo: async () => ({}),
+            getFundingPayments: async () => [],
+            getExchangeType: () => ExchangeType.EXTENDED,
+            getConfig: () => ({ exchangeType: ExchangeType.EXTENDED } as any),
+            getMarkPrice: async () => 0,
+            getEquity: async () => 0,
+            isReady: () => false,
+            initialize: async () => {},
+            dispose: async () => {},
+            getMaxLeverage: async () => 1,
+            setLeverage: async () => {},
+          } as unknown as IPerpExchangeAdapter;
+        } else {
+          this.realAdapter = extendedAdapter;
+        }
         break;
       default:
         throw new Error(`Unsupported exchange type: ${exchangeType}`);
