@@ -15,6 +15,7 @@ import {
 import { PerpPosition } from '../../../domain/entities/PerpPosition';
 import { IPerpExchangeAdapter, ExchangeError, FundingPayment } from '../../../domain/ports/IPerpExchangeAdapter';
 import { DiagnosticsService } from '../../services/DiagnosticsService';
+import { MarketQualityFilter } from '../../../domain/services/MarketQualityFilter';
 
 /**
  * AsterExchangeAdapter - Implements IPerpExchangeAdapter for Aster DEX
@@ -37,6 +38,7 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
   constructor(
     private readonly configService: ConfigService,
     @Optional() private readonly diagnosticsService?: DiagnosticsService,
+    @Optional() private readonly marketQualityFilter?: MarketQualityFilter,
   ) {
     // Load configuration from environment
     // Remove trailing slash if present (causes 403 errors)
@@ -107,7 +109,7 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
   }
 
   /**
-   * Record an error to diagnostics service
+   * Record an error to diagnostics service and market quality filter
    */
   private recordError(type: string, message: string, symbol?: string, context?: Record<string, any>): void {
     if (this.diagnosticsService) {
@@ -119,6 +121,28 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
         timestamp: new Date(),
         context,
       });
+    }
+
+    // Record to market quality filter for automatic blacklisting
+    if (this.marketQualityFilter && symbol) {
+      const failureType = MarketQualityFilter.parseFailureType(message);
+      this.marketQualityFilter.recordFailure({
+        symbol,
+        exchange: ExchangeType.ASTER,
+        failureType,
+        message,
+        timestamp: new Date(),
+        context,
+      });
+    }
+  }
+
+  /**
+   * Record a successful order fill
+   */
+  private recordSuccess(symbol: string): void {
+    if (this.marketQualityFilter) {
+      this.marketQualityFilter.recordSuccess(symbol, ExchangeType.ASTER);
     }
   }
 
@@ -466,6 +490,9 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
 
       const orderId = response.data.orderId?.toString() || response.data.orderId;
       const status = this.mapAsterOrderStatus(response.data.status);
+
+      // Record success for market quality tracking
+      this.recordSuccess(request.symbol);
 
       return new PerpOrderResponse(
         orderId,

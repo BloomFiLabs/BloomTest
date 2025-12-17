@@ -17,6 +17,7 @@ import { NAVReporter } from '../../infrastructure/adapters/blockchain/NAVReporte
 import { RealFundingPaymentsService } from '../../infrastructure/services/RealFundingPaymentsService';
 import { PositionStateRepository, PersistedPositionState } from '../../infrastructure/repositories/PositionStateRepository';
 import { ExecutionLockService } from '../../infrastructure/services/ExecutionLockService';
+import { MarketQualityFilter } from '../../domain/services/MarketQualityFilter';
 
 /**
  * PerpKeeperScheduler - Scheduled execution for funding rate arbitrage
@@ -62,6 +63,7 @@ export class PerpKeeperScheduler implements OnModuleInit {
     @Optional() private readonly fundingPaymentsService?: RealFundingPaymentsService,
     @Optional() private readonly positionStateRepository?: PositionStateRepository,
     @Optional() private readonly executionLockService?: ExecutionLockService,
+    @Optional() private readonly marketQualityFilter?: MarketQualityFilter,
   ) {
     // Initialize orchestrator with exchange adapters
     const adapters = this.keeperService.getExchangeAdapters();
@@ -583,8 +585,24 @@ export class PerpKeeperScheduler implements OnModuleInit {
       includePerpSpot,
     );
 
-    // Filter out any opportunities for blacklisted symbols
-    return opportunities.filter(opp => !this.isBlacklisted(opp.symbol));
+    // Filter out any opportunities for blacklisted symbols (static blacklist)
+    let filtered = opportunities.filter(opp => !this.isBlacklisted(opp.symbol));
+
+    // Apply dynamic market quality filter (automatic blacklisting based on execution failures)
+    if (this.marketQualityFilter) {
+      const { passed, filtered: qualityFiltered, reasons } = this.marketQualityFilter.filterOpportunities(filtered);
+      
+      if (qualityFiltered.length > 0) {
+        this.logger.warn(
+          `🚫 Market quality filter removed ${qualityFiltered.length} opportunity(ies): ` +
+          qualityFiltered.map(o => `${o.symbol} (${reasons.get(`${o.symbol}-${o.longExchange}`) || reasons.get(o.symbol) || 'quality'})`).join(', ')
+        );
+      }
+      
+      filtered = passed;
+    }
+
+    return filtered;
   }
 
   /**

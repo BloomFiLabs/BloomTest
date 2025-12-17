@@ -17,6 +17,7 @@ import { PerpPosition } from '../../../domain/entities/PerpPosition';
 import { IPerpExchangeAdapter, ExchangeError, FundingPayment } from '../../../domain/ports/IPerpExchangeAdapter';
 import { HyperLiquidDataProvider } from './HyperLiquidDataProvider';
 import { DiagnosticsService } from '../../services/DiagnosticsService';
+import { MarketQualityFilter } from '../../../domain/services/MarketQualityFilter';
 
 /**
  * HyperliquidExchangeAdapter - Implements IPerpExchangeAdapter for Hyperliquid
@@ -42,6 +43,7 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
     private readonly configService: ConfigService,
     private readonly dataProvider: HyperLiquidDataProvider,
     @Optional() private readonly diagnosticsService?: DiagnosticsService,
+    @Optional() private readonly marketQualityFilter?: MarketQualityFilter,
   ) {
     const privateKey = this.configService.get<string>('PRIVATE_KEY') || this.configService.get<string>('HYPERLIQUID_PRIVATE_KEY');
     const isTestnet = this.configService.get<boolean>('HYPERLIQUID_TESTNET') || false;
@@ -84,7 +86,7 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
   }
 
   /**
-   * Record an error to diagnostics service
+   * Record an error to diagnostics service and market quality filter
    */
   private recordError(type: string, message: string, symbol?: string, context?: Record<string, any>): void {
     if (this.diagnosticsService) {
@@ -96,6 +98,28 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
         timestamp: new Date(),
         context,
       });
+    }
+
+    // Record to market quality filter for automatic blacklisting
+    if (this.marketQualityFilter && symbol) {
+      const failureType = MarketQualityFilter.parseFailureType(message);
+      this.marketQualityFilter.recordFailure({
+        symbol,
+        exchange: ExchangeType.HYPERLIQUID,
+        failureType,
+        message,
+        timestamp: new Date(),
+        context,
+      });
+    }
+  }
+
+  /**
+   * Record a successful order fill
+   */
+  private recordSuccess(symbol: string): void {
+    if (this.marketQualityFilter) {
+      this.marketQualityFilter.recordSuccess(symbol, ExchangeType.HYPERLIQUID);
     }
   }
 
@@ -371,6 +395,9 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
           `✅ Hyperliquid order ${orderStatus === OrderStatus.FILLED ? 'filled' : 'placed'} successfully: ` +
           `${orderId} (${request.side} ${request.size} ${request.symbol} @ ${avgFillPrice || request.price || 'MARKET'})`
         );
+        
+        // Record success for market quality tracking
+        this.recordSuccess(request.symbol);
         
         return response;
       }

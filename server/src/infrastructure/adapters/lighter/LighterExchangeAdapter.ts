@@ -15,6 +15,7 @@ import {
 import { PerpPosition } from '../../../domain/entities/PerpPosition';
 import { IPerpExchangeAdapter, ExchangeError, FundingPayment } from '../../../domain/ports/IPerpExchangeAdapter';
 import { DiagnosticsService } from '../../services/DiagnosticsService';
+import { MarketQualityFilter } from '../../../domain/services/MarketQualityFilter';
 
 /**
  * LighterExchangeAdapter - Implements IPerpExchangeAdapter for Lighter Protocol
@@ -51,6 +52,7 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter, OnModuleDes
   constructor(
     private readonly configService: ConfigService,
     @Optional() private readonly diagnosticsService?: DiagnosticsService,
+    @Optional() private readonly marketQualityFilter?: MarketQualityFilter,
   ) {
     const baseUrl = this.configService.get<string>('LIGHTER_API_BASE_URL') || 'https://mainnet.zklighter.elliot.ai';
     const apiKey = this.configService.get<string>('LIGHTER_API_KEY');
@@ -83,7 +85,7 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter, OnModuleDes
   }
 
   /**
-   * Record an error to diagnostics service
+   * Record an error to diagnostics service and market quality filter
    */
   private recordError(type: string, message: string, symbol?: string, context?: Record<string, any>): void {
     if (this.diagnosticsService) {
@@ -95,6 +97,28 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter, OnModuleDes
         timestamp: new Date(),
         context,
       });
+    }
+
+    // Record to market quality filter for automatic blacklisting
+    if (this.marketQualityFilter && symbol) {
+      const failureType = MarketQualityFilter.parseFailureType(message);
+      this.marketQualityFilter.recordFailure({
+        symbol,
+        exchange: ExchangeType.LIGHTER,
+        failureType,
+        message,
+        timestamp: new Date(),
+        context,
+      });
+    }
+  }
+
+  /**
+   * Record a successful order fill
+   */
+  private recordSuccess(symbol: string): void {
+    if (this.marketQualityFilter) {
+      this.marketQualityFilter.recordSuccess(symbol, ExchangeType.LIGHTER);
     }
   }
 
@@ -832,6 +856,8 @@ export class LighterExchangeAdapter implements IPerpExchangeAdapter, OnModuleDes
               this.logger.log(
                 `✅ Lighter order ${orderId} filled immediately: ${actualSize.toFixed(4)} ${request.symbol}`
               );
+              // Record success for market quality tracking
+              this.recordSuccess(request.symbol);
               return new PerpOrderResponse(
                 orderId,
                 OrderStatus.FILLED,

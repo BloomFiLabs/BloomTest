@@ -506,6 +506,32 @@ export interface DiagnosticsResponse {
       hitRate: number;
     };
   };
+
+  /** Market quality filter diagnostics */
+  marketQuality?: {
+    blacklistedCount: number;
+    blacklistedMarkets: Array<{
+      symbol: string;
+      exchange?: string;
+      reason: string;
+      expiresIn?: string;
+    }>;
+    recentFailures: Array<{
+      symbol: string;
+      exchange: string;
+      type: string;
+      message: string;
+      timeAgo: string;
+    }>;
+    marketStats: Array<{
+      symbol: string;
+      exchange: string;
+      failures1h: number;
+      failures24h: number;
+      failureRate: string;
+      status: 'healthy' | 'degraded' | 'blacklisted';
+    }>;
+  };
 }
 
 /**
@@ -622,6 +648,9 @@ export class DiagnosticsService {
 
   // Prediction service reference
   private predictionService?: any;
+
+  // Market quality filter reference
+  private marketQualityFilter?: any;
 
   constructor() {
     this.logger.log('DiagnosticsService initialized with enhanced tracking');
@@ -997,6 +1026,13 @@ export class DiagnosticsService {
    */
   setPredictionService(service: any): void {
     this.predictionService = service;
+  }
+
+  /**
+   * Set market quality filter reference for diagnostics
+   */
+  setMarketQualityFilter(filter: any): void {
+    this.marketQualityFilter = filter;
   }
 
   // ==================== NEW: Lighter State Tracking ====================
@@ -1485,7 +1521,23 @@ export class DiagnosticsService {
       capital: this.getCapitalDiagnostics(),
       currentOperation: this.getCurrentOperationDiagnostics(),
       predictions: this.getPredictionDiagnostics(),
+      marketQuality: this.getMarketQualityDiagnostics(),
     };
+  }
+
+  /**
+   * Get market quality filter diagnostics
+   */
+  private getMarketQualityDiagnostics(): DiagnosticsResponse['marketQuality'] {
+    if (!this.marketQualityFilter) {
+      return undefined;
+    }
+
+    try {
+      return this.marketQualityFilter.getDiagnostics();
+    } catch {
+      return undefined;
+    }
   }
 
   /**

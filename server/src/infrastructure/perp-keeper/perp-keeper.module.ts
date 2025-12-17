@@ -32,6 +32,7 @@ import { PortfolioRiskAnalyzer } from '../services/PortfolioRiskAnalyzer';
 import { RealFundingPaymentsService } from '../services/RealFundingPaymentsService';
 import { OptimalLeverageService } from '../services/OptimalLeverageService';
 import { DiagnosticsService } from '../services/DiagnosticsService';
+import { MarketQualityFilter } from '../../domain/services/MarketQualityFilter';
 import { CircuitBreakerService } from '../services/CircuitBreakerService';
 import { ExecutionLockService } from '../services/ExecutionLockService';
 import { PositionStateRepository } from '../repositories/PositionStateRepository';
@@ -517,6 +518,9 @@ import { PredictionBacktester } from '../../domain/services/prediction/Predictio
     // Diagnostics service (must be before PerformanceLogger due to dependency)
     DiagnosticsService,
     
+    // Market quality filter - tracks market execution quality and blacklists failing markets
+    MarketQualityFilter,
+    
     // Circuit breaker for error rate protection
     CircuitBreakerService,
     
@@ -600,6 +604,7 @@ import { PredictionBacktester } from '../../domain/services/prediction/Predictio
     RealFundingPaymentsService,
     OptimalLeverageService,
     DiagnosticsService,
+    MarketQualityFilter,
     CircuitBreakerService,
     PositionStateRepository,
     RateLimiterService,
@@ -627,6 +632,7 @@ export class PerpKeeperModule implements OnModuleInit {
     @Optional() private readonly circuitBreaker?: CircuitBreakerService,
     @Optional() private readonly rateLimiter?: RateLimiterService,
     @Optional() private readonly positionStateRepo?: PositionStateRepository,
+    @Optional() private readonly marketQualityFilter?: MarketQualityFilter,
   ) {}
 
   /**
@@ -652,6 +658,10 @@ export class PerpKeeperModule implements OnModuleInit {
       if (this.positionStateRepo) {
         this.diagnosticsService.setPositionStateRepository(this.positionStateRepo);
         this.logger.log('Wired PositionStateRepository into DiagnosticsService');
+      }
+      if (this.marketQualityFilter) {
+        this.diagnosticsService.setMarketQualityFilter(this.marketQualityFilter);
+        this.logger.log('Wired MarketQualityFilter into DiagnosticsService');
       }
     }
   }
