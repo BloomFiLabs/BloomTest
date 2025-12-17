@@ -1736,6 +1736,11 @@ export class FundingArbitrageStrategy {
 
             if (longBalance > 0 && shortBalance > 0) {
               try {
+                // Get dynamic leverage based on realized volatility
+                const leverage = await this.getLeverageForSymbol(
+                  item.opportunity.symbol,
+                  item.opportunity.longExchange,
+                );
                 const planResult = await this.executionPlanBuilder.buildPlan(
                   item.opportunity,
                   adapters,
@@ -1744,6 +1749,7 @@ export class FundingArbitrageStrategy {
                   item.opportunity.longMarkPrice,
                   item.opportunity.shortMarkPrice,
                   undefined, // Use available capital, not portfolio allocation
+                  leverage, // Pass dynamic leverage
                 );
 
                 if (planResult.isSuccess) {
@@ -2432,6 +2438,11 @@ export class FundingArbitrageStrategy {
               ? (exchangeBalances.get(opp.opportunity.shortExchange) ?? 0)
               : 0;
 
+            // Get dynamic leverage based on realized volatility
+            const leverage = await this.getLeverageForSymbol(
+              opp.opportunity.symbol,
+              opp.opportunity.longExchange,
+            );
             const planResult = await this.executionPlanBuilder.buildPlan(
               opp.opportunity,
               adapters,
@@ -2440,6 +2451,7 @@ export class FundingArbitrageStrategy {
               opp.opportunity.longMarkPrice,
               opp.opportunity.shortMarkPrice,
               opp.maxPortfolioFor35APY, // Use allocated position size
+              leverage, // Pass dynamic leverage
             );
 
             if (planResult.isSuccess) {

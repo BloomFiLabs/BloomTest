@@ -215,22 +215,31 @@ export class FundingRatePredictionService
     // Get OI data if available (from current rate data)
     const historicalOI = this.buildHistoricalOI(symbol, exchange);
 
+    // Helper to sanitize numbers - ?? doesn't catch NaN, only null/undefined
+    const sanitizeNumber = (val: number | undefined, fallback: number): number => {
+      if (val === undefined || val === null || !isFinite(val)) {
+        return fallback;
+      }
+      return val;
+    };
+
     return {
       symbol,
       exchange,
-      currentRate: currentRateData?.currentRate ?? 0,
+      currentRate: sanitizeNumber(currentRateData?.currentRate, 0),
       historicalRates,
-      markPrice: currentRateData?.markPrice ?? 0,
+      markPrice: sanitizeNumber(currentRateData?.markPrice, 0),
       indexPrice: undefined, // Would need spot price data
-      openInterest: currentRateData?.openInterest,
+      openInterest: sanitizeNumber(currentRateData?.openInterest, undefined as any),
       historicalOI,
-      volume24h: currentRateData?.volume24h,
+      volume24h: sanitizeNumber(currentRateData?.volume24h, undefined as any),
       timestamp: new Date(),
     };
   }
 
   /**
    * Get historical rates from service and convert to expected format
+   * Filters out any NaN or invalid rate values to prevent NaN propagation
    */
   private getHistoricalRates(
     symbol: string,
@@ -239,7 +248,9 @@ export class FundingRatePredictionService
     const data = this.historicalService.getHistoricalData(symbol, exchange);
 
     // Sort by timestamp descending (most recent first)
+    // Filter out any NaN or invalid rates to prevent NaN propagation in predictions
     return data
+      .filter((d) => isFinite(d.rate)) // Remove NaN, Infinity, -Infinity
       .map((d) => ({
         rate: d.rate,
         timestamp: d.timestamp,

@@ -31,7 +31,8 @@ export class StrategyConfig {
     public readonly maxBackoffDelayClosing: number,
     public readonly minFillBalance: Percentage,
     // Dynamic leverage configuration
-    public readonly useDynamicLeverage: boolean = false,
+    // Default to TRUE - leverage should be based on realized volatility, not static
+    public readonly useDynamicLeverage: boolean = true,
     public readonly minLeverage: number = 1,
     public readonly maxLeverage: number = 10,
     public readonly volatilityLookbackHours: number = 24,
@@ -240,7 +241,7 @@ export class StrategyConfig {
    */
   static withDefaults(
     leverage: number = 2.0,
-    useDynamicLeverage: boolean = false,
+    useDynamicLeverage: boolean = true, // Default to dynamic leverage based on realized vol
     minLeverage: number = 1,
     maxLeverage: number = 10,
     volatilityLookbackHours: number = 24,
