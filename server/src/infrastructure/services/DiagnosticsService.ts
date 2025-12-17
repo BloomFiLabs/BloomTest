@@ -341,6 +341,16 @@ export interface DiagnosticsResponse {
     totalValue: number;
     unrealizedPnl: number;
     byExchange: Record<string, number>;
+    breakEvenInfo?: Array<{
+      symbol: string;
+      exchange: string;
+      openedAt: string;
+      estimatedBreakEvenHours: number;
+      hoursElapsed: number;
+      hoursRemaining: number;
+      status: 'earning' | 'not_yet_profitable' | 'overdue';
+      progressPercent: number;
+    }>;
   };
   liquidity: {
     pairsFiltered: { last24h: number; reasons: Record<string, number> };
@@ -619,7 +629,28 @@ export class DiagnosticsService {
     totalValue: number;
     unrealizedPnl: number;
     byExchange: Record<string, number>;
+    // Break-even tracking per position
+    breakEvenInfo?: Array<{
+      symbol: string;
+      openedAt: Date;
+      estimatedBreakEvenHours: number;
+      hoursRemaining: number;
+      status: 'earning' | 'not_yet_profitable' | 'overdue';
+    }>;
   } = { count: 0, totalValue: 0, unrealizedPnl: 0, byExchange: {} };
+
+  // Break-even tracking per active position (keyed by symbol-exchange)
+  private positionBreakEvenMap: Map<
+    string,
+    {
+      symbol: string;
+      exchange: string;
+      openedAt: Date;
+      estimatedBreakEvenHours: number;
+      estimatedCosts: number;
+      expectedHourlyReturn: number;
+    }
+  > = new Map();
 
   // Position time tracking for single-leg percentage calculation
   // Tracks cumulative time spent in positions (both full and single-leg)
@@ -1027,6 +1058,38 @@ export class DiagnosticsService {
     byExchange: Record<string, number>;
   }): void {
     this.apyData = data;
+  }
+
+  /**
+   * Record break-even info when a position is opened
+   */
+  recordPositionBreakEven(
+    symbol: string,
+    exchange: string,
+    estimatedBreakEvenHours: number,
+    estimatedCosts: number,
+    expectedHourlyReturn: number,
+  ): void {
+    const key = `${symbol}-${exchange}`;
+    this.positionBreakEvenMap.set(key, {
+      symbol,
+      exchange,
+      openedAt: new Date(),
+      estimatedBreakEvenHours,
+      estimatedCosts,
+      expectedHourlyReturn,
+    });
+    this.logger.debug(
+      `Recorded break-even for ${symbol} on ${exchange}: ${estimatedBreakEvenHours.toFixed(1)}h`,
+    );
+  }
+
+  /**
+   * Remove break-even tracking when position is closed
+   */
+  removePositionBreakEven(symbol: string, exchange: string): void {
+    const key = `${symbol}-${exchange}`;
+    this.positionBreakEvenMap.delete(key);
   }
 
   /**
@@ -1483,6 +1546,71 @@ export class DiagnosticsService {
     };
   }
 
+  // ==================== Break-Even Info ====================
+
+  /**
+   * Get break-even info for all active positions
+   */
+  private getBreakEvenInfo(): Array<{
+    symbol: string;
+    exchange: string;
+    openedAt: string;
+    estimatedBreakEvenHours: number;
+    hoursElapsed: number;
+    hoursRemaining: number;
+    status: 'earning' | 'not_yet_profitable' | 'overdue';
+    progressPercent: number;
+  }> {
+    const now = Date.now();
+    const info: Array<{
+      symbol: string;
+      exchange: string;
+      openedAt: string;
+      estimatedBreakEvenHours: number;
+      hoursElapsed: number;
+      hoursRemaining: number;
+      status: 'earning' | 'not_yet_profitable' | 'overdue';
+      progressPercent: number;
+    }> = [];
+
+    for (const [, data] of this.positionBreakEvenMap) {
+      const hoursElapsed =
+        (now - data.openedAt.getTime()) / (1000 * 60 * 60);
+      const hoursRemaining = Math.max(
+        0,
+        data.estimatedBreakEvenHours - hoursElapsed,
+      );
+
+      let status: 'earning' | 'not_yet_profitable' | 'overdue';
+      if (hoursElapsed >= data.estimatedBreakEvenHours) {
+        status = 'earning';
+      } else if (hoursElapsed < data.estimatedBreakEvenHours * 2) {
+        status = 'not_yet_profitable';
+      } else {
+        status = 'overdue';
+      }
+
+      const progressPercent =
+        data.estimatedBreakEvenHours > 0
+          ? Math.min(100, (hoursElapsed / data.estimatedBreakEvenHours) * 100)
+          : 100;
+
+      info.push({
+        symbol: data.symbol,
+        exchange: data.exchange,
+        openedAt: this.formatTimeAgo(data.openedAt),
+        estimatedBreakEvenHours:
+          Math.round(data.estimatedBreakEvenHours * 10) / 10,
+        hoursElapsed: Math.round(hoursElapsed * 10) / 10,
+        hoursRemaining: Math.round(hoursRemaining * 10) / 10,
+        status,
+        progressPercent: Math.round(progressPercent),
+      });
+    }
+
+    return info.sort((a, b) => a.hoursRemaining - b.hoursRemaining);
+  }
+
   // ==================== NEW: Prediction Diagnostics ====================
 
   /**
@@ -1607,7 +1735,10 @@ export class DiagnosticsService {
         // NEW: Recent errors with full context snapshots
         recentWithContext: this.getRecentErrorsWithContext(),
       },
-      positions: this.positionData,
+      positions: {
+        ...this.positionData,
+        breakEvenInfo: this.getBreakEvenInfo(),
+      },
       liquidity: {
         pairsFiltered: {
           last24h: this.getLiquidityFilterCount(24),

@@ -952,7 +952,16 @@ export class LighterExchangeAdapter
           // Note: We ignore request.timeInForce for LIMIT orders and always use GTC
           // Lighter API mapping: 0 = IOC, 1 = GTC/GTT (Good Till Time)
           const timeInForce = 1; // Always GTC/GTT (1) for LIMIT orders, regardless of request.timeInForce
-          const expiredAt = Date.now() + 3600000; // 1 hour expiry for GTC orders
+          // ALIGNED EXPIRY: Match order expiry to our retry logic wait time
+          // Opening orders: waitForOrderFill polls for ~62 seconds (10 retries with 2s base, 8s max backoff)
+          // Closing orders: waitForOrderFill polls for ~190 seconds (10 retries with 2s base, 32s max backoff)
+          // Set expiry slightly higher so orders auto-expire if we stop polling (avoids BigInt cancel bug)
+          // This avoids the Lighter SDK BigInt issue with large order indices on cancel
+          const isClosing = request.reduceOnly === true;
+          const OPENING_ORDER_EXPIRY_MS = 90 * 1000; // 90 seconds (gives buffer beyond ~62s retry time)
+          const CLOSING_ORDER_EXPIRY_MS = 4 * 60 * 1000; // 4 minutes (gives buffer beyond ~190s retry time)
+          const LIGHTER_ORDER_EXPIRY_MS = isClosing ? CLOSING_ORDER_EXPIRY_MS : OPENING_ORDER_EXPIRY_MS;
+          const expiredAt = Date.now() + LIGHTER_ORDER_EXPIRY_MS;
 
           this.logger.debug(
             `LIMIT order for ${request.symbol}: Using GTC/GTT (timeInForce=1) ` +
@@ -962,8 +971,8 @@ export class LighterExchangeAdapter
           // orderExpiry: For GTC orders (timeInForce = 1), orderExpiry cannot be 0
           // SDK code shows: wasmOrderExpiry = (timeInForce === IOC) ? 0 : orderExpiry
           // This means for GTC orders, orderExpiry must be a valid timestamp >= expiredAt
-          // Use expiredAt + 2 minutes for GTC orders (short expiry for trading bot)
-          const orderExpiry = expiredAt + 2 * 60 * 1000; // 2 minutes from expiredAt
+          // Keep orderExpiry same as expiredAt (both 5 minutes) for consistency
+          const orderExpiry = expiredAt; // Same as expiredAt (5 minutes)
 
           orderParams = {
             marketIndex,
@@ -1613,9 +1622,11 @@ export class LighterExchangeAdapter
 
         let cancelledCount = 0;
         for (const order of orders) {
-          const orderIndex = parseInt(
-            order.order_id || order.order_index || '0',
-          );
+          // Order indices can exceed Number.MAX_SAFE_INTEGER
+          // The SDK WASM expects a number - we use parseFloat which preserves more precision
+          // than parseInt for large numbers, then floor it
+          const orderIndexStr = String(order.order_id || order.order_index || '0');
+          const orderIndex = Math.floor(parseFloat(orderIndexStr));
           if (orderIndex <= 0) continue;
 
           try {
@@ -1670,7 +1681,7 @@ export class LighterExchangeAdapter
         return cancelledCount > 0;
       } else {
         // Numeric order index passed - cancel directly
-        const orderIndex = parseInt(orderId);
+        const orderIndex = Math.floor(parseFloat(orderId));
         if (isNaN(orderIndex) || orderIndex <= 0) {
           this.logger.error(`❌ Invalid order index: ${orderId}`);
           throw new ExchangeError(
@@ -1774,7 +1785,9 @@ export class LighterExchangeAdapter
       // Cancel each order individually (more reliable than cancelAllOrders which affects ALL markets)
       let cancelledCount = 0;
       for (const order of orders) {
-        const orderIndex = parseInt(order.order_id || order.order_index || '0');
+        // Use parseFloat then floor for large order indices
+        const orderIndexStr = String(order.order_id || order.order_index || '0');
+        const orderIndex = Math.floor(parseFloat(orderIndexStr));
         if (orderIndex <= 0) continue;
 
         try {
@@ -2334,7 +2347,7 @@ export class LighterExchangeAdapter
         );
 
         // Response structure: { code: 200, order_book_details: { bestBid: {...}, bestAsk: {...} } }
-        const orderBook = response?.order_book_details || response;
+        const orderBook = (response as any)?.order_book_details || response;
         const bestBid = orderBook?.bestBid || orderBook?.best_bid;
         const bestAsk = orderBook?.bestAsk || orderBook?.best_ask;
 

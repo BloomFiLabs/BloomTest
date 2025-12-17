@@ -2155,6 +2155,21 @@ export class OrderExecutor implements IOrderExecutor {
                 this.performanceLogger.recordTradingCosts(totalCosts);
               }
 
+              // Record break-even info for diagnostics
+              if (this.diagnosticsService && perpPerpPlan.estimatedCosts) {
+                const totalCosts = perpPerpPlan.estimatedCosts.total || 0;
+                const hourlyReturn = Math.abs(perpPerpPlan.expectedNetReturn);
+                const breakEvenHours =
+                  hourlyReturn > 0 ? totalCosts / hourlyReturn : 24;
+                this.diagnosticsService.recordPositionBreakEven(
+                  opportunity.symbol,
+                  opportunity.longExchange,
+                  breakEvenHours,
+                  totalCosts,
+                  hourlyReturn,
+                );
+              }
+
               this.logger.log(
                 `✅ [${i + 1}/${opportunities.length}] ${opportunity.symbol}: ` +
                   `$${perpPerpPlan.expectedNetReturn.toFixed(4)}/period`,
