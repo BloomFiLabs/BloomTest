@@ -705,33 +705,86 @@ export class LighterExchangeAdapter
           if (request.reduceOnly) {
             useCreateMarketOrder = true;
 
-            // Get current mark price for avgExecutionPrice
+            // Strategy for closing:
+            // - Attempt 0: Use mark price (candlesticks) for fair value
+            // - Attempt 1: Use actual order book at best bid/ask (no slippage)
+            // - Attempt 2+: Use order book with progressive slippage
             let avgExecutionPrice: number;
-            try {
-              const markPrice = await this.getMarkPrice(request.symbol);
-              avgExecutionPrice = markPrice;
-            } catch (priceError: any) {
-              // Fallback: try to get from order book
+
+            // Progressive slippage: starts at attempt 2
+            // [attempt 0 = mark, attempt 1 = book no slippage, attempt 2+ = book + slippage]
+            const priceImprovements = [0, 0, 0.001, 0.005, 0.01, 0.02, 0.05];
+            const priceImprovement =
+              priceImprovements[Math.min(attempt, priceImprovements.length - 1)];
+
+            if (attempt === 0) {
+              // First attempt: try mark price (fair value)
               try {
-                const orderBook = await this.orderApi!.getOrderBookDetails({
-                  marketIndex: marketIndex,
-                } as any);
-                avgExecutionPrice = isBuy
-                  ? parseFloat(orderBook.bestAsk?.price || '0')
-                  : parseFloat(orderBook.bestBid?.price || '0');
-              } catch (obError: any) {
-                throw new Error(
-                  `Failed to get price for closing position: ${priceError.message}`,
+                const markPrice = await this.getMarkPrice(request.symbol);
+                avgExecutionPrice = markPrice;
+                this.logger.debug(
+                  `Closing ${request.symbol}: using mark price $${markPrice.toFixed(6)}`,
                 );
+              } catch (priceError: any) {
+                // Mark price failed, fall back to order book immediately
+                this.logger.warn(
+                  `Mark price unavailable for ${request.symbol} close, using order book: ${priceError.message}`,
+                );
+                this.clearOrderBookCache(request.symbol);
+                const { bestBid, bestAsk } = await this.getOrderBookBidAsk(request.symbol);
+                avgExecutionPrice = isBuy ? bestAsk : bestBid;
+              }
+            } else if (attempt === 1) {
+              // Second attempt: use order book at best price (no slippage yet)
+              this.logger.warn(
+                `🔄 Closing retry ${attempt + 1}/${maxRetries} for ${request.symbol}: ` +
+                  `Using order book at best price (no slippage)`,
+              );
+              this.clearOrderBookCache(request.symbol);
+              
+              try {
+                const { bestBid, bestAsk } = await this.getOrderBookBidAsk(request.symbol);
+                avgExecutionPrice = isBuy ? bestAsk : bestBid;
+                this.logger.debug(
+                  `Order book for ${request.symbol} close: bestBid=${bestBid.toFixed(6)}, bestAsk=${bestAsk.toFixed(6)}, ` +
+                    `taking ${isBuy ? 'ask' : 'bid'} at $${avgExecutionPrice.toFixed(6)}`,
+                );
+              } catch (obError: any) {
+                // Order book failed, try mark price
+                this.logger.warn(
+                  `Order book unavailable for ${request.symbol} close, using mark price: ${obError.message}`,
+                );
+                avgExecutionPrice = await this.getMarkPrice(request.symbol);
+              }
+            } else {
+              // Subsequent retries: use order book with progressive slippage
+              this.logger.warn(
+                `🔄 Closing retry ${attempt + 1}/${maxRetries} for ${request.symbol}: ` +
+                  `Using order book with ${(priceImprovement * 100).toFixed(2)}% slippage`,
+              );
+              this.clearOrderBookCache(request.symbol);
+              
+              try {
+                const { bestBid, bestAsk } = await this.getOrderBookBidAsk(request.symbol);
+                avgExecutionPrice = isBuy ? bestAsk : bestBid;
+                this.logger.debug(
+                  `Order book for ${request.symbol} close: bestBid=${bestBid.toFixed(6)}, bestAsk=${bestAsk.toFixed(6)}, ` +
+                    `using ${isBuy ? 'ask' : 'bid'} = $${avgExecutionPrice.toFixed(6)}`,
+                );
+              } catch (obError: any) {
+                // Order book failed, try mark price
+                this.logger.warn(
+                  `Order book unavailable for ${request.symbol} close, using mark price: ${obError.message}`,
+                );
+                avgExecutionPrice = await this.getMarkPrice(request.symbol);
               }
             }
 
-            // Progressive price improvement for closing orders: worse prices on retries
-            const priceImprovements = [0, 0.001, 0.005, 0.01, 0.02, 0.05];
-            const priceImprovement =
-              priceImprovements[
-                Math.min(attempt, priceImprovements.length - 1)
-              ];
+            if (!avgExecutionPrice || avgExecutionPrice <= 0) {
+              throw new Error(
+                `Could not determine price for closing ${request.symbol}: avgExecutionPrice=${avgExecutionPrice}`,
+              );
+            }
 
             // Apply price improvement (worse price = better chance to fill)
             // For BUY (closing SHORT): worse = higher price
@@ -740,10 +793,10 @@ export class LighterExchangeAdapter
               ? avgExecutionPrice * (1 + priceImprovement)
               : avgExecutionPrice * (1 - priceImprovement);
 
-            if (attempt > 0) {
+            if (attempt > 1 && priceImprovement > 0) {
               this.logger.warn(
-                `🔄 Closing position retry ${attempt + 1}/${maxRetries} for ${request.symbol}: ` +
-                  `Using ${(priceImprovement * 100).toFixed(2)}% worse price (${adjustedPrice.toFixed(6)} vs ${avgExecutionPrice.toFixed(6)})`,
+                `🔄 Closing ${request.symbol}: Applying ${(priceImprovement * 100).toFixed(2)}% slippage ` +
+                  `($${adjustedPrice.toFixed(6)} vs base $${avgExecutionPrice.toFixed(6)})`,
               );
             }
 
@@ -786,64 +839,92 @@ export class LighterExchangeAdapter
             );
           } else {
             // For opening market orders, use createUnifiedOrder with idealPrice and maxSlippage
-            // Get current market price
-            let orderBook: any;
-            const orderBookMaxRetries = 5;
-            for (
-              let obAttempt = 0;
-              obAttempt < orderBookMaxRetries;
-              obAttempt++
-            ) {
+            // Strategy: 
+            // - Attempt 0: Use mark price (candlesticks) for fair price
+            // - Attempt 1: Use actual order book at best bid/ask (no slippage)
+            // - Attempt 2+: Use order book with progressive slippage
+            
+            let idealPrice: number;
+            
+            // Progressive price improvement: starts at attempt 2
+            // [attempt 0 = mark, attempt 1 = book no slippage, attempt 2+ = book + slippage]
+            const priceImprovements = [0, 0, 0.001, 0.005, 0.01, 0.02, 0.05];
+            const priceImprovement =
+              priceImprovements[Math.min(attempt, priceImprovements.length - 1)];
+
+            if (attempt === 0) {
+              // First attempt: try mark price (fair value)
               try {
-                if (obAttempt > 0) {
-                  const obDelay = Math.min(
-                    baseDelay * Math.pow(2, obAttempt - 1),
-                    maxDelay,
-                  );
-                  const obJitter = obDelay * 0.2 * (Math.random() * 2 - 1);
-                  const delay = Math.max(1000, obDelay + obJitter);
-                  this.logger.debug(
-                    `Retrying order book fetch (attempt ${obAttempt + 1}/${orderBookMaxRetries})`,
-                  );
-                  await new Promise((resolve) => setTimeout(resolve, delay));
-                }
-                orderBook = await this.orderApi!.getOrderBookDetails({
-                  marketIndex: marketIndex,
-                } as any);
-                break;
+                const markPrice = await this.getMarkPrice(request.symbol);
+                idealPrice = markPrice;
+                this.logger.debug(
+                  `Market order ${request.symbol}: using mark price $${markPrice.toFixed(6)}`,
+                );
+              } catch (markError: any) {
+                // Mark price failed, fall back to order book immediately
+                this.logger.warn(
+                  `Mark price unavailable for ${request.symbol}, using order book: ${markError.message}`,
+                );
+                this.clearOrderBookCache(request.symbol);
+                const { bestBid, bestAsk } = await this.getOrderBookBidAsk(request.symbol);
+                idealPrice = isBuy ? bestAsk : bestBid;
+              }
+            } else if (attempt === 1) {
+              // Second attempt: use order book at best price (no slippage yet)
+              this.logger.warn(
+                `🔄 Market order retry ${attempt + 1}/${maxRetries} for ${request.symbol}: ` +
+                  `Using order book at best price (no slippage)`,
+              );
+              this.clearOrderBookCache(request.symbol);
+              
+              try {
+                const { bestBid, bestAsk } = await this.getOrderBookBidAsk(request.symbol);
+                idealPrice = isBuy ? bestAsk : bestBid;
+                this.logger.debug(
+                  `Order book for ${request.symbol}: bestBid=${bestBid.toFixed(6)}, bestAsk=${bestAsk.toFixed(6)}, ` +
+                    `taking ${isBuy ? 'ask' : 'bid'} at $${idealPrice.toFixed(6)}`,
+                );
               } catch (obError: any) {
-                const obErrorMsg = obError?.message || String(obError);
-                const isObRateLimit =
-                  obErrorMsg.includes('Too Many Requests') ||
-                  obErrorMsg.includes('429') ||
-                  obErrorMsg.includes('rate limit');
-                if (isObRateLimit && obAttempt < orderBookMaxRetries - 1) {
-                  continue;
-                }
-                throw obError;
+                // Order book failed, try mark price
+                this.logger.warn(
+                  `Order book unavailable for ${request.symbol}, using mark price: ${obError.message}`,
+                );
+                idealPrice = await this.getMarkPrice(request.symbol);
+              }
+            } else {
+              // Subsequent retries: use order book with progressive slippage
+              this.logger.warn(
+                `🔄 Market order retry ${attempt + 1}/${maxRetries} for ${request.symbol}: ` +
+                  `Using order book with ${(priceImprovement * 100).toFixed(2)}% slippage`,
+              );
+              this.clearOrderBookCache(request.symbol);
+              
+              try {
+                const { bestBid, bestAsk } = await this.getOrderBookBidAsk(request.symbol);
+                // Apply slippage to take from the book
+                idealPrice = isBuy
+                  ? bestAsk * (1 + priceImprovement)
+                  : bestBid * (1 - priceImprovement);
+                  
+                this.logger.debug(
+                  `Order book for ${request.symbol}: bestBid=${bestBid.toFixed(6)}, bestAsk=${bestAsk.toFixed(6)}, ` +
+                    `using ${isBuy ? 'ask' : 'bid'} + ${(priceImprovement * 100).toFixed(2)}% = $${idealPrice.toFixed(6)}`,
+                );
+              } catch (obError: any) {
+                // Order book failed, try mark price + slippage
+                this.logger.warn(
+                  `Order book unavailable for ${request.symbol}, using mark price + slippage: ${obError.message}`,
+                );
+                const markPrice = await this.getMarkPrice(request.symbol);
+                idealPrice = isBuy
+                  ? markPrice * (1 + priceImprovement)
+                  : markPrice * (1 - priceImprovement);
               }
             }
 
-            // Progressive price improvement for market orders: worse prices on retries
-            const priceImprovements = [0, 0.001, 0.005, 0.01, 0.02, 0.05];
-            const priceImprovement =
-              priceImprovements[
-                Math.min(attempt, priceImprovements.length - 1)
-              ];
-
-            let idealPrice = isBuy
-              ? parseFloat(orderBook.bestAsk?.price || '0')
-              : parseFloat(orderBook.bestBid?.price || '0');
-
-            // Apply price improvement (worse price = better chance to fill)
-            idealPrice = isBuy
-              ? idealPrice * (1 + priceImprovement)
-              : idealPrice * (1 - priceImprovement);
-
-            if (attempt > 0) {
-              this.logger.warn(
-                `🔄 Market order retry ${attempt + 1}/${maxRetries} for ${request.symbol}: ` +
-                  `Using ${(priceImprovement * 100).toFixed(2)}% worse price`,
+            if (!idealPrice || idealPrice <= 0) {
+              throw new Error(
+                `Could not determine price for ${request.symbol}: idealPrice=${idealPrice}`,
               );
             }
 
@@ -2016,6 +2097,102 @@ export class LighterExchangeAdapter
   private priceCache: Map<string, { price: number; timestamp: number }> =
     new Map();
   private readonly PRICE_CACHE_TTL = 10000; // 10 seconds cache
+
+  // Order book cache: key = symbol, value = { bestBid, bestAsk, timestamp }
+  private orderBookCache: Map<
+    string,
+    { bestBid: number; bestAsk: number; timestamp: number }
+  > = new Map();
+  private readonly ORDER_BOOK_CACHE_TTL = 2000; // 2 seconds - short TTL for order execution
+
+  /**
+   * Get actual bid/ask prices from the order book using /api/v1/orderBookOrders
+   * This is more accurate than candlesticks for order execution
+   */
+  async getOrderBookBidAsk(
+    symbol: string,
+  ): Promise<{ bestBid: number; bestAsk: number }> {
+    // Check cache first (short TTL for execution accuracy)
+    const cached = this.orderBookCache.get(symbol);
+    if (cached && Date.now() - cached.timestamp < this.ORDER_BOOK_CACHE_TTL) {
+      return { bestBid: cached.bestBid, bestAsk: cached.bestAsk };
+    }
+
+    try {
+      await this.ensureInitialized();
+      const marketIndex = await this.getMarketIndex(symbol);
+      const baseUrl = this.config.baseUrl;
+
+      // Use the orderBookOrders endpoint - requires market_id and limit
+      const response = await axios.get(`${baseUrl}/api/v1/orderBookOrders`, {
+        params: {
+          market_id: marketIndex,
+          limit: 20,
+        },
+        timeout: 10000,
+      });
+
+      const data = response.data;
+      if (data.code !== 200) {
+        throw new Error(`API returned code ${data.code}: ${data.message || 'Unknown error'}`);
+      }
+
+      const bids = data.bids || [];
+      const asks = data.asks || [];
+
+      if (bids.length === 0 && asks.length === 0) {
+        throw new Error(`No orders in order book for ${symbol}`);
+      }
+
+      // Sort bids descending by price (highest bid first)
+      bids.sort(
+        (a: any, b: any) =>
+          parseFloat(b.price || '0') - parseFloat(a.price || '0'),
+      );
+      // Sort asks ascending by price (lowest ask first)
+      asks.sort(
+        (a: any, b: any) =>
+          parseFloat(a.price || '0') - parseFloat(b.price || '0'),
+      );
+
+      const bestBid = bids.length > 0 ? parseFloat(bids[0].price || '0') : 0;
+      const bestAsk = asks.length > 0 ? parseFloat(asks[0].price || '0') : 0;
+
+      if (bestBid <= 0 && bestAsk <= 0) {
+        throw new Error(`Invalid order book prices for ${symbol}: bid=${bestBid}, ask=${bestAsk}`);
+      }
+
+      // Cache the result
+      this.orderBookCache.set(symbol, {
+        bestBid,
+        bestAsk,
+        timestamp: Date.now(),
+      });
+
+      this.logger.debug(
+        `Order book for ${symbol}: bestBid=${bestBid.toFixed(6)}, bestAsk=${bestAsk.toFixed(6)}, ` +
+          `spread=${((bestAsk - bestBid) / bestBid * 100).toFixed(4)}%`,
+      );
+
+      return { bestBid, bestAsk };
+    } catch (error: any) {
+      this.logger.warn(
+        `Failed to get order book for ${symbol}: ${error.message}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Clear order book cache for a symbol (used before order execution)
+   */
+  clearOrderBookCache(symbol?: string): void {
+    if (symbol) {
+      this.orderBookCache.delete(symbol);
+    } else {
+      this.orderBookCache.clear();
+    }
+  }
 
   async getMarkPrice(symbol: string): Promise<number> {
     // Check cache first
