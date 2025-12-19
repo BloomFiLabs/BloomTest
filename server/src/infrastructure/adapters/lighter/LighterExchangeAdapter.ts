@@ -328,9 +328,9 @@ export class LighterExchangeAdapter
       const market = new MarketHelper(marketIndex, this.orderApi!);
 
       // Add retry logic with exponential backoff for market config fetch (rate limiting)
-      const maxRetries = 6;
-      const baseDelay = 2000; // 2 seconds base delay
-      const maxDelay = 60000; // 60 seconds max delay
+      const maxRetries = 8;
+      const baseDelay = 3000; // 3 seconds base delay
+      const maxDelay = 300000; // 5 minutes max delay
       let lastError: any = null;
 
       for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -947,32 +947,21 @@ export class LighterExchangeAdapter
             throw new Error('Limit price is required for LIMIT orders');
           }
 
-          // LIMIT orders always use GTC (Good Till Cancel/Time) - they can sit on the order book
-          // Only MARKET orders use IOC (Immediate Or Cancel) for immediate execution
-          // Note: We ignore request.timeInForce for LIMIT orders and always use GTC
-          // Lighter API mapping: 0 = IOC, 1 = GTC/GTT (Good Till Time)
-          const timeInForce = 1; // Always GTC/GTT (1) for LIMIT orders, regardless of request.timeInForce
-          // ALIGNED EXPIRY: Match order expiry to our retry logic wait time
-          // Opening orders: waitForOrderFill polls for ~62 seconds (10 retries with 2s base, 8s max backoff)
-          // Closing orders: waitForOrderFill polls for ~190 seconds (10 retries with 2s base, 32s max backoff)
-          // Set expiry slightly higher so orders auto-expire if we stop polling (avoids BigInt cancel bug)
-          // This avoids the Lighter SDK BigInt issue with large order indices on cancel
+          // orderExpiry: For GTC orders (timeInForce = 1), orderExpiry cannot be 0
+          // Lighter API expects Unix timestamp in SECONDS
           const isClosing = request.reduceOnly === true;
-          const OPENING_ORDER_EXPIRY_MS = 90 * 1000; // 90 seconds (gives buffer beyond ~62s retry time)
-          const CLOSING_ORDER_EXPIRY_MS = 4 * 60 * 1000; // 4 minutes (gives buffer beyond ~190s retry time)
-          const LIGHTER_ORDER_EXPIRY_MS = isClosing ? CLOSING_ORDER_EXPIRY_MS : OPENING_ORDER_EXPIRY_MS;
-          const expiredAt = Date.now() + LIGHTER_ORDER_EXPIRY_MS;
+          const OPENING_ORDER_EXPIRY_SEC = 90; // 90 seconds
+          const CLOSING_ORDER_EXPIRY_SEC = 240; // 4 minutes
+          const LIGHTER_ORDER_EXPIRY_SEC = isClosing ? CLOSING_ORDER_EXPIRY_SEC : OPENING_ORDER_EXPIRY_SEC;
+          
+          const nowInSeconds = Math.floor(Date.now() / 1000);
+          const orderExpiry = nowInSeconds + LIGHTER_ORDER_EXPIRY_SEC;
+          const expiredAt = orderExpiry; 
 
           this.logger.debug(
             `LIMIT order for ${request.symbol}: Using GTC/GTT (timeInForce=1) ` +
-              `(request.timeInForce was ${request.timeInForce === TimeInForce.IOC ? 'IOC' : request.timeInForce === TimeInForce.GTC ? 'GTC' : 'undefined'}, but LIMIT orders always use GTC)`,
+              `expiry=${orderExpiry} (${LIGHTER_ORDER_EXPIRY_SEC}s from now)`
           );
-
-          // orderExpiry: For GTC orders (timeInForce = 1), orderExpiry cannot be 0
-          // SDK code shows: wasmOrderExpiry = (timeInForce === IOC) ? 0 : orderExpiry
-          // This means for GTC orders, orderExpiry must be a valid timestamp >= expiredAt
-          // Keep orderExpiry same as expiredAt for consistency
-          const orderExpiry = expiredAt; // Same as expiredAt (90s opening / 4min closing)
 
           orderParams = {
             marketIndex,
@@ -983,7 +972,7 @@ export class LighterExchangeAdapter
             orderType: LighterOrderType.LIMIT,
             timeInForce, // 0 = IOC, 1 = GTC/GTT (Good Till Time)
             reduceOnly: request.reduceOnly ? 1 : 0, // Critical: must be 1 for closing orders
-            orderExpiry, // For GTC orders: expiredAt + 2 minutes (orderExpiry cannot be 0 for GTC)
+            orderExpiry, 
             expiredAt,
           };
         }
@@ -2222,14 +2211,14 @@ export class LighterExchangeAdapter
       // Method 0: Try candlesticks endpoint (proven to work reliably)
       // Using axios directly to avoid ES module import issues with @api/zklighter
       // Add retry logic for rate limiting (429 errors) with improved exponential backoff
-      const maxRetries = 6; // Increased from 3 to 6
-      const baseDelay = 2000; // 2 seconds base delay
-      const maxDelay = 60000; // 60 seconds max delay
+      const maxRetries = 8; // Increased from 6 to 8 for more aggressive backoff
+      const baseDelay = 3000; // 3 seconds base delay (was 2s)
+      const maxDelay = 300000; // 5 minutes max delay (was 60s)
 
       for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
           if (attempt > 0) {
-            // Exponential backoff with jitter: 2s, 4s, 8s, 16s, 32s, 60s (capped)
+            // Exponential backoff with jitter: 3s, 6s, 12s, 24s, 48s, 96s, 192s, 300s (capped)
             const exponentialDelay = Math.min(
               baseDelay * Math.pow(2, attempt - 1),
               maxDelay,
@@ -2695,14 +2684,14 @@ export class LighterExchangeAdapter
     const accountIndex = this.config.accountIndex!;
 
     // Retry logic for rate limiting (429 errors) with improved exponential backoff
-    const maxRetries = 6; // Increased from 3 to 6
-    const baseDelay = 2000; // 2 seconds base delay
-    const maxDelay = 60000; // 60 seconds max delay
+    const maxRetries = 8; // Increased from 6 to 8
+    const baseDelay = 3000; // 3 seconds base delay
+    const maxDelay = 300000; // 5 minutes max delay
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         if (attempt > 0) {
-          // Exponential backoff with jitter: 2s, 4s, 8s, 16s, 32s, 60s (capped)
+          // Exponential backoff with jitter: 3s, 6s, 12s, 24s, 48s, 96s, 192s, 300s (capped)
           const exponentialDelay = Math.min(
             baseDelay * Math.pow(2, attempt - 1),
             maxDelay,

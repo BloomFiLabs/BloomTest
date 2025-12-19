@@ -2538,6 +2538,24 @@ export class PerpKeeperScheduler implements OnModuleInit {
 
       const closeResponse = await adapter.placeOrder(closeOrder);
 
+      // Record closing costs (fees + slippage)
+      if (closeResponse.isSuccess()) {
+        const positionValue = position.size * (position.markPrice || 0);
+        // Estimate fees for market order (taker fee)
+        const exchangeType = position.exchangeType;
+        const takerFeeRate = this.config.getTakerFeeRate(exchangeType) || 0.0005;
+        const estimatedFees = positionValue * takerFeeRate;
+        
+        // Estimate market order slippage (0.1% conservative for market close)
+        const estimatedSlippage = positionValue * 0.001;
+        
+        this.performanceLogger.recordTradingCosts(estimatedFees + estimatedSlippage);
+        this.logger.debug(
+          `Recorded closing costs for ${position.symbol} on ${exchangeType}: ` +
+          `$${(estimatedFees + estimatedSlippage).toFixed(4)} (Fees: $${estimatedFees.toFixed(4)}, Slippage: $${estimatedSlippage.toFixed(4)})`
+        );
+      }
+
       // Wait and retry if order didn't fill immediately
       if (!closeResponse.isFilled() && closeResponse.orderId) {
         const maxRetries = 5;

@@ -715,31 +715,28 @@ export class PerpKeeperPerformanceLogger
     if (capitalDeployed === 0 || this.realizedFundingPayments.length === 0)
       return 0;
 
+    // Calculate NET realized profit (Funding + P&L - Trading Costs)
     const totalFunding = this.realizedFundingPayments.reduce(
       (sum, p) => sum + p.amount,
       0,
     );
+    const netProfit = totalFunding + this.totalRealizedPnl - this.totalTradingCosts;
     const runtimeDays = this.getRuntimeDays();
 
     if (runtimeDays === 0) return 0;
 
     // IMPORTANT: Don't extrapolate from very short periods - results are unreliable
     // Require at least 1 hour (1/24 day) of runtime for APY calculation
-    // For shorter periods, show the raw return rate without annualization
     const MIN_DAYS_FOR_APY = 1 / 24; // 1 hour
 
     if (runtimeDays < MIN_DAYS_FOR_APY) {
       // For very short periods, just show the current return rate (not annualized)
-      // This prevents misleading 100,000%+ APY numbers
-      const rawReturn = (totalFunding / capitalDeployed) * 100;
-      this.logger.debug(
-        `Runtime too short for APY (${(runtimeDays * 24 * 60).toFixed(1)}min) - showing raw return: ${rawReturn.toFixed(2)}%`,
-      );
+      const rawReturn = (netProfit / capitalDeployed) * 100;
       return rawReturn;
     }
 
     // Calculate daily return and annualize
-    const dailyReturn = totalFunding / capitalDeployed / runtimeDays;
+    const dailyReturn = netProfit / capitalDeployed / runtimeDays;
 
     // Cap APY at reasonable maximum to prevent misleading numbers
     // Even the best funding arb strategies rarely exceed 500% APY sustainably
@@ -801,18 +798,23 @@ export class PerpKeeperPerformanceLogger
 
     const netFundingCaptured = totalFundingCaptured - totalFundingPaid;
     const estimatedAPY = this.calculateEstimatedAPY();
-    const realizedAPY = this.calculateRealizedAPY(
-      capitalDeployed || totalPositionValue,
-    );
+    
+    // Determine the capital base for APY calculation
+    // Prefer capitalDeployed (actual collateral), fallback to estimated collateral if not provided
+    const defaultLeverage = 2.0;
+    const estimatedCollateral = totalPositionValue / defaultLeverage;
+    const capitalBase = capitalDeployed || (estimatedCollateral > 0 ? estimatedCollateral : totalPositionValue);
+
+    const realizedAPY = this.calculateRealizedAPY(capitalBase);
 
     // Calculate daily returns
     const estimatedDailyReturn =
       runtimeDays > 0
-        ? (estimatedAPY / 100 / 365) * (capitalDeployed || totalPositionValue)
+        ? (estimatedAPY / 100 / 365) * capitalBase
         : 0;
 
     const realizedDailyReturn =
-      runtimeDays > 0 ? netFundingCaptured / runtimeDays : 0;
+      runtimeDays > 0 ? (netFundingCaptured + this.totalRealizedPnl - this.totalTradingCosts) / runtimeDays : 0;
 
     // Calculate capital utilization
     const capitalUtilization =

@@ -346,9 +346,12 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
       const adjustedGrossAPY = adjustedSpread * periodsPerYear;
       const effectiveGrossAPY = adjustedGrossAPY;
 
-      // Total one-time costs amortized over a year
+      // Total one-time costs amortized over a target hold period
+      // Realistic hold period is around 7 days for funding arb positions
+      const holdPeriodDays = 7;
+      const holdPeriodHours = holdPeriodDays * 24;
       const totalOneTimeCosts = totalSlippageCost + totalFees;
-      const amortizedCostsPerHour = totalOneTimeCosts / periodsPerYear;
+      const amortizedCostsPerHour = totalOneTimeCosts / holdPeriodHours;
 
       // Calculate net return per hour using adjusted gross APY
       const grossReturnPerHour =
@@ -444,9 +447,13 @@ export class PortfolioOptimizer implements IPortfolioOptimizer {
         // Calculate hourly return for final position
         const finalHourlyReturn =
           (finalEffectiveGrossAPY / periodsPerYear) * finalTestPosition;
+        
+        // Use realistic hold period for break-even and penalty calculations
+        const holdPeriodDays = 7;
+        const holdPeriodHours = holdPeriodDays * 24;
         const breakEvenHours =
           finalHourlyReturn > 0
-            ? finalTotalOneTimeCosts / finalHourlyReturn
+            ? finalTotalOneTimeCosts / (finalHourlyReturn)
             : Infinity;
 
         // Volatility-based portfolio reduction factors
