@@ -947,20 +947,16 @@ export class LighterExchangeAdapter
             throw new Error('Limit price is required for LIMIT orders');
           }
 
-          // orderExpiry: For GTC orders (timeInForce = 1), orderExpiry cannot be 0
-          // Lighter API expects Unix timestamp in SECONDS
-          const isClosing = request.reduceOnly === true;
-          const OPENING_ORDER_EXPIRY_SEC = 90; // 90 seconds
-          const CLOSING_ORDER_EXPIRY_SEC = 240; // 4 minutes
-          const LIGHTER_ORDER_EXPIRY_SEC = isClosing ? CLOSING_ORDER_EXPIRY_SEC : OPENING_ORDER_EXPIRY_SEC;
-          
-          const nowInSeconds = Math.floor(Date.now() / 1000);
-          const orderExpiry = nowInSeconds + LIGHTER_ORDER_EXPIRY_SEC;
+          // ALIGNED EXPIRY: Lighter GTT orders require a MINIMUM of 10 minutes expiry.
+          // We use 15 minutes (900,000ms) to ensure we satisfy this requirement.
+          // The API expects a Unix timestamp in MILLISECONDS (13 digits).
+          const MIN_GTT_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
+          const orderExpiry = Date.now() + MIN_GTT_EXPIRY_MS;
           const expiredAt = orderExpiry; 
 
           this.logger.debug(
             `LIMIT order for ${request.symbol}: Using GTC/GTT (timeInForce=1) ` +
-              `expiry=${orderExpiry} (${LIGHTER_ORDER_EXPIRY_SEC}s from now)`
+              `expiry=${orderExpiry} (15 minutes from now)`
           );
 
           orderParams = {
