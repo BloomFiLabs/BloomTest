@@ -139,18 +139,7 @@ export class PerpKeeperService implements IPerpKeeperService {
           aster,
           lighter,
           hyperliquid,
-          extended,
-        ),
-      );
-      this.adapters.set(
-        ExchangeType.EXTENDED,
-        new MockExchangeAdapter(
-          this.configService,
-          ExchangeType.EXTENDED,
-          aster,
-          lighter,
-          hyperliquid,
-          extended,
+          null, // Disable extended in mock mode
         ),
       );
     } else {
@@ -176,13 +165,7 @@ export class PerpKeeperService implements IPerpKeeperService {
           'Hyperliquid adapter not available - will be created lazily if needed',
         );
       }
-      if (extendedAdapter) {
-        this.adapters.set(ExchangeType.EXTENDED, extendedAdapter);
-      } else {
-        this.logger.warn(
-          'Extended adapter not available - will be created lazily if needed',
-        );
-      }
+      // EXTENDED is disabled
     }
 
     // Initialize spot adapters
@@ -195,9 +178,7 @@ export class PerpKeeperService implements IPerpKeeperService {
     if (lighterSpotAdapter) {
       this.spotAdapters.set(ExchangeType.LIGHTER, lighterSpotAdapter);
     }
-    if (extendedSpotAdapter) {
-      this.spotAdapters.set(ExchangeType.EXTENDED, extendedSpotAdapter);
-    }
+    // EXTENDED spot is disabled
 
     this.logger.log(
       `PerpKeeperService initialized with ${this.adapters.size} perp adapters and ${this.spotAdapters.size} spot adapters`,

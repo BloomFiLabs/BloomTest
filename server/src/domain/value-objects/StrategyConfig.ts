@@ -257,14 +257,12 @@ export class StrategyConfig {
       [ExchangeType.HYPERLIQUID, Percentage.fromDecimal(0.00015)], // 0.0150% maker fee (tier 0)
       [ExchangeType.ASTER, Percentage.fromDecimal(0.00005)], // 0.0050% maker fee
       [ExchangeType.LIGHTER, Percentage.fromDecimal(0)], // 0% fees (no trading fees)
-      [ExchangeType.EXTENDED, Percentage.fromDecimal(0.0001)], // 0.01% maker fee
     ]);
 
     const takerFeeRates = new Map<ExchangeType, Percentage>([
       [ExchangeType.HYPERLIQUID, Percentage.fromDecimal(0.0002)], // 0.0200% taker fee (tier 0)
       [ExchangeType.ASTER, Percentage.fromDecimal(0.0004)], // 0.0400% taker fee
       [ExchangeType.LIGHTER, Percentage.fromDecimal(0)], // 0% fees (no trading fees)
-      [ExchangeType.EXTENDED, Percentage.fromDecimal(0.0002)], // 0.02% taker fee
     ]);
 
     return new StrategyConfig(

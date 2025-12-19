@@ -142,7 +142,6 @@ export class PerpKeeperPerformanceLogger
       ExchangeType.ASTER,
       ExchangeType.LIGHTER,
       ExchangeType.HYPERLIQUID,
-      ExchangeType.EXTENDED,
     ]) {
       this.exchangeMetrics.set(exchangeType, {
         exchangeType,

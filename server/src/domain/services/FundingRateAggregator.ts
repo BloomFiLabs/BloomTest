@@ -113,11 +113,6 @@ export class FundingRateAggregator {
       this.hyperliquidProvider,
     ];
 
-    // Add extended provider if available
-    if (this.extendedProvider) {
-      // Extended provider doesn't implement IFundingDataProvider yet, handle separately
-    }
-
     // Try to load cached symbols on construction
     this.loadCachedSymbols();
   }
@@ -396,8 +391,6 @@ export class FundingRateAggregator {
         return mapping.lighterMarketIndex;
       case ExchangeType.HYPERLIQUID:
         return mapping.hyperliquidSymbol;
-      case ExchangeType.EXTENDED:
-        return mapping.extendedSymbol;
       default:
         return undefined;
     }
@@ -445,10 +438,6 @@ export class FundingRateAggregator {
               exchangeSymbol: mapping.hyperliquidSymbol,
             }
           : null;
-      case ExchangeType.EXTENDED:
-        return mapping.extendedSymbol
-          ? { normalizedSymbol: symbol, exchangeSymbol: mapping.extendedSymbol }
-          : null;
       default:
         return null;
     }
@@ -477,68 +466,9 @@ export class FundingRateAggregator {
       })
       .filter((p): p is Promise<ExchangeFundingRate | null> => p !== null);
 
-    // Add Extended provider separately (doesn't implement IFundingDataProvider yet)
-    if (this.extendedProvider && mapping?.extendedSymbol) {
-      fetchPromises.push(
-        this.fetchExtendedFundingData(symbol, mapping.extendedSymbol).catch(
-          (error: any) => {
-            this.logger.debug(
-              `Failed to get Extended funding data for ${symbol}: ${error.message}`,
-            );
-            return null;
-          },
-        ),
-      );
-    }
-
     // Execute all fetches in parallel and filter out nulls
     const results = await Promise.all(fetchPromises);
     return results.filter((rate): rate is ExchangeFundingRate => rate !== null);
-  }
-
-  /**
-   * Fetch Extended exchange funding data (legacy method until Extended implements IFundingDataProvider)
-   */
-  private async fetchExtendedFundingData(
-    normalizedSymbol: string,
-    extendedSymbol: string,
-  ): Promise<ExchangeFundingRate | null> {
-    if (!this.extendedProvider) return null;
-
-    try {
-      const [currentRate, predictedRate, markPrice, openInterest] =
-        await Promise.all([
-          this.extendedProvider.getCurrentFundingRate(extendedSymbol),
-          this.extendedProvider.getPredictedFundingRate(extendedSymbol),
-          this.extendedProvider.getMarkPrice(extendedSymbol),
-          this.extendedProvider
-            .getOpenInterest(extendedSymbol)
-            .catch(() => undefined),
-        ]);
-
-      if (openInterest === undefined) {
-        this.logger.debug(
-          `Skipping Extended for ${normalizedSymbol} - OI unavailable`,
-        );
-        return null;
-      }
-
-      return {
-        exchange: ExchangeType.EXTENDED,
-        symbol: normalizedSymbol,
-        currentRate,
-        predictedRate,
-        markPrice,
-        openInterest,
-        volume24h: undefined,
-        timestamp: new Date(),
-      };
-    } catch (error: any) {
-      this.logger.debug(
-        `Failed to get Extended funding data for ${normalizedSymbol}: ${error.message}`,
-      );
-      return null;
-    }
   }
 
   /**
@@ -637,8 +567,6 @@ export class FundingRateAggregator {
                   return mapping.lighterMarketIndex !== undefined;
                 case ExchangeType.HYPERLIQUID:
                   return !!mapping.hyperliquidSymbol;
-                case ExchangeType.EXTENDED:
-                  return !!mapping.extendedSymbol;
                 default:
                   return false;
               }
