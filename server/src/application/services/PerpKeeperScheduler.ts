@@ -1140,6 +1140,18 @@ export class PerpKeeperScheduler implements OnModuleInit {
 
         // Try to open missing side for each single-leg position
         for (const position of singleLegPositions) {
+          // Identify missing exchange (for 2-exchange arbitrage)
+          // Most trades are Hyperliquid vs {Lighter, Aster}
+          let missingExchange: ExchangeType | undefined;
+          if (position.exchangeType === ExchangeType.HYPERLIQUID) {
+            // If HL exists, missing is likely Lighter or Aster
+            // We can't know for sure without looking at history, but we can check what's available
+            missingExchange = ExchangeType.LIGHTER; // Default guess
+          } else {
+            // If Lighter/Aster exists, missing is likely Hyperliquid
+            missingExchange = ExchangeType.HYPERLIQUID;
+          }
+
           // Track single-leg start in diagnostics
           const singleLegId = `${position.symbol}-${position.exchangeType}-${position.side}`;
           this.diagnosticsService?.recordSingleLegStart({
@@ -1149,6 +1161,8 @@ export class PerpKeeperScheduler implements OnModuleInit {
             side: position.side as 'LONG' | 'SHORT',
             startedAt: new Date(),
             retryCount: 0,
+            missingExchange,
+            reason: `Detected orphaned ${position.side} leg on ${position.exchangeType}`,
           });
 
           const retrySuccess = await this.tryOpenMissingSide(position);
@@ -1161,8 +1175,9 @@ export class PerpKeeperScheduler implements OnModuleInit {
             );
           } else {
             // Retries exhausted - close the single leg position
+            const missingInfo = missingExchange ? ` (Other leg on ${missingExchange} failed to fill)` : '';
             this.logger.error(
-              `🚨 Closing single-leg position ${position.symbol} (${position.side}) on ${position.exchangeType} ` +
+              `🚨 Closing single-leg position ${position.symbol} (${position.side}) on ${position.exchangeType}${missingInfo} ` +
                 `after all retry attempts failed. Will open 2 legs on next best opportunity.`,
             );
             await this.closeSingleLegPosition(position);

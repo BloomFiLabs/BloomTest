@@ -1635,6 +1635,35 @@ export class OrderExecutor implements IOrderExecutor {
             `SHORT (${opportunity.shortExchange}): ${shortErrorMsg}`,
         );
 
+        // Record single-leg failure for patterns if one leg succeeded
+        if (this.diagnosticsService) {
+          if (longResponse.isSuccess() && !shortResponse.isSuccess()) {
+            this.diagnosticsService.recordSingleLegFailure({
+              id: `sl-f-${opportunity.symbol}-${Date.now()}`,
+              symbol: opportunity.symbol,
+              timestamp: new Date(),
+              failedLeg: 'short',
+              failedExchange: opportunity.shortExchange!,
+              successfulExchange: opportunity.longExchange,
+              failureReason: shortResponse.status === OrderStatus.REJECTED ? 'order_rejected' : 'exchange_error',
+              failureMessage: shortErrorMsg,
+              timeBetweenLegsMs: 0,
+            });
+          } else if (!longResponse.isSuccess() && shortResponse.isSuccess()) {
+            this.diagnosticsService.recordSingleLegFailure({
+              id: `sl-f-${opportunity.symbol}-${Date.now()}`,
+              symbol: opportunity.symbol,
+              timestamp: new Date(),
+              failedLeg: 'long',
+              failedExchange: opportunity.longExchange,
+              successfulExchange: opportunity.shortExchange!,
+              failureReason: longResponse.status === OrderStatus.REJECTED ? 'order_rejected' : 'exchange_error',
+              failureMessage: longErrorMsg,
+              timeBetweenLegsMs: 0,
+            });
+          }
+        }
+
         return Result.failure(
           new OrderExecutionException(
             `Order execution failed: Long (${opportunity.longExchange}): ${longErrorMsg}, Short (${opportunity.shortExchange}): ${shortErrorMsg}`,

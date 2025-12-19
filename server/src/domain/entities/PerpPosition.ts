@@ -18,6 +18,7 @@ export class PerpPosition {
     public readonly marginUsed?: number, // Margin used in USD
     public readonly timestamp?: Date, // Position opened timestamp
     public readonly lastUpdated?: Date, // Last update timestamp
+    public readonly metadata?: Record<string, any>, // Additional metadata
   ) {
     // Validation
     if (size <= 0) {

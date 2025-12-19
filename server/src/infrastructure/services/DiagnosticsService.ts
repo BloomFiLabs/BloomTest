@@ -186,6 +186,8 @@ export interface SingleLegEvent {
   resolvedAt?: Date;
   retryCount: number;
   resolution?: 'FILLED' | 'CLOSED' | 'TIMEOUT';
+  missingExchange?: ExchangeType; // The exchange that failed to fill
+  reason?: string; // Reason for the single leg
 }
 
 /**
@@ -256,6 +258,8 @@ interface ActiveSingleLeg {
   side: 'LONG' | 'SHORT';
   ageMinutes: number;
   retries: number;
+  reason?: string;
+  missingExchange?: ExchangeType;
 }
 
 /**
@@ -880,6 +884,10 @@ export class DiagnosticsService {
     
     const bucket = this.getOrCreateCurrentBucket();
     bucket.singleLegs.started++;
+
+    const reasonStr = event.reason ? ` (Reason: ${event.reason})` : '';
+    const missingStr = event.missingExchange ? ` (Missing: ${event.missingExchange})` : '';
+    this.logger.warn(`🚨 Single-leg detected for ${event.symbol} on ${event.exchange}${reasonStr}${missingStr}`);
   }
 
   /**
@@ -929,10 +937,11 @@ export class DiagnosticsService {
       this.singleLegFailures.shift();
     }
 
+    const msgStr = event.failureMessage ? ` - ${event.failureMessage}` : '';
     this.logger.warn(
-      `Single-leg failure recorded: ${event.symbol} ` +
-      `${event.failedLeg} leg failed on ${event.failedExchange} ` +
-      `(reason: ${event.failureReason}, time between legs: ${event.timeBetweenLegsMs}ms)`,
+      `🚨 Single-leg failure recorded: ${event.symbol} ` +
+      `${event.failedLeg} leg failed on ${event.failedExchange} (Success: ${event.successfulExchange}) ` +
+      `[Reason: ${event.failureReason}${msgStr}]`
     );
   }
 
@@ -2145,6 +2154,8 @@ export class DiagnosticsService {
       side: sl.side,
       ageMinutes: Math.round((now - sl.startedAt.getTime()) / 60000),
       retries: sl.retryCount,
+      reason: sl.reason,
+      missingExchange: sl.missingExchange,
     }));
   }
 
