@@ -65,6 +65,18 @@ import { PerpSpotExecutionPlanBuilder } from '../../domain/services/strategy-rul
 import { PredictedBreakEvenCalculator } from '../../domain/services/strategy-rules/PredictedBreakEvenCalculator';
 import { StrategyConfig } from '../../domain/value-objects/StrategyConfig';
 import { SimpleEventBus } from '../events/SimpleEventBus';
+import { TWAPEngine } from '../../domain/services/TWAPEngine';
+import {
+  TWAPOrchestrator,
+  TWAPOptimizer,
+  TWAPSliceExecutor,
+  TWAPStateManager,
+  OrderBookCollector,
+  ExecutionAnalyticsTracker,
+  LiquidityProfileCalibrator,
+  ReplenishmentRateAnalyzer,
+  SlippageModelCalibrator,
+} from '../../domain/services/twap';
 import type { IEventBus } from '../../domain/events/DomainEvent';
 import type { IHistoricalFundingRateService } from '../../domain/ports/IHistoricalFundingRateService';
 import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTracker';
@@ -417,6 +429,18 @@ import { PredictionBacktester } from '../../domain/services/prediction/Predictio
     },
     SimpleEventBus, // Keep for backward compatibility
 
+    // TWAP Services
+    OrderBookCollector,
+    ExecutionAnalyticsTracker,
+    LiquidityProfileCalibrator,
+    ReplenishmentRateAnalyzer,
+    SlippageModelCalibrator,
+    TWAPOptimizer,
+    TWAPStateManager,
+    TWAPSliceExecutor,
+    TWAPOrchestrator,
+    TWAPEngine,
+
     // Domain services
     FundingRateAggregator,
     FundingArbitrageStrategy,
@@ -712,6 +736,10 @@ import { PredictionBacktester } from '../../domain/services/prediction/Predictio
     KalmanFilterEstimator,
     RegimeDetector,
     PredictionBacktester,
+    // TWAP services
+    TWAPEngine,
+    TWAPOrchestrator,
+    TWAPOptimizer,
   ],
 })
 export class PerpKeeperModule implements OnModuleInit {
@@ -725,6 +753,8 @@ export class PerpKeeperModule implements OnModuleInit {
     @Optional() private readonly rateLimiter?: RateLimiterService,
     @Optional() private readonly positionStateRepo?: PositionStateRepository,
     @Optional() private readonly marketQualityFilter?: MarketQualityFilter,
+    @Optional() private readonly orderBookCollector?: OrderBookCollector,
+    @Optional() private readonly perpKeeperService?: PerpKeeperService,
   ) {}
 
   /**
@@ -763,6 +793,13 @@ export class PerpKeeperModule implements OnModuleInit {
         );
         this.logger.log('Wired MarketQualityFilter into DiagnosticsService');
       }
+    }
+
+    // Initialize OrderBookCollector for TWAP data collection
+    if (this.orderBookCollector && this.perpKeeperService) {
+      const adapters = this.perpKeeperService.getExchangeAdapters();
+      this.orderBookCollector.initialize(adapters);
+      this.logger.log(`Initialized OrderBookCollector with ${adapters.size} adapters`);
     }
   }
 }

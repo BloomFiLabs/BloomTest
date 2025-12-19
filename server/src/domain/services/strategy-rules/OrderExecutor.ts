@@ -41,6 +41,7 @@ import {
   CircuitState,
 } from '../../../infrastructure/services/CircuitBreakerService';
 import { ExecutionLockService } from '../../../infrastructure/services/ExecutionLockService';
+import { TWAPEngine } from '../../services/TWAPEngine';
 import {
   ExecutionAnalytics,
   OrderExecutionMetrics,
@@ -93,6 +94,8 @@ export class OrderExecutor implements IOrderExecutor {
     private readonly circuitBreaker?: CircuitBreakerService,
     @Optional()
     private readonly executionLockService?: ExecutionLockService,
+    @Optional()
+    private readonly twapEngine?: TWAPEngine,
   ) {
     // Initialize execution analytics
     this.executionAnalytics = new ExecutionAnalytics();
@@ -1533,19 +1536,57 @@ export class OrderExecutor implements IOrderExecutor {
         );
       }
 
-      // Place orders (inside try block to use scaled orders)
-      const scaledSizeBaseAsset = longOrder.size;
-      this.logger.log(
-        `📤 Executing orders for ${opportunity.symbol}: ` +
-          `LONG ${scaledSizeBaseAsset.toFixed(4)} ($${actualPositionUsd.toFixed(2)}) on ${opportunity.longExchange}, ` +
-          `SHORT ${scaledSizeBaseAsset.toFixed(4)} ($${actualPositionUsd.toFixed(2)}) on ${opportunity.shortExchange}`,
-      );
+      // Determine if TWAP execution is needed for large positions
+      let useTWAP = false;
+      let twapStrategy: any = null;
 
-      // Place orders with intelligent execution strategy (sequential for Lighter, parallel otherwise)
+      if (this.twapEngine && actualPositionUsd >= 20000) {
+        this.logger.log(`🐘 Large position detected ($${actualPositionUsd.toFixed(0)}), evaluating TWAP execution...`);
+        const twapResult = await this.twapEngine.calculateOptimalStrategy(
+          opportunity.symbol,
+          actualPositionUsd,
+          opportunity.longExchange,
+          opportunity.shortExchange,
+          longAdapter,
+          shortAdapter
+        );
+
+        if (twapResult.isSuccess && twapResult.value.sliceCount > 1) {
+          useTWAP = true;
+          twapStrategy = twapResult.value;
+          this.logger.log(`✅ TWAP strategy confirmed: ${twapStrategy.sliceCount} slices over ${twapStrategy.totalDurationMinutes} minutes`);
+        }
+      }
+
+      // Place orders
       let longResponse: PerpOrderResponse;
       let shortResponse: PerpOrderResponse;
       let longError: any = null;
       let shortError: any = null;
+
+      if (useTWAP && this.twapEngine) {
+        this.logger.log(`🚀 Executing via TWAP Engine for ${opportunity.symbol}`);
+        const twapExecResult = await this.twapEngine.startExecution(
+          twapStrategy,
+          longAdapter,
+          shortAdapter,
+          leverage
+        );
+
+        if (twapExecResult.isSuccess) {
+          // TWAP started successfully - we count this as a success for the cycle
+          // even though it will continue in the background
+          result.opportunitiesExecuted = 1;
+          result.ordersPlaced = 2; // Initial slices
+          result.totalExpectedReturn = plan.expectedNetReturn;
+
+          this.logger.log(`✅ TWAP execution initiated for ${opportunity.symbol}`);
+          return Result.success(result);
+        } else {
+          this.logger.error(`❌ TWAP execution failed to start: ${twapExecResult.error.message}`);
+          return Result.failure(twapExecResult.error);
+        }
+      }
 
       try {
         // Use placeOrderPair which handles sequential vs parallel execution
