@@ -9,19 +9,7 @@ describe('CostCalculator', () => {
   let config: StrategyConfig;
 
   beforeEach(async () => {
-    const exchangeFeeRates = new Map([
-      [ExchangeType.HYPERLIQUID, 0.00015],
-      [ExchangeType.ASTER, 0.00005],
-      [ExchangeType.LIGHTER, 0],
-    ]);
-
-    const takerFeeRates = new Map([
-      [ExchangeType.HYPERLIQUID, 0.0002],
-      [ExchangeType.ASTER, 0.0004],
-      [ExchangeType.LIGHTER, 0],
-    ]);
-
-    config = new StrategyConfig(exchangeFeeRates, takerFeeRates);
+    config = StrategyConfig.withDefaults(2.0);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [

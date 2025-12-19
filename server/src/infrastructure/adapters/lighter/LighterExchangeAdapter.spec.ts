@@ -97,15 +97,15 @@ describe('LighterExchangeAdapter Nonce Handling', () => {
       const callOrder: string[] = [];
 
       // Create a mock order
-      const mockOrder: PerpOrderRequest = {
-        symbol: 'ETHUSDC',
-        side: OrderSide.LONG,
-        size: 0.1,
-        type: OrderType.LIMIT,
-        price: 3000,
-        timeInForce: TimeInForce.GTC,
-        reduceOnly: false,
-      };
+      const mockOrder = new PerpOrderRequest(
+        'ETHUSDC',
+        OrderSide.LONG,
+        OrderType.LIMIT,
+        0.1,
+        3000,
+        TimeInForce.GTC,
+        false,
+      );
 
       // Override placeOrder to track call order
       // We can't easily test the internal mutex without exposing it,
@@ -211,14 +211,15 @@ describe('LighterExchangeAdapter ReduceOnly Validation', () => {
       // Mock getPositions to return empty array
       jest.spyOn(adapter, 'getPositions').mockResolvedValue([]);
 
-      const reduceOnlyOrder: PerpOrderRequest = {
-        symbol: 'ETHUSDC',
-        side: OrderSide.SHORT, // Trying to close a non-existent LONG
-        size: 0.1,
-        type: OrderType.MARKET,
-        timeInForce: TimeInForce.IOC,
-        reduceOnly: true,
-      };
+      const reduceOnlyOrder = new PerpOrderRequest(
+        'ETHUSDC',
+        OrderSide.SHORT, // Trying to close a non-existent LONG
+        OrderType.MARKET,
+        0.1,
+        undefined,
+        TimeInForce.IOC,
+        true,
+      );
 
       await expect(adapter.placeOrder(reduceOnlyOrder)).rejects.toThrow(
         'Cannot place reduceOnly order: No position exists for ETHUSDC',
@@ -250,14 +251,15 @@ describe('LighterExchangeAdapter ReduceOnly Validation', () => {
         } as any,
       ]);
 
-      const wrongDirectionOrder: PerpOrderRequest = {
-        symbol: 'ETHUSDC',
-        side: OrderSide.LONG, // Wrong! Should be SHORT to close LONG
-        size: 0.5,
-        type: OrderType.MARKET,
-        timeInForce: TimeInForce.IOC,
-        reduceOnly: true,
-      };
+      const wrongDirectionOrder = new PerpOrderRequest(
+        'ETHUSDC',
+        OrderSide.LONG, // Wrong! Should be SHORT to close LONG
+        OrderType.MARKET,
+        0.5,
+        undefined,
+        TimeInForce.IOC,
+        true,
+      );
 
       await expect(adapter.placeOrder(wrongDirectionOrder)).rejects.toThrow(
         'Invalid reduceOnly direction: Position is LONG, order side is LONG, expected SHORT to close',
@@ -289,14 +291,15 @@ describe('LighterExchangeAdapter ReduceOnly Validation', () => {
         } as any,
       ]);
 
-      const wrongDirectionOrder: PerpOrderRequest = {
-        symbol: 'ETHUSDC',
-        side: OrderSide.SHORT, // Wrong! Should be LONG to close SHORT
-        size: 0.5,
-        type: OrderType.MARKET,
-        timeInForce: TimeInForce.IOC,
-        reduceOnly: true,
-      };
+      const wrongDirectionOrder = new PerpOrderRequest(
+        'ETHUSDC',
+        OrderSide.SHORT, // Wrong! Should be LONG to close SHORT
+        OrderType.MARKET,
+        0.5,
+        undefined,
+        TimeInForce.IOC,
+        true,
+      );
 
       await expect(adapter.placeOrder(wrongDirectionOrder)).rejects.toThrow(
         'Invalid reduceOnly direction: Position is SHORT, order side is SHORT, expected LONG to close',
@@ -321,14 +324,15 @@ describe('LighterExchangeAdapter ReduceOnly Validation', () => {
         } as any,
       ]);
 
-      const correctOrder: PerpOrderRequest = {
-        symbol: 'ETHUSDC',
-        side: OrderSide.SHORT, // Correct! SHORT to close LONG
-        size: 0.5,
-        type: OrderType.MARKET,
-        timeInForce: TimeInForce.IOC,
-        reduceOnly: true,
-      };
+      const correctOrder = new PerpOrderRequest(
+        'ETHUSDC',
+        OrderSide.SHORT, // Correct! SHORT to close LONG
+        OrderType.MARKET,
+        0.5,
+        undefined,
+        TimeInForce.IOC,
+        true,
+      );
 
       // The order should pass validation but may fail on actual placement
       // We're testing the validation logic, not the SDK interaction
@@ -368,14 +372,15 @@ describe('LighterExchangeAdapter ReduceOnly Validation', () => {
         } as any,
       ]);
 
-      const correctOrder: PerpOrderRequest = {
-        symbol: 'ETHUSDC',
-        side: OrderSide.LONG, // Correct! LONG to close SHORT
-        size: 0.5,
-        type: OrderType.MARKET,
-        timeInForce: TimeInForce.IOC,
-        reduceOnly: true,
-      };
+      const correctOrder = new PerpOrderRequest(
+        'ETHUSDC',
+        OrderSide.LONG, // Correct! LONG to close SHORT
+        OrderType.MARKET,
+        0.5,
+        undefined,
+        TimeInForce.IOC,
+        true,
+      );
 
       try {
         await adapter.placeOrder(correctOrder);
@@ -411,14 +416,15 @@ describe('LighterExchangeAdapter ReduceOnly Validation', () => {
         } as any,
       ]);
 
-      const orderWithDifferentFormat: PerpOrderRequest = {
-        symbol: 'ETHUSDC', // Different format than position
-        side: OrderSide.SHORT,
-        size: 0.5,
-        type: OrderType.MARKET,
-        timeInForce: TimeInForce.IOC,
-        reduceOnly: true,
-      };
+      const orderWithDifferentFormat = new PerpOrderRequest(
+        'ETHUSDC', // Different format than position
+        OrderSide.SHORT,
+        OrderType.MARKET,
+        0.5,
+        undefined,
+        TimeInForce.IOC,
+        true, // reduceOnly
+      );
 
       // Should NOT throw "no position exists" because symbols should match after normalization
       try {
@@ -446,14 +452,15 @@ describe('LighterExchangeAdapter ReduceOnly Validation', () => {
         } as any,
       ]);
 
-      const oversizedOrder: PerpOrderRequest = {
-        symbol: 'ETHUSDC',
-        side: OrderSide.SHORT,
-        size: 0.5, // Larger than position
-        type: OrderType.MARKET,
-        timeInForce: TimeInForce.IOC,
-        reduceOnly: true,
-      };
+      const oversizedOrder = new PerpOrderRequest(
+        'ETHUSDC',
+        OrderSide.SHORT,
+        OrderType.MARKET,
+        0.5, // Larger than position
+        undefined,
+        TimeInForce.IOC,
+        true, // reduceOnly
+      );
 
       // Should be rejected with error about size mismatch to force caller to retry with correct size
       await expect(adapter.placeOrder(oversizedOrder)).rejects.toThrow(

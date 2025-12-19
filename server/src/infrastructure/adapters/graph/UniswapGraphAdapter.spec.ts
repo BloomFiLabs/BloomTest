@@ -106,10 +106,10 @@ describe('UniswapGraphAdapter', () => {
       await adapter.getPoolFeeTier(upperCaseAddress);
 
       // Check that the request was called with lowercase address
-      const callArgs = mockClient.request.mock.calls[0];
+      const callArgs = mockClient.request.mock.calls[0] as any;
       expect(callArgs).toBeDefined();
-      expect(callArgs.length).toBeGreaterThanOrEqual(2);
-      const variables = callArgs[1];
+      // The request function may be called with (query, variables) or a single options object
+      const variables = callArgs.length > 1 ? callArgs[1] : callArgs[0]?.variables;
       expect(variables).toHaveProperty('pool', upperCaseAddress.toLowerCase());
     });
   });

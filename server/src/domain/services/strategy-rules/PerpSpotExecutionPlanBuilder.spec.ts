@@ -62,6 +62,7 @@ describe('PerpSpotExecutionPlanBuilder', () => {
       longExchange: ExchangeType.HYPERLIQUID,
       spotExchange: ExchangeType.HYPERLIQUID,
       longRate: Percentage.fromDecimal(0.0001), // Positive funding
+      shortRate: Percentage.fromDecimal(0), // Required field
       spread: Percentage.fromDecimal(0.0001),
       expectedReturn: Percentage.fromDecimal(0.876), // Annualized
       timestamp: new Date(),
@@ -104,6 +105,7 @@ describe('PerpSpotExecutionPlanBuilder', () => {
         longExchange: ExchangeType.HYPERLIQUID,
         spotExchange: ExchangeType.HYPERLIQUID,
         longRate: Percentage.fromDecimal(-0.0001), // Negative funding
+        shortRate: Percentage.fromDecimal(0),
         spread: Percentage.fromDecimal(0.0001),
         expectedReturn: Percentage.fromDecimal(0.876),
         timestamp: new Date(),
@@ -182,6 +184,7 @@ describe('PerpSpotExecutionPlanBuilder', () => {
         longExchange: ExchangeType.HYPERLIQUID,
         spotExchange: ExchangeType.ASTER, // Different exchange
         longRate: Percentage.fromDecimal(0.0001),
+        shortRate: Percentage.fromDecimal(0),
         spread: Percentage.fromDecimal(0.0001),
         expectedReturn: Percentage.fromDecimal(0.876),
         timestamp: new Date(),
@@ -221,7 +224,7 @@ describe('PerpSpotExecutionPlanBuilder', () => {
         // Or spot capacity: 2000
         // Min of these = 1000
         const expectedSize = 1000 / 3000; // positionValue / markPrice
-        expect(plan.positionSize.toDecimal()).toBeCloseTo(expectedSize, 2);
+        expect(plan.positionSize.toBaseAsset()).toBeCloseTo(expectedSize, 2);
       }
     });
   });

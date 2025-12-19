@@ -719,13 +719,13 @@ export class LighterExchangeAdapter
 
             if (attempt === 0) {
               // First attempt: try mark price (fair value)
-              try {
-                const markPrice = await this.getMarkPrice(request.symbol);
-                avgExecutionPrice = markPrice;
+            try {
+              const markPrice = await this.getMarkPrice(request.symbol);
+              avgExecutionPrice = markPrice;
                 this.logger.debug(
                   `Closing ${request.symbol}: using mark price $${markPrice.toFixed(6)}`,
                 );
-              } catch (priceError: any) {
+            } catch (priceError: any) {
                 // Mark price failed, fall back to order book immediately
                 this.logger.warn(
                   `Mark price unavailable for ${request.symbol} close, using order book: ${priceError.message}`,
@@ -857,14 +857,14 @@ export class LighterExchangeAdapter
               try {
                 const markPrice = await this.getMarkPrice(request.symbol);
                 idealPrice = markPrice;
-                this.logger.debug(
+                  this.logger.debug(
                   `Market order ${request.symbol}: using mark price $${markPrice.toFixed(6)}`,
                 );
               } catch (markError: any) {
                 // Mark price failed, fall back to order book immediately
                 this.logger.warn(
                   `Mark price unavailable for ${request.symbol}, using order book: ${markError.message}`,
-                );
+                  );
                 this.clearOrderBookCache(request.symbol);
                 const { bestBid, bestAsk } = await this.getOrderBookBidAsk(request.symbol);
                 idealPrice = isBuy ? bestAsk : bestBid;
@@ -902,17 +902,17 @@ export class LighterExchangeAdapter
               try {
                 const { bestBid, bestAsk } = await this.getOrderBookBidAsk(request.symbol);
                 // Apply slippage to take from the book
-                idealPrice = isBuy
+            idealPrice = isBuy
                   ? bestAsk * (1 + priceImprovement)
                   : bestBid * (1 - priceImprovement);
-                  
+
                 this.logger.debug(
                   `Order book for ${request.symbol}: bestBid=${bestBid.toFixed(6)}, bestAsk=${bestAsk.toFixed(6)}, ` +
                     `using ${isBuy ? 'ask' : 'bid'} + ${(priceImprovement * 100).toFixed(2)}% = $${idealPrice.toFixed(6)}`,
                 );
               } catch (obError: any) {
                 // Order book failed, try mark price + slippage
-                this.logger.warn(
+              this.logger.warn(
                   `Order book unavailable for ${request.symbol}, using mark price + slippage: ${obError.message}`,
                 );
                 const markPrice = await this.getMarkPrice(request.symbol);
@@ -971,8 +971,8 @@ export class LighterExchangeAdapter
           // orderExpiry: For GTC orders (timeInForce = 1), orderExpiry cannot be 0
           // SDK code shows: wasmOrderExpiry = (timeInForce === IOC) ? 0 : orderExpiry
           // This means for GTC orders, orderExpiry must be a valid timestamp >= expiredAt
-          // Keep orderExpiry same as expiredAt (both 5 minutes) for consistency
-          const orderExpiry = expiredAt; // Same as expiredAt (5 minutes)
+          // Keep orderExpiry same as expiredAt for consistency
+          const orderExpiry = expiredAt; // Same as expiredAt (90s opening / 4min closing)
 
           orderParams = {
             marketIndex,
@@ -1785,9 +1785,7 @@ export class LighterExchangeAdapter
       // Cancel each order individually (more reliable than cancelAllOrders which affects ALL markets)
       let cancelledCount = 0;
       for (const order of orders) {
-        // Use parseFloat then floor for large order indices
-        const orderIndexStr = String(order.order_id || order.order_index || '0');
-        const orderIndex = Math.floor(parseFloat(orderIndexStr));
+        const orderIndex = parseInt(order.order_id || order.order_index || '0');
         if (orderIndex <= 0) continue;
 
         try {

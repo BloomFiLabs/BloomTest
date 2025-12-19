@@ -74,6 +74,7 @@ describe('ExecutionPlanBuilder', () => {
   describe('buildPlan', () => {
     const createMockOpportunity = (): ArbitrageOpportunity => ({
       symbol: 'ETHUSDT',
+      strategyType: 'perp-perp',
       longExchange: ExchangeType.LIGHTER,
       shortExchange: ExchangeType.ASTER,
       longRate: Percentage.fromDecimal(0.0003),
@@ -229,11 +230,11 @@ describe('ExecutionPlanBuilder', () => {
       const lighterAdapter = mockAdapters.get(ExchangeType.LIGHTER)!;
 
       // Mock getBestBidAsk so it doesn't fall back to getMarkPrice
-      asterAdapter.getBestBidAsk = jest.fn().mockResolvedValue({
+      (asterAdapter as any).getBestBidAsk = jest.fn().mockResolvedValue({
         bestBid: 2999,
         bestAsk: 3001,
       });
-      lighterAdapter.getBestBidAsk = jest.fn().mockResolvedValue({
+      (lighterAdapter as any).getBestBidAsk = jest.fn().mockResolvedValue({
         bestBid: 3000,
         bestAsk: 3002,
       });
@@ -299,12 +300,7 @@ describe('ExecutionPlanBuilder', () => {
       mockCostCalculator.calculateSlippageCost.mockReturnValue(0.5);
       mockCostCalculator.calculateFees.mockReturnValue(0.5);
       mockCostCalculator.predictFundingRateImpact.mockReturnValue(0);
-      mockCostCalculator.calculateBreakEvenHours.mockReturnValue({
-        breakEvenHours: 1,
-        feesEarnedSoFar: 0,
-        remainingCost: 0,
-        hoursHeld: 0,
-      });
+      mockCostCalculator.calculateBreakEvenHours.mockReturnValue(1);
 
       const result = await builder.buildPlan(
         opportunity,
@@ -350,26 +346,26 @@ describe('ExecutionPlanBuilder', () => {
       const opportunity = createMockOpportunity();
       const asterAdapter = mockAdapters.get(ExchangeType.ASTER)!;
       // Add getBestBidAsk method if not present
-      if (!asterAdapter.getBestBidAsk) {
-        asterAdapter.getBestBidAsk = jest.fn().mockResolvedValue({
+      if (!(asterAdapter as any).getBestBidAsk) {
+        (asterAdapter as any).getBestBidAsk = jest.fn().mockResolvedValue({
           bestBid: 2999,
           bestAsk: 3001,
         });
       } else {
-        asterAdapter.getBestBidAsk.mockResolvedValue({
+        (asterAdapter as any).getBestBidAsk.mockResolvedValue({
           bestBid: 2999,
           bestAsk: 3001,
         });
       }
 
       const lighterAdapter = mockAdapters.get(ExchangeType.LIGHTER)!;
-      if (!lighterAdapter.getBestBidAsk) {
-        lighterAdapter.getBestBidAsk = jest.fn().mockResolvedValue({
+      if (!(lighterAdapter as any).getBestBidAsk) {
+        (lighterAdapter as any).getBestBidAsk = jest.fn().mockResolvedValue({
           bestBid: 3000,
           bestAsk: 3002,
         });
       } else {
-        lighterAdapter.getBestBidAsk.mockResolvedValue({
+        (lighterAdapter as any).getBestBidAsk.mockResolvedValue({
           bestBid: 3000,
           bestAsk: 3002,
         });
@@ -424,6 +420,7 @@ describe('ExecutionPlanBuilder', () => {
   describe('buildPlanWithAllocation', () => {
     const createMockOpportunity = (): ArbitrageOpportunity => ({
       symbol: 'ETHUSDT',
+      strategyType: 'perp-perp',
       longExchange: ExchangeType.LIGHTER,
       shortExchange: ExchangeType.ASTER,
       longRate: Percentage.fromDecimal(0.0003),

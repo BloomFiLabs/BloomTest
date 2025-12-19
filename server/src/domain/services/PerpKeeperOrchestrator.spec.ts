@@ -3,6 +3,7 @@ import { PerpKeeperOrchestrator } from './PerpKeeperOrchestrator';
 import { FundingRateAggregator } from './FundingRateAggregator';
 import { FundingArbitrageStrategy } from './FundingArbitrageStrategy';
 import { ExchangeType } from '../value-objects/ExchangeConfig';
+import { Percentage } from '../value-objects/Percentage';
 import {
   PerpOrderRequest,
   OrderSide,
@@ -112,12 +113,13 @@ describe('PerpKeeperOrchestrator', () => {
       mockAggregator.findAllOpportunities.mockResolvedValue([
         {
           symbol: 'ETHUSDT',
+          strategyType: 'perp-perp',
           longExchange: ExchangeType.LIGHTER,
           shortExchange: ExchangeType.ASTER,
-          longRate: 0.0003,
-          shortRate: 0.0001,
-          spread: 0.0002,
-          expectedReturn: 0.219,
+          longRate: Percentage.fromDecimal(0.0003),
+          shortRate: Percentage.fromDecimal(0.0001),
+          spread: Percentage.fromDecimal(0.0002),
+          expectedReturn: Percentage.fromDecimal(0.219),
           timestamp: new Date(),
         },
       ]);

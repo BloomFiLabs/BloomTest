@@ -135,7 +135,9 @@ describe('PerpSpotBalanceManager', () => {
       );
 
       expect(result.isSuccess).toBe(true);
-      expect(result.value).toBe(true);
+      if (result.isSuccess) {
+        expect(result.value).toBe(true);
+      }
       expect(mockSpotAdapter.transferInternal).toHaveBeenCalled();
     });
 
@@ -152,7 +154,9 @@ describe('PerpSpotBalanceManager', () => {
       );
 
       expect(result.isSuccess).toBe(true);
-      expect(result.value).toBe(false);
+      if (result.isSuccess) {
+        expect(result.value).toBe(false);
+      }
       expect(mockSpotAdapter.transferInternal).not.toHaveBeenCalled();
     });
 
@@ -173,7 +177,9 @@ describe('PerpSpotBalanceManager', () => {
 
       // Should return success=false but not throw
       expect(result.isSuccess).toBe(true);
-      expect(result.value).toBe(false);
+      if (result.isSuccess) {
+        expect(result.value).toBe(false);
+      }
     });
   });
 });

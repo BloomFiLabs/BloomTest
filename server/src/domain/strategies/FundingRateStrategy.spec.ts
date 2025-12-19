@@ -6,6 +6,7 @@ import {
   IExecutableStrategy,
   StrategyExecutionResult,
 } from './IExecutableStrategy';
+import { createEmptyContext } from '../services/MarketDataContext';
 
 // Mock interfaces for dependencies
 interface MockFundingDataProvider {
@@ -95,7 +96,7 @@ describe('FundingRateStrategy', () => {
     it('should skip execution when disabled', async () => {
       strategy.setEnabled(false);
 
-      const result = await strategy.execute();
+      const result = await strategy.execute(createEmptyContext());
 
       expect(result.executed).toBe(false);
       expect(result.reason).toContain('disabled');
@@ -113,7 +114,7 @@ describe('FundingRateStrategy', () => {
       mockExecutor.getEquity.mockResolvedValue(10000);
       mockExecutor.placeOrder.mockResolvedValue('0xabc123');
 
-      const result = await strategy.execute();
+      const result = await strategy.execute(createEmptyContext());
 
       expect(result.executed).toBe(true);
       expect(result.action).toBe('OPEN_SHORT');
@@ -137,7 +138,7 @@ describe('FundingRateStrategy', () => {
       mockExecutor.getEquity.mockResolvedValue(10000);
       mockExecutor.placeOrder.mockResolvedValue('0xdef456');
 
-      const result = await strategy.execute();
+      const result = await strategy.execute(createEmptyContext());
 
       expect(result.executed).toBe(true);
       expect(result.action).toBe('OPEN_LONG');
@@ -160,7 +161,7 @@ describe('FundingRateStrategy', () => {
       });
       mockExecutor.getEquity.mockResolvedValue(10000);
 
-      const result = await strategy.execute();
+      const result = await strategy.execute(createEmptyContext());
 
       expect(result.executed).toBe(false);
       expect(result.reason).toContain('below threshold');
@@ -180,7 +181,7 @@ describe('FundingRateStrategy', () => {
       });
       mockExecutor.getEquity.mockResolvedValue(10000);
 
-      const result = await strategy.execute();
+      const result = await strategy.execute(createEmptyContext());
 
       expect(result.executed).toBe(false);
       expect(result.action).toBe('HOLD');
@@ -201,7 +202,7 @@ describe('FundingRateStrategy', () => {
       mockExecutor.getEquity.mockResolvedValue(10000);
       mockExecutor.closePosition.mockResolvedValue('0xclose123');
 
-      const result = await strategy.execute();
+      const result = await strategy.execute(createEmptyContext());
 
       expect(result.executed).toBe(true);
       expect(result.action).toBe('CLOSE_POSITION');
@@ -221,7 +222,7 @@ describe('FundingRateStrategy', () => {
       mockExecutor.closePosition.mockResolvedValue('0xclose123');
       mockExecutor.placeOrder.mockResolvedValue('0xflip456');
 
-      const result = await strategy.execute();
+      const result = await strategy.execute(createEmptyContext());
 
       expect(result.executed).toBe(true);
       expect(result.action).toBe('FLIP_TO_LONG');

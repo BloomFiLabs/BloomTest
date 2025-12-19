@@ -292,6 +292,7 @@ describe('BalanceManager', () => {
   describe('attemptRebalanceForOpportunity', () => {
     const createMockOpportunity = (): ArbitrageOpportunity => ({
       symbol: 'ETHUSDT',
+      strategyType: 'perp-perp',
       longExchange: ExchangeType.LIGHTER,
       shortExchange: ExchangeType.ASTER,
       longRate: Percentage.fromDecimal(0.0003),

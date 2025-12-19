@@ -52,10 +52,10 @@ import { ethers } from 'ethers';
 describe('HyperliquidSpotAdapter', () => {
   let adapter: HyperliquidSpotAdapter;
   let mockConfigService: jest.Mocked<ConfigService>;
-  let mockTransport: jest.Mocked<HttpTransport>;
-  let mockExchangeClient: jest.Mocked<ExchangeClient>;
-  let mockInfoClient: jest.Mocked<InfoClient>;
-  let mockSymbolConverter: jest.Mocked<SymbolConverter>;
+  let mockTransport: any;
+  let mockExchangeClient: any;
+  let mockInfoClient: any;
+  let mockSymbolConverter: any;
   let mockWallet: any;
 
   beforeEach(async () => {
@@ -88,7 +88,7 @@ describe('HyperliquidSpotAdapter', () => {
     (HttpTransport as jest.Mock).mockImplementation(() => mockTransport);
     (ExchangeClient as jest.Mock).mockImplementation(() => mockExchangeClient);
     (InfoClient as jest.Mock).mockImplementation(() => mockInfoClient);
-    (ethers.Wallet as jest.Mock).mockImplementation(() => mockWallet);
+    (ethers.Wallet as unknown as jest.Mock).mockImplementation(() => mockWallet);
 
     mockConfigService = {
       get: jest.fn((key: string) => {
@@ -129,7 +129,7 @@ describe('HyperliquidSpotAdapter', () => {
       mockSymbolConverter.getAssetId.mockReturnValue(0);
       mockSymbolConverter.getSzDecimals.mockReturnValue(4);
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': { bid: '3000', ask: '3001' },
+        'ETH-SPOT': '3000.5',
       });
 
       mockExchangeClient.placeOrder.mockResolvedValue({
@@ -202,7 +202,7 @@ describe('HyperliquidSpotAdapter', () => {
       mockSymbolConverter.getAssetId.mockReturnValue(0);
       mockSymbolConverter.getSzDecimals.mockReturnValue(4);
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': { bid: '3000', ask: '3001' },
+        'ETH-SPOT': '3000.5',
       });
 
       mockExchangeClient.placeOrder.mockResolvedValue({
@@ -245,7 +245,7 @@ describe('HyperliquidSpotAdapter', () => {
       // Mock allMids for getSpotPrice call (called internally by getSpotPositions)
       // getSpotPrice is called with 'ETH-SPOT' (the coin from spotBalances)
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': { bid: '3000', ask: '3001' },
+        'ETH-SPOT': '3000.5',
       });
 
       // getSpotPosition('ETH') will call getSpotPositions() which returns positions with symbol 'ETH-SPOT'
@@ -288,8 +288,8 @@ describe('HyperliquidSpotAdapter', () => {
         ],
       });
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': { bid: '3000', ask: '3001' },
-        'BTC-SPOT': { bid: '50000', ask: '50001' },
+        'ETH-SPOT': '3000.5',
+        'BTC-SPOT': '50000.5',
       });
 
       const positions = await adapter.getSpotPositions();
@@ -398,7 +398,7 @@ describe('HyperliquidSpotAdapter', () => {
   describe('getSpotPrice', () => {
     it('should return spot price from allMids', async () => {
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': { bid: '3000', ask: '3001' },
+        'ETH-SPOT': '3000.5',
       });
 
       const price = await adapter.getSpotPrice('ETH');
@@ -486,7 +486,7 @@ describe('HyperliquidSpotAdapter', () => {
       mockSymbolConverter.getAssetId.mockReturnValue(0);
       mockSymbolConverter.getSzDecimals.mockReturnValue(4);
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': { bid: '3000', ask: '3001' },
+        'ETH-SPOT': '3000.5',
       });
       mockExchangeClient.placeOrder.mockResolvedValue({
         response: {
@@ -522,7 +522,7 @@ describe('HyperliquidSpotAdapter', () => {
       mockSymbolConverter.getAssetId.mockReturnValue(0);
       mockSymbolConverter.getSzDecimals.mockReturnValue(4);
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': { bid: '3000', ask: '3001' },
+        'ETH-SPOT': '3000.5',
       });
       mockExchangeClient.placeOrder.mockResolvedValue({
         response: {
@@ -557,7 +557,7 @@ describe('HyperliquidSpotAdapter', () => {
       mockSymbolConverter.getAssetId.mockReturnValue(0);
       mockSymbolConverter.getSzDecimals.mockReturnValue(4);
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': { bid: '3000', ask: '3001' },
+        'ETH-SPOT': '3000.5',
       });
       mockExchangeClient.placeOrder.mockResolvedValue({
         response: {
@@ -620,7 +620,7 @@ describe('HyperliquidSpotAdapter', () => {
       mockSymbolConverter.getAssetId.mockReturnValue(0);
       mockSymbolConverter.getSzDecimals.mockReturnValue(4);
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': { bid: '3000', ask: '3001' },
+        'ETH-SPOT': '3000.5',
       });
       mockExchangeClient.placeOrder.mockResolvedValue({
         response: {
@@ -692,7 +692,7 @@ describe('HyperliquidSpotAdapter', () => {
       mockSymbolConverter.getAssetId.mockReturnValue(0);
       mockSymbolConverter.getSzDecimals.mockReturnValue(4);
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': { bid: '3000', ask: '3001' },
+        'ETH-SPOT': '3000.5',
       });
       mockExchangeClient.placeOrder.mockResolvedValue({
         response: {
@@ -770,7 +770,7 @@ describe('HyperliquidSpotAdapter', () => {
       mockSymbolConverter.getAssetId.mockReturnValue(0);
       mockSymbolConverter.getSzDecimals.mockReturnValue(4);
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': { bid: '3000', ask: '3001' },
+        'ETH-SPOT': '3000.5',
       });
 
       mockExchangeClient.placeOrder.mockResolvedValue({
@@ -847,7 +847,7 @@ describe('HyperliquidSpotAdapter', () => {
       mockSymbolConverter.getAssetId.mockReturnValue(0);
       mockSymbolConverter.getSzDecimals.mockReturnValue(4);
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': { bid: '3000', ask: '3001' },
+        'ETH-SPOT': '3000.5',
       });
       mockExchangeClient.placeOrder.mockResolvedValue({
         response: {
@@ -899,7 +899,7 @@ describe('HyperliquidSpotAdapter', () => {
         ],
       });
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': { bid: '3000', ask: '3001' },
+        'ETH-SPOT': '3000.5',
       });
 
       const positions = await adapter.getSpotPositions();

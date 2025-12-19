@@ -293,9 +293,9 @@ export interface DiagnosticsResponse {
   };
   singleLegs: {
     active: ActiveSingleLeg[];
-    stats: {
-      last1h: number;
-      last24h: number;
+    stats: { 
+      last1h: number; 
+      last24h: number; 
       avgResolutionMin: number;
       singleLegRate1h: number;
       singleLegRate24h: number;
@@ -376,11 +376,11 @@ export interface DiagnosticsResponse {
     byExchange: Record<
       string,
       {
-        currentPerSecond: number;
-        maxPerSecond: number;
-        currentPerMinute: number;
-        maxPerMinute: number;
-        queued: number;
+      currentPerSecond: number; 
+      maxPerSecond: number;
+      currentPerMinute: number;
+      maxPerMinute: number;
+      queued: number;
       }
     >;
   };
@@ -418,10 +418,10 @@ export interface DiagnosticsResponse {
     byExchange: Record<
       string,
       {
-        orders: number;
-        fillRate: number;
-        avgSlippageBps: number;
-        avgFillTimeMs: number;
+      orders: number;
+      fillRate: number;
+      avgSlippageBps: number;
+      avgFillTimeMs: number;
       }
     >;
   };
@@ -515,11 +515,11 @@ export interface DiagnosticsResponse {
     byExchange: Record<
       string,
       {
-        total: number;
-        available: number;
-        marginUsed: number;
-        inOrders: number;
-        utilizationPercent: number;
+      total: number;
+      available: number;
+      marginUsed: number;
+      inOrders: number;
+      utilizationPercent: number;
       }
     >;
     summary: {
@@ -594,35 +594,35 @@ export interface DiagnosticsResponse {
 
 /**
  * DiagnosticsService - Tracks and aggregates diagnostic data for the keeper bot
- *
+ * 
  * Uses circular buffers (hourly buckets for 7 days) to keep memory bounded.
  * Provides condensed summaries suitable for API responses and AI context windows.
  */
 @Injectable()
 export class DiagnosticsService {
   private readonly logger = new Logger(DiagnosticsService.name);
-
+  
   // Start time for uptime calculation
   private readonly startTime: Date = new Date();
-
+  
   // Circular buffer of hourly buckets (168 hours = 7 days)
   private readonly MAX_HOURS = 168;
   private readonly hourlyBuckets: Map<number, HourlyBucket> = new Map();
-
+  
   // Active single-leg positions (key: id)
   private readonly activeSingleLegs: Map<string, SingleLegEvent> = new Map();
-
+  
   // Recent errors ring buffer (last 20)
   private readonly MAX_RECENT_ERRORS = 20;
   private readonly recentErrors: ErrorEvent[] = [];
-
+  
   // APY data (set externally by PerformanceLogger)
   private apyData: {
     estimated: number;
     realized: number;
     byExchange: Record<string, number>;
   } = { estimated: 0, realized: 0, byExchange: {} };
-
+  
   // Position data (set externally)
   private positionData: {
     count: number;
@@ -651,7 +651,7 @@ export class DiagnosticsService {
       expectedHourlyReturn: number;
     }
   > = new Map();
-
+  
   // Position time tracking for single-leg percentage calculation
   // Tracks cumulative time spent in positions (both full and single-leg)
   private totalPositionTimeMs: number = 0;
@@ -671,10 +671,10 @@ export class DiagnosticsService {
     lastHarvestAmount: number;
     nextHarvestIn: string;
     totalHarvested: number;
-  } = {
-    accruedProfits: 0,
-    lastHarvestTime: null,
-    lastHarvestAmount: 0,
+  } = { 
+    accruedProfits: 0, 
+    lastHarvestTime: null, 
+    lastHarvestAmount: 0, 
     nextHarvestIn: '24h 0m',
     totalHarvested: 0,
   };
@@ -720,10 +720,10 @@ export class DiagnosticsService {
     byExchange: Map<
       ExchangeType,
       {
-        total: number;
-        available: number;
-        marginUsed: number;
-        inOrders: number;
+      total: number;
+      available: number;
+      marginUsed: number;
+      inOrders: number;
       }
     >;
   } = { byExchange: new Map() };
@@ -745,7 +745,7 @@ export class DiagnosticsService {
    */
   recordError(event: ErrorEvent): void {
     const bucket = this.getOrCreateCurrentBucket();
-
+    
     // Aggregate by type
     const existing = bucket.errors.get(event.type);
     if (existing) {
@@ -759,7 +759,7 @@ export class DiagnosticsService {
         lastTimestamp: event.timestamp,
       });
     }
-
+    
     // Add to recent errors (ring buffer)
     this.recentErrors.push(event);
     if (this.recentErrors.length > this.MAX_RECENT_ERRORS) {
@@ -795,10 +795,10 @@ export class DiagnosticsService {
       snapshot,
     };
     this.recordError(event);
-
+    
     this.logger.debug(
       `Recorded error with context: ${type} - ${message} ` +
-        `(snapshot: ${JSON.stringify(snapshot).substring(0, 200)}...)`,
+      `(snapshot: ${JSON.stringify(snapshot).substring(0, 200)}...)`,
     );
   }
 
@@ -849,7 +849,7 @@ export class DiagnosticsService {
    */
   recordOrder(event: OrderEvent): void {
     const bucket = this.getOrCreateCurrentBucket();
-
+    
     switch (event.status) {
       case 'PLACED':
         bucket.orders.placed++;
@@ -877,7 +877,7 @@ export class DiagnosticsService {
    */
   recordSingleLegStart(event: SingleLegEvent): void {
     this.activeSingleLegs.set(event.id, event);
-
+    
     const bucket = this.getOrCreateCurrentBucket();
     bucket.singleLegs.started++;
   }
@@ -891,20 +891,20 @@ export class DiagnosticsService {
   ): void {
     const singleLeg = this.activeSingleLegs.get(id);
     if (!singleLeg) return;
-
+    
     singleLeg.resolvedAt = new Date();
     singleLeg.resolution = resolution;
-
+    
     const bucket = this.getOrCreateCurrentBucket();
     bucket.singleLegs.resolved++;
-
+    
     // Calculate resolution time in minutes
     const resolutionTimeMin =
       (singleLeg.resolvedAt.getTime() - singleLeg.startedAt.getTime()) / 60000;
     if (bucket.singleLegs.resolutionTimesMin.length < 50) {
       bucket.singleLegs.resolutionTimesMin.push(resolutionTimeMin);
     }
-
+    
     // Remove from active
     this.activeSingleLegs.delete(id);
   }
@@ -931,8 +931,8 @@ export class DiagnosticsService {
 
     this.logger.warn(
       `Single-leg failure recorded: ${event.symbol} ` +
-        `${event.failedLeg} leg failed on ${event.failedExchange} ` +
-        `(reason: ${event.failureReason}, time between legs: ${event.timeBetweenLegsMs}ms)`,
+      `${event.failedLeg} leg failed on ${event.failedExchange} ` +
+      `(reason: ${event.failureReason}, time between legs: ${event.timeBetweenLegsMs}ms)`,
     );
   }
 
@@ -976,7 +976,7 @@ export class DiagnosticsService {
         ? Math.round(
             timeBetween.reduce((a, b) => a + b, 0) / timeBetween.length,
           )
-        : 0;
+      : 0;
 
     const slippages = last24h
       .map((f) => f.priceSlippageBps)
@@ -986,26 +986,26 @@ export class DiagnosticsService {
         ? Math.round(
             (slippages.reduce((a, b) => a + b, 0) / slippages.length) * 10,
           ) / 10
-        : 0;
+      : 0;
 
     // Recent failures
     const recentFailures = last24h
       .slice(-10)
       .reverse()
       .map((f) => {
-        const minutesAgo = Math.round((now - f.timestamp.getTime()) / 60000);
-        return {
-          symbol: f.symbol,
-          failedLeg: f.failedLeg,
-          failedExchange: f.failedExchange,
-          reason: f.failureReason,
-          message: f.failureMessage,
+      const minutesAgo = Math.round((now - f.timestamp.getTime()) / 60000);
+      return {
+        symbol: f.symbol,
+        failedLeg: f.failedLeg,
+        failedExchange: f.failedExchange,
+        reason: f.failureReason,
+        message: f.failureMessage,
           timeAgo:
             minutesAgo < 60
               ? `${minutesAgo}min ago`
               : `${Math.round(minutesAgo / 60)}h ago`,
-        };
-      });
+      };
+    });
 
     return {
       byLeg,
@@ -1031,13 +1031,13 @@ export class DiagnosticsService {
    */
   recordConnectionEvent(event: ConnectionEvent): void {
     const bucket = this.getOrCreateCurrentBucket();
-
+    
     let connStats = bucket.connections.get(event.exchange);
     if (!connStats) {
       connStats = { reconnects: 0, errors: 0 };
       bucket.connections.set(event.exchange, connStats);
     }
-
+    
     switch (event.event) {
       case 'RECONNECT':
         connStats.reconnects++;
@@ -1103,18 +1103,18 @@ export class DiagnosticsService {
     byExchange: Record<string, number>;
   }): void {
     const now = new Date();
-
+    
     // Track time spent in positions
     if (this.lastPositionCheckTime && this.lastPositionCount > 0) {
       // We had positions since last check - accumulate that time
       const elapsedMs = now.getTime() - this.lastPositionCheckTime.getTime();
       this.totalPositionTimeMs += elapsedMs;
     }
-
+    
     // Update tracking state
     this.lastPositionCheckTime = now;
     this.lastPositionCount = data.count;
-
+    
     this.positionData = data;
   }
 
@@ -1183,7 +1183,7 @@ export class DiagnosticsService {
     this.lighterState = state;
     this.logger.debug(
       `Lighter state updated: nonce=${state.nonce.current}/${state.nonce.expected}, ` +
-        `positions=${state.positions.length}, balance=$${state.balances.available.toFixed(2)}`,
+      `positions=${state.positions.length}, balance=$${state.balances.available.toFixed(2)}`,
     );
   }
 
@@ -1224,7 +1224,7 @@ export class DiagnosticsService {
 
     const now = Date.now();
     const lastSyncAgeMs = now - this.lighterState.nonce.lastSync.getTime();
-
+    
     // Determine nonce sync status
     let syncStatus: 'OK' | 'STALE' | 'MISMATCH' = 'OK';
     if (this.lighterState.nonce.current !== this.lighterState.nonce.expected) {
@@ -1326,28 +1326,28 @@ export class DiagnosticsService {
 
     const now = Date.now();
     const orders = Array.from(this.unfilledOrders.values());
-
+    
     // Count by exchange
     const byExchange: Record<string, number> = {};
     let totalValue = 0;
-
+    
     const orderDetails = orders
       .map((o) => {
-        byExchange[o.exchange] = (byExchange[o.exchange] || 0) + 1;
-        totalValue += o.size * o.orderPrice;
-
-        return {
+      byExchange[o.exchange] = (byExchange[o.exchange] || 0) + 1;
+      totalValue += o.size * o.orderPrice;
+      
+      return {
           orderId:
             o.orderId.substring(0, 20) + (o.orderId.length > 20 ? '...' : ''),
-          symbol: o.symbol,
-          exchange: o.exchange,
-          side: o.side,
-          price: o.orderPrice,
-          size: o.size,
-          marketPrice: o.marketPrice,
-          deviationBps: Math.round(o.deviationBps * 10) / 10,
-          ageMinutes: Math.round(o.ageSeconds / 60),
-        };
+        symbol: o.symbol,
+        exchange: o.exchange,
+        side: o.side,
+        price: o.orderPrice,
+        size: o.size,
+        marketPrice: o.marketPrice,
+        deviationBps: Math.round(o.deviationBps * 10) / 10,
+        ageMinutes: Math.round(o.ageSeconds / 60),
+      };
       })
       .sort((a, b) => b.ageMinutes - a.ageMinutes);
 
@@ -1357,7 +1357,7 @@ export class DiagnosticsService {
     const farFromMarket = orders.filter(
       (o) => Math.abs(o.deviationBps) > 50,
     ).length;
-
+    
     if (staleCount > 0) {
       recommendation += `${staleCount} orders older than 5 minutes. `;
     }
@@ -1506,11 +1506,11 @@ export class DiagnosticsService {
     const byExchange: Record<
       string,
       {
-        total: number;
-        available: number;
-        marginUsed: number;
-        inOrders: number;
-        utilizationPercent: number;
+      total: number;
+      available: number;
+      marginUsed: number;
+      inOrders: number;
+      utilizationPercent: number;
       }
     > = {};
 
@@ -1520,9 +1520,9 @@ export class DiagnosticsService {
     for (const [exchange, data] of this.capitalData.byExchange) {
       const utilization =
         data.total > 0
-          ? Math.round((data.marginUsed / data.total) * 1000) / 10
-          : 0;
-
+        ? Math.round((data.marginUsed / data.total) * 1000) / 10
+        : 0;
+      
       byExchange[exchange] = {
         ...data,
         utilizationPercent: utilization,
@@ -1631,12 +1631,12 @@ export class DiagnosticsService {
         enabled: true,
         accuracy: stats
           ? {
-              last24h: {
-                predictions: stats.total || 0,
-                directionallyCorrect: stats.correct || 0,
-                accuracyPercent: stats.accuracy || 0,
-                avgErrorBps: stats.avgError || 0,
-              },
+          last24h: {
+            predictions: stats.total || 0,
+            directionallyCorrect: stats.correct || 0,
+            accuracyPercent: stats.accuracy || 0,
+            avgErrorBps: stats.avgError || 0,
+          },
             }
           : undefined,
         currentPredictions: currentPredictions?.slice(0, 10),
@@ -1668,17 +1668,17 @@ export class DiagnosticsService {
   getDiagnostics(): DiagnosticsResponse {
     const now = new Date();
     const uptimeHours = (now.getTime() - this.startTime.getTime()) / 3600000;
-
+    
     // Aggregate stats for different time periods
     const stats1h = this.aggregateStats(1);
     const stats24h = this.aggregateStats(24);
-
+    
     // Calculate health status
     const health = this.calculateHealthStatus(stats1h, stats24h);
-
+    
     // Get all fill times for percentile calculation
     const allFillTimes = this.getAllFillTimes();
-
+    
     return {
       timestamp: now,
       uptime: {
@@ -1697,7 +1697,7 @@ export class DiagnosticsService {
               ? Math.round(
                   (stats1h.orders.filled / stats1h.orders.placed) * 1000,
                 ) / 10
-              : 100,
+            : 100,
         },
         last24h: {
           placed: stats24h.orders.placed,
@@ -1708,7 +1708,7 @@ export class DiagnosticsService {
               ? Math.round(
                   (stats24h.orders.filled / stats24h.orders.placed) * 1000,
                 ) / 10
-              : 100,
+            : 100,
         },
         avgFillTimeMs: this.calculatePercentiles(allFillTimes),
       },
@@ -1784,27 +1784,27 @@ export class DiagnosticsService {
    */
   private getRecentErrorsWithContext(): DiagnosticsResponse['errors']['recentWithContext'] {
     const now = Date.now();
-
+    
     return this.errorsWithContext
       .slice(-10)
       .reverse()
       .map((err) => {
-        const minutesAgo = Math.round((now - err.timestamp.getTime()) / 60000);
-        let timeStr: string;
-        if (minutesAgo < 60) {
-          timeStr = `${minutesAgo}min ago`;
-        } else {
-          timeStr = `${Math.round(minutesAgo / 60)}h ago`;
-        }
-
-        return {
-          time: timeStr,
-          type: err.type,
-          exchange: err.exchange,
-          msg: err.message.substring(0, 100),
-          snapshot: err.snapshot,
-        };
-      });
+      const minutesAgo = Math.round((now - err.timestamp.getTime()) / 60000);
+      let timeStr: string;
+      if (minutesAgo < 60) {
+        timeStr = `${minutesAgo}min ago`;
+      } else {
+        timeStr = `${Math.round(minutesAgo / 60)}h ago`;
+      }
+      
+      return {
+        time: timeStr,
+        type: err.type,
+        exchange: err.exchange,
+        msg: err.message.substring(0, 100),
+        snapshot: err.snapshot,
+      };
+    });
   }
 
   /**
@@ -1812,7 +1812,7 @@ export class DiagnosticsService {
    */
   private getExecutionLocksDiagnostics(): DiagnosticsResponse['executionLocks'] {
     const now = Date.now();
-
+    
     // Check if global lock is stale (held > 60s)
     const lockDurationMs = this.globalLockInfo.startedAt
       ? now - this.globalLockInfo.startedAt.getTime()
@@ -1869,11 +1869,11 @@ export class DiagnosticsService {
     const byExchange: Record<
       string,
       {
-        currentPerSecond: number;
-        maxPerSecond: number;
-        currentPerMinute: number;
-        maxPerMinute: number;
-        queued: number;
+      currentPerSecond: number;
+      maxPerSecond: number;
+      currentPerMinute: number;
+      maxPerMinute: number;
+      queued: number;
       }
     > = {};
 
@@ -1917,7 +1917,7 @@ export class DiagnosticsService {
 
     try {
       const stats = this.executionAnalytics.getDiagnosticsStats();
-
+      
       const formatStats = (s: any) => ({
         totalOrders: s.totalOrders || 0,
         successfulOrders: s.successfulOrders || 0,
@@ -1935,10 +1935,10 @@ export class DiagnosticsService {
       const byExchange: Record<
         string,
         {
-          orders: number;
-          fillRate: number;
-          avgSlippageBps: number;
-          avgFillTimeMs: number;
+        orders: number;
+        fillRate: number;
+        avgSlippageBps: number;
+        avgFillTimeMs: number;
         }
       > = {};
 
@@ -1972,7 +1972,7 @@ export class DiagnosticsService {
 
   private getOrCreateCurrentBucket(): HourlyBucket {
     const hourTs = this.getHourTimestamp();
-
+    
     let bucket = this.hourlyBuckets.get(hourTs);
     if (!bucket) {
       bucket = {
@@ -1990,11 +1990,11 @@ export class DiagnosticsService {
         connections: new Map(),
       };
       this.hourlyBuckets.set(hourTs, bucket);
-
+      
       // Cleanup old buckets
       this.cleanupOldBuckets();
     }
-
+    
     return bucket;
   }
 
@@ -2018,7 +2018,7 @@ export class DiagnosticsService {
   } {
     const now = this.getHourTimestamp();
     const cutoff = now - hours * 3600000;
-
+    
     const result = {
       orders: { placed: 0, filled: 0, failed: 0 },
       errorCount: 0,
@@ -2028,7 +2028,7 @@ export class DiagnosticsService {
         { count: number; lastMessage: string; lastTimestamp: Date }
       >(),
     };
-
+    
     for (const [hourTs, bucket] of this.hourlyBuckets) {
       if (hourTs >= cutoff) {
         result.orders.placed += bucket.orders.placed;
@@ -2036,7 +2036,7 @@ export class DiagnosticsService {
         result.orders.failed += bucket.orders.failed;
         result.singleLegs.started += bucket.singleLegs.started;
         result.singleLegs.resolved += bucket.singleLegs.resolved;
-
+        
         // Aggregate errors
         for (const [type, data] of bucket.errors) {
           result.errorCount += data.count;
@@ -2053,7 +2053,7 @@ export class DiagnosticsService {
         }
       }
     }
-
+    
     return result;
   }
 
@@ -2073,14 +2073,14 @@ export class DiagnosticsService {
     if (times.length === 0) {
       return { p50: 0, p95: 0, p99: 0 };
     }
-
+    
     const sorted = [...times].sort((a, b) => a - b);
-
+    
     const percentile = (p: number): number => {
       const index = Math.ceil((p / 100) * sorted.length) - 1;
       return sorted[Math.max(0, index)];
     };
-
+    
     return {
       p50: Math.round(percentile(50)),
       p95: Math.round(percentile(95)),
@@ -2093,7 +2093,7 @@ export class DiagnosticsService {
     stats24h: any,
   ): { overall: 'OK' | 'DEGRADED' | 'CRITICAL'; issues: string[] } {
     const issues: string[] = [];
-
+    
     // Check fill rate
     if (stats1h.orders.placed > 0) {
       const fillRate = stats1h.orders.filled / stats1h.orders.placed;
@@ -2101,7 +2101,7 @@ export class DiagnosticsService {
         issues.push(`Low fill rate: ${Math.round(fillRate * 100)}%`);
       }
     }
-
+    
     // Check active single-legs
     if (this.activeSingleLegs.size > 0) {
       const oldSingleLegs = Array.from(this.activeSingleLegs.values()).filter(
@@ -2111,12 +2111,12 @@ export class DiagnosticsService {
         issues.push(`${oldSingleLegs.length} stale single-leg position(s)`);
       }
     }
-
+    
     // Check error rate
     if (stats1h.errorCount > 10) {
       issues.push(`High error rate: ${stats1h.errorCount} errors/hour`);
     }
-
+    
     // Check connections
     const connStatus = this.getConnectionStatus();
     for (const [exchange, status] of Object.entries(connStatus)) {
@@ -2126,14 +2126,14 @@ export class DiagnosticsService {
         );
       }
     }
-
+    
     let overall: 'OK' | 'DEGRADED' | 'CRITICAL' = 'OK';
     if (issues.length > 2) {
       overall = 'CRITICAL';
     } else if (issues.length > 0) {
       overall = 'DEGRADED';
     }
-
+    
     return { overall, issues };
   }
 
@@ -2153,7 +2153,7 @@ export class DiagnosticsService {
     for (const bucket of this.hourlyBuckets.values()) {
       allTimes.push(...bucket.singleLegs.resolutionTimesMin);
     }
-
+    
     if (allTimes.length === 0) return 0;
     return (
       Math.round((allTimes.reduce((a, b) => a + b, 0) / allTimes.length) * 10) /
@@ -2173,7 +2173,7 @@ export class DiagnosticsService {
     // So number of executions = placed / 2
     const executions = Math.floor(stats.orders.placed / 2);
     if (executions === 0) return 0;
-
+    
     // Single-leg rate = single-legs / executions
     const rate = stats.singleLegs.started / executions;
     return Math.round(rate * 1000) / 10; // Return as percentage with 1 decimal, e.g., 15.5%
@@ -2192,30 +2192,30 @@ export class DiagnosticsService {
       totalSingleLegMs +=
         bucket.singleLegs.resolutionTimesMin.reduce((a, b) => a + b, 0) * 60000;
     }
-
+    
     // Also count time for currently active single-legs
     const now = Date.now();
     for (const sl of this.activeSingleLegs.values()) {
       totalSingleLegMs += now - sl.startedAt.getTime();
     }
-
+    
     // Get total time spent in positions (tracked via updatePositionData calls)
     // Add current period if we have positions now
     let totalPositionMs = this.totalPositionTimeMs;
     if (this.lastPositionCheckTime && this.lastPositionCount > 0) {
       totalPositionMs += now - this.lastPositionCheckTime.getTime();
     }
-
+    
     // If no position time tracked yet but we have single-leg time,
     // single-leg time IS position time (can't be in single-leg without position)
     // Use the greater of tracked position time or single-leg time as denominator
     if (totalPositionMs < totalSingleLegMs) {
       totalPositionMs = totalSingleLegMs;
     }
-
+    
     // If still no position time, return 0
     if (totalPositionMs === 0) return 0;
-
+    
     // Cap at 100% (can't spend more than 100% of position time in single-leg)
     const percent = Math.min((totalSingleLegMs / totalPositionMs) * 100, 100);
     return Math.round(percent * 10) / 10; // Return as percentage with 1 decimal
@@ -2225,7 +2225,7 @@ export class DiagnosticsService {
     stats: any,
   ): Record<string, { count: number; last: string }> {
     const result: Record<string, { count: number; last: string }> = {};
-
+    
     for (const [type, data] of stats.errors) {
       const minutesAgo = Math.round(
         (Date.now() - data.lastTimestamp.getTime()) / 60000,
@@ -2238,10 +2238,10 @@ export class DiagnosticsService {
       } else {
         lastStr = `${Math.round(minutesAgo / 1440)}d ago`;
       }
-
+      
       result[type] = { count: data.count, last: lastStr };
     }
-
+    
     return result;
   }
 
@@ -2252,32 +2252,32 @@ export class DiagnosticsService {
     msg: string;
   }> {
     const now = Date.now();
-
+    
     return this.recentErrors
       .slice(-10)
       .reverse()
       .map((err) => {
-        const minutesAgo = Math.round((now - err.timestamp.getTime()) / 60000);
-        let timeStr: string;
-        if (minutesAgo < 60) {
-          timeStr = `${minutesAgo}min ago`;
-        } else {
-          timeStr = `${Math.round(minutesAgo / 60)}h ago`;
-        }
-
-        return {
-          time: timeStr,
-          type: err.type,
-          exchange: err.exchange,
-          msg: err.message.substring(0, 100), // Truncate for brevity
-        };
-      });
+      const minutesAgo = Math.round((now - err.timestamp.getTime()) / 60000);
+      let timeStr: string;
+      if (minutesAgo < 60) {
+        timeStr = `${minutesAgo}min ago`;
+      } else {
+        timeStr = `${Math.round(minutesAgo / 60)}h ago`;
+      }
+      
+      return {
+        time: timeStr,
+        type: err.type,
+        exchange: err.exchange,
+        msg: err.message.substring(0, 100), // Truncate for brevity
+      };
+    });
   }
 
   private getLiquidityFilterCount(hours: number): number {
     const now = this.getHourTimestamp();
     const cutoff = now - hours * 3600000;
-
+    
     let count = 0;
     for (const [hourTs, bucket] of this.hourlyBuckets) {
       if (hourTs >= cutoff) {
@@ -2286,14 +2286,14 @@ export class DiagnosticsService {
         }
       }
     }
-
+    
     return count;
   }
 
   private getLiquidityFilterReasons(hours: number): Record<string, number> {
     const now = this.getHourTimestamp();
     const cutoff = now - hours * 3600000;
-
+    
     const result: Record<string, number> = {};
     for (const [hourTs, bucket] of this.hourlyBuckets) {
       if (hourTs >= cutoff) {
@@ -2302,7 +2302,7 @@ export class DiagnosticsService {
         }
       }
     }
-
+    
     return result;
   }
 
@@ -2312,12 +2312,12 @@ export class DiagnosticsService {
   > {
     const now = this.getHourTimestamp();
     const cutoff = now - 24 * 3600000;
-
+    
     const result: Record<
       string,
       { status: string; reconnects24h: number; lastError?: string }
     > = {};
-
+    
     // Initialize for all exchanges
     for (const exchange of [
       ExchangeType.HYPERLIQUID,
@@ -2326,7 +2326,7 @@ export class DiagnosticsService {
     ]) {
       result[exchange] = { status: 'OK', reconnects24h: 0 };
     }
-
+    
     // Aggregate from buckets
     for (const [hourTs, bucket] of this.hourlyBuckets) {
       if (hourTs >= cutoff) {
@@ -2341,7 +2341,7 @@ export class DiagnosticsService {
         }
       }
     }
-
+    
     // Determine status based on reconnect count
     for (const exchange of Object.keys(result)) {
       if (result[exchange].reconnects24h > 20) {
@@ -2350,7 +2350,7 @@ export class DiagnosticsService {
         result[exchange].status = 'CRITICAL';
       }
     }
-
+    
     return result;
   }
 
@@ -2388,10 +2388,10 @@ export class DiagnosticsService {
    */
   getSummary(): string {
     const diag = this.getDiagnostics();
-
+    
     const lines: string[] = [];
     lines.push(`Health: ${diag.health.overall}`);
-
+    
     if (diag.health.issues.length > 0) {
       lines.push(`Issues: ${diag.health.issues.join('; ')}`);
     }
@@ -2400,7 +2400,7 @@ export class DiagnosticsService {
       `Orders 1h: ${diag.orders.last1h.filled}/${diag.orders.last1h.placed} filled (${diag.orders.last1h.fillRate}%)`,
     );
     lines.push(`Errors 1h: ${diag.errors.total.last1h}`);
-
+    
     if (diag.singleLegs.failureAnalysis) {
       const fa = diag.singleLegs.failureAnalysis;
       lines.push(

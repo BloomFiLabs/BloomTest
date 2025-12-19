@@ -9,6 +9,9 @@ class MockStrategy implements IExecutableStrategy {
   private enabled = true;
   public executeCalled = false;
   public executeResult: StrategyExecutionResult;
+  public readonly id: string;
+  public readonly requiredAssets: string[] = [];
+  public readonly requiredPools: string[] = [];
 
   constructor(
     public readonly name: string,
@@ -16,6 +19,7 @@ class MockStrategy implements IExecutableStrategy {
     public readonly contractAddress: string,
     result?: Partial<StrategyExecutionResult>,
   ) {
+    this.id = contractAddress;
     this.executeResult = {
       strategyName: name,
       executed: false,
@@ -32,7 +36,7 @@ class MockStrategy implements IExecutableStrategy {
     this.enabled = enabled;
   }
 
-  async execute(): Promise<StrategyExecutionResult> {
+  async execute(context: any): Promise<StrategyExecutionResult> {
     this.executeCalled = true;
     return this.executeResult;
   }
@@ -41,8 +45,12 @@ class MockStrategy implements IExecutableStrategy {
     return { mock: 'true' };
   }
 
-  async emergencyExit(): Promise<string> {
-    return '0xemergency';
+  async emergencyExit(): Promise<StrategyExecutionResult> {
+    return {
+      strategyName: this.name,
+      executed: true,
+      reason: 'Emergency exit',
+    };
   }
 }
 

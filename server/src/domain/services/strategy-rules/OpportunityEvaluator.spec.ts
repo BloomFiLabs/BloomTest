@@ -13,6 +13,8 @@ import { ArbitrageExecutionPlan } from '../FundingArbitrageStrategy';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { PerpPosition } from '../../entities/PerpPosition';
 import { OrderSide } from '../../value-objects/PerpOrder';
+import { Percentage } from '../../value-objects/Percentage';
+import { PositionSize } from '../../value-objects/PositionSize';
 import {
   PerpOrderRequest,
   OrderType,
@@ -28,7 +30,7 @@ describe('OpportunityEvaluator', () => {
   let config: StrategyConfig;
 
   beforeEach(async () => {
-    config = new StrategyConfig();
+    config = StrategyConfig.withDefaults();
 
     mockHistoricalService = {
       getHistoricalMetrics: jest.fn(),
@@ -67,15 +69,16 @@ describe('OpportunityEvaluator', () => {
       symbol: 'ETHUSDT',
       longExchange: ExchangeType.LIGHTER,
       shortExchange: ExchangeType.ASTER,
-      longRate: 0.0003,
-      shortRate: 0.0001,
-      spread: 0.0002,
-      expectedReturn: 0.219,
+      longRate: Percentage.fromDecimal(0.0003),
+      shortRate: Percentage.fromDecimal(0.0001),
+      spread: Percentage.fromDecimal(0.0002),
+      expectedReturn: Percentage.fromDecimal(0.219),
       longMarkPrice: 3001,
       shortMarkPrice: 3000,
       longOpenInterest: 1000000,
       shortOpenInterest: 1000000,
       timestamp: new Date(),
+      strategyType: 'perp-perp',
     });
 
     const createMockPlan = (): ArbitrageExecutionPlan => ({
@@ -96,7 +99,7 @@ describe('OpportunityEvaluator', () => {
         3001,
         TimeInForce.GTC,
       ),
-      positionSize: 1.0,
+      positionSize: PositionSize.fromBaseAsset(1.0, 2.0),
       estimatedCosts: {
         fees: 10,
         slippage: 5,
@@ -115,14 +118,18 @@ describe('OpportunityEvaluator', () => {
         minRate: 0.0001,
         maxRate: 0.0005,
         consistencyScore: 0.8,
-        volatility: 0.0001,
+        stdDev: 0.0001,
+        positiveDays: 7,
+        dataPoints: 168,
       };
       const shortMetrics: HistoricalMetrics = {
         averageRate: 0.0001,
         minRate: 0.00005,
         maxRate: 0.00015,
         consistencyScore: 0.7,
-        volatility: 0.00005,
+        stdDev: 0.00005,
+        positiveDays: 7,
+        dataPoints: 168,
       };
 
       mockHistoricalService.getHistoricalMetrics
@@ -134,9 +141,9 @@ describe('OpportunityEvaluator', () => {
         plan,
       );
 
-      expect(result.consistencyScore).toBe(0.75); // Average of 0.8 and 0.7
-      expect(result.historicalMetrics.long).toEqual(longMetrics);
-      expect(result.historicalMetrics.short).toEqual(shortMetrics);
+      expect((result as any).value.consistencyScore).toBe(0.75); // Average of 0.8 and 0.7
+      expect((result as any).value.historicalMetrics.long).toEqual(longMetrics);
+      expect((result as any).value.historicalMetrics.short).toEqual(shortMetrics);
     });
 
     it('should calculate worst-case break-even hours', () => {
@@ -148,14 +155,18 @@ describe('OpportunityEvaluator', () => {
         minRate: 0.0001, // Worst case
         maxRate: 0.0005,
         consistencyScore: 0.8,
-        volatility: 0.0001,
+        stdDev: 0.0001,
+        positiveDays: 7,
+        dataPoints: 168,
       };
       const shortMetrics: HistoricalMetrics = {
         averageRate: 0.0001,
         minRate: 0.00005, // Worst case
         maxRate: 0.00015,
         consistencyScore: 0.7,
-        volatility: 0.00005,
+        stdDev: 0.00005,
+        positiveDays: 7,
+        dataPoints: 168,
       };
 
       mockHistoricalService.getHistoricalMetrics
@@ -167,8 +178,8 @@ describe('OpportunityEvaluator', () => {
         plan,
       );
 
-      expect(result.worstCaseBreakEvenHours).not.toBeNull();
-      expect(result.worstCaseBreakEvenHours).toBeGreaterThan(0);
+      expect((result as any).value.worstCaseBreakEvenHours).not.toBeNull();
+      expect((result as any).value.worstCaseBreakEvenHours).toBeGreaterThan(0);
     });
 
     it('should return null worst-case break-even if no plan provided', () => {
@@ -179,7 +190,7 @@ describe('OpportunityEvaluator', () => {
         null,
       );
 
-      expect(result.worstCaseBreakEvenHours).toBeNull();
+      expect((result as any).value.worstCaseBreakEvenHours).toBeNull();
     });
 
     it('should handle missing historical metrics', () => {
@@ -193,9 +204,9 @@ describe('OpportunityEvaluator', () => {
         plan,
       );
 
-      expect(result.consistencyScore).toBe(0);
-      expect(result.historicalMetrics.long).toBeNull();
-      expect(result.historicalMetrics.short).toBeNull();
+      expect((result as any).value.consistencyScore).toBe(0);
+      expect((result as any).value.historicalMetrics.long).toBeNull();
+      expect((result as any).value.historicalMetrics.short).toBeNull();
     });
   });
 
@@ -204,15 +215,16 @@ describe('OpportunityEvaluator', () => {
       symbol,
       longExchange: ExchangeType.LIGHTER,
       shortExchange: ExchangeType.ASTER,
-      longRate: 0.0003,
-      shortRate: 0.0001,
-      spread: 0.0002,
-      expectedReturn: 0.219,
+      longRate: Percentage.fromDecimal(0.0003),
+      shortRate: Percentage.fromDecimal(0.0001),
+      spread: Percentage.fromDecimal(0.0002),
+      expectedReturn: Percentage.fromDecimal(0.219),
       longMarkPrice: 3001,
       shortMarkPrice: 3000,
       longOpenInterest: 1000000,
       shortOpenInterest: 1000000,
       timestamp: new Date(),
+      strategyType: 'perp-perp',
     });
 
     const createMockPlan = (
@@ -235,7 +247,7 @@ describe('OpportunityEvaluator', () => {
         3001,
         TimeInForce.GTC,
       ),
-      positionSize: 1.0,
+      positionSize: PositionSize.fromBaseAsset(1.0, 2.0),
       estimatedCosts: {
         fees: 10,
         slippage: 5,
@@ -258,14 +270,18 @@ describe('OpportunityEvaluator', () => {
         minRate: 0.0002, // Worst case - still reasonable
         maxRate: 0.0004,
         consistencyScore: 0.9,
-        volatility: 0.0001,
+        stdDev: 0.0001,
+        positiveDays: 7,
+        dataPoints: 168,
       };
       const shortMetrics: HistoricalMetrics = {
         averageRate: 0.0001,
         minRate: 0.00005, // Worst case - still reasonable
         maxRate: 0.00015,
         consistencyScore: 0.8,
-        volatility: 0.00005,
+        stdDev: 0.00005,
+        positiveDays: 7,
+        dataPoints: 168,
       };
 
       // Return different metrics for each call (long, short)
@@ -300,7 +316,7 @@ describe('OpportunityEvaluator', () => {
       );
 
       expect(result).not.toBeNull();
-      expect(result.opportunity.symbol).toBeDefined();
+      expect((result as any).value.opportunity.symbol).toBeDefined();
     });
 
     it('should return null if no opportunities provided', async () => {
@@ -323,14 +339,18 @@ describe('OpportunityEvaluator', () => {
         minRate: 0.0000001,
         maxRate: 0.000002,
         consistencyScore: 0.5,
-        volatility: 0.0000001,
+        stdDev: 0.0000001,
+        positiveDays: 7,
+        dataPoints: 168,
       };
       const shortMetrics: HistoricalMetrics = {
         averageRate: 0.0000005,
         minRate: 0.0000001,
         maxRate: 0.000001,
         consistencyScore: 0.5,
-        volatility: 0.0000001,
+        stdDev: 0.0000001,
+        positiveDays: 7,
+        dataPoints: 168,
       };
 
       mockHistoricalService.getHistoricalMetrics.mockReturnValue(longMetrics);
@@ -375,15 +395,16 @@ describe('OpportunityEvaluator', () => {
       symbol: 'ETHUSDT',
       longExchange: ExchangeType.ASTER,
       shortExchange: ExchangeType.LIGHTER,
-      longRate: 0.0003,
-      shortRate: 0.0001,
-      spread: 0.0002,
-      expectedReturn: 0.219,
+      longRate: Percentage.fromDecimal(0.0003),
+      shortRate: Percentage.fromDecimal(0.0001),
+      spread: Percentage.fromDecimal(0.0002),
+      expectedReturn: Percentage.fromDecimal(0.219),
       longMarkPrice: 3001,
       shortMarkPrice: 3000,
       longOpenInterest: 1000000,
       shortOpenInterest: 1000000,
       timestamp: new Date(),
+      strategyType: 'perp-perp',
     });
 
     const createMockPlan = (
@@ -406,7 +427,7 @@ describe('OpportunityEvaluator', () => {
         3001,
         TimeInForce.GTC,
       ),
-      positionSize: 1.0,
+      positionSize: PositionSize.fromBaseAsset(1.0, 2.0),
       estimatedCosts: {
         fees: 10,
         slippage: 5,
@@ -427,12 +448,20 @@ describe('OpportunityEvaluator', () => {
           exchange: ExchangeType.LIGHTER,
           symbol: 'ETHUSDT',
           currentRate: 0.0003,
+          predictedRate: 0.0003,
+          markPrice: 3000,
+          openInterest: 1000000,
+          volume24h: 10000000,
           timestamp: new Date(),
         },
       ]);
 
       mockLossTracker.getRemainingBreakEvenHours.mockReturnValue({
         remainingBreakEvenHours: 20,
+        requiredFundingRate: 0.0003,
+        currentRate: 0.0003,
+        entryCost: 10,
+        positionValueUsd: 3000,
         remainingCost: 10,
         feesEarnedSoFar: 0,
         hoursHeld: 0,
@@ -446,8 +475,8 @@ describe('OpportunityEvaluator', () => {
         new Map(),
       );
 
-      expect(result.shouldRebalance).toBe(true);
-      expect(result.reason).toContain('instantly profitable');
+      expect((result as any).value.shouldRebalance).toBe(true);
+      expect((result as any).value.reason).toContain('instantly profitable');
     });
 
     it('should reject rebalance if current position already profitable', async () => {
@@ -461,12 +490,20 @@ describe('OpportunityEvaluator', () => {
           exchange: ExchangeType.LIGHTER,
           symbol: 'ETHUSDT',
           currentRate: 0.0003,
+          predictedRate: 0.0003,
+          markPrice: 3000,
+          openInterest: 1000000,
+          volume24h: 10000000,
           timestamp: new Date(),
         },
       ]);
 
       mockLossTracker.getRemainingBreakEvenHours.mockReturnValue({
         remainingBreakEvenHours: 10,
+        requiredFundingRate: 0.0003,
+        currentRate: 0.0003,
+        entryCost: 10,
+        positionValueUsd: 3000,
         remainingCost: -5, // Negative = already profitable
         feesEarnedSoFar: 15,
         hoursHeld: 5,
@@ -480,8 +517,8 @@ describe('OpportunityEvaluator', () => {
         new Map(),
       );
 
-      expect(result.shouldRebalance).toBe(false);
-      expect(result.reason).toContain('already profitable');
+      expect((result as any).value.shouldRebalance).toBe(false);
+      expect((result as any).value.reason).toContain('already profitable');
     });
 
     it('should approve rebalance if new position breaks even faster', async () => {
@@ -495,23 +532,32 @@ describe('OpportunityEvaluator', () => {
           exchange: ExchangeType.LIGHTER,
           symbol: 'ETHUSDT',
           currentRate: 0.0003,
+          predictedRate: 0.0003,
+          markPrice: 3000,
+          openInterest: 1000000,
+          volume24h: 10000000,
           timestamp: new Date(),
         },
       ]);
 
       mockLossTracker.getRemainingBreakEvenHours.mockReturnValue({
         remainingBreakEvenHours: 20, // Current needs 20 hours
+        requiredFundingRate: 0.0003,
+        currentRate: 0.0003,
+        entryCost: 10,
+        positionValueUsd: 3000,
         remainingCost: 10,
         feesEarnedSoFar: 0,
         hoursHeld: 0,
       });
 
       mockLossTracker.getSwitchingCosts.mockReturnValue({
-        p1ExitFees: 5,
-        p2EntryFees: 5,
-        p2ExitFees: 5,
-        p2Slippage: 5,
-        total: 20,
+        exitCostCurrent: 5,
+        entryCostNew: 5,
+        lostProgress: 5,
+        totalSwitchingCost: 20,
+        feesEarnedSoFar: 0,
+        hoursHeld: 0,
       });
 
       // Mock cost calculator to return reasonable break-even for new position
@@ -527,8 +573,8 @@ describe('OpportunityEvaluator', () => {
       );
 
       // Should compare break-even times
-      expect(result.shouldRebalance).toBeDefined();
-      expect(result.currentBreakEvenHours).toBe(20);
+      expect((result as any).value.shouldRebalance).toBeDefined();
+      expect((result as any).value.currentBreakEvenHours).toBe(20);
     });
 
     it('should handle position that never breaks even', async () => {
@@ -541,12 +587,20 @@ describe('OpportunityEvaluator', () => {
           exchange: ExchangeType.LIGHTER,
           symbol: 'ETHUSDT',
           currentRate: 0.0003,
+          predictedRate: 0.0003,
+          markPrice: 3000,
+          openInterest: 1000000,
+          volume24h: 10000000,
           timestamp: new Date(),
         },
       ]);
 
       mockLossTracker.getRemainingBreakEvenHours.mockReturnValue({
         remainingBreakEvenHours: Infinity, // Never breaks even
+        requiredFundingRate: 0.0003,
+        currentRate: 0.0003,
+        entryCost: 10,
+        positionValueUsd: 3000,
         remainingCost: Infinity,
         feesEarnedSoFar: 0,
         hoursHeld: 0,
@@ -561,7 +615,7 @@ describe('OpportunityEvaluator', () => {
       );
 
       // Should handle Infinity case
-      expect(result.shouldRebalance).toBeDefined();
+      expect((result as any).value.shouldRebalance).toBeDefined();
     });
   });
 });

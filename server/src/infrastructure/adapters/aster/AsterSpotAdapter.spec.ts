@@ -51,11 +51,11 @@ describe('AsterSpotAdapter', () => {
       },
     };
 
-    (ethers.Wallet as jest.Mock).mockImplementation(() => mockWallet);
+    (ethers.Wallet as unknown as jest.Mock).mockImplementation(() => mockWallet);
     (ethers.AbiCoder as any).defaultAbiCoder = jest.fn().mockReturnValue({
       encode: jest.fn().mockReturnValue('0xencoded'),
     });
-    (ethers.keccak256 as jest.Mock) = jest
+    (ethers.keccak256 as unknown as jest.Mock) = jest
       .fn()
       .mockReturnValue('0x' + '3'.repeat(64));
     (ethers.getBytes as jest.Mock) = jest

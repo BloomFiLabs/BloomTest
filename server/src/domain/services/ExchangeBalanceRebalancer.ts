@@ -517,9 +517,9 @@ export class ExchangeBalanceRebalancer {
                   `(requested: $${amount.toFixed(2)}). Attempting transfer anyway - pool check may be stale.`,
               );
             } else {
-              this.logger.log(
-                `   ℹ️ Lighter fast withdraw pool has $${poolAvailable.toFixed(2)} available`,
-              );
+            this.logger.log(
+              `   ℹ️ Lighter fast withdraw pool has $${poolAvailable.toFixed(2)} available`,
+            );
             }
           }
         } catch (poolCheckError: any) {

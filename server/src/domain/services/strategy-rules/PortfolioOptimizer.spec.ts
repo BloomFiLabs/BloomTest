@@ -6,7 +6,11 @@ import {
   HistoricalFundingRateService,
   HistoricalMetrics,
 } from '../../../infrastructure/services/HistoricalFundingRateService';
-import { IHistoricalFundingRateService } from '../../ports/IHistoricalFundingRateService';
+import {
+  IHistoricalFundingRateService,
+  SpreadVolatilityMetrics,
+} from '../../ports/IHistoricalFundingRateService';
+import { Percentage } from '../../value-objects/Percentage';
 import { ArbitrageOpportunity } from '../FundingRateAggregator';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 
@@ -51,12 +55,13 @@ describe('PortfolioOptimizer', () => {
   describe('calculateMaxPortfolioForTargetAPY', () => {
     const createMockOpportunity = (): ArbitrageOpportunity => ({
       symbol: 'ETHUSDT',
+      strategyType: 'perp-perp',
       longExchange: ExchangeType.LIGHTER,
       shortExchange: ExchangeType.ASTER,
-      longRate: 0.0003,
-      shortRate: 0.0001,
-      spread: 0.0002,
-      expectedReturn: 0.219,
+      longRate: Percentage.fromDecimal(0.0003),
+      shortRate: Percentage.fromDecimal(0.0001),
+      spread: Percentage.fromDecimal(0.0002),
+      expectedReturn: Percentage.fromDecimal(0.219),
       longMarkPrice: 3001,
       shortMarkPrice: 3000,
       longOpenInterest: 1000000,
@@ -120,7 +125,11 @@ describe('PortfolioOptimizer', () => {
 
     it('should apply volatility adjustments when volatility metrics available', async () => {
       const opportunity = createMockOpportunity();
-      const volatilityMetrics: HistoricalMetrics = {
+      const volatilityMetrics: SpreadVolatilityMetrics = {
+        averageSpread: 0.0002,
+        stdDevSpread: 0.0001,
+        minSpread: 0.0001,
+        maxSpread: 0.0003,
         stabilityScore: 0.3, // Low stability = high volatility
         maxHourlySpreadChange: 0.0002,
         spreadReversals: 10,
@@ -200,15 +209,16 @@ describe('PortfolioOptimizer', () => {
         symbol: 'ETHUSDT',
         longExchange: ExchangeType.LIGHTER,
         shortExchange: ExchangeType.ASTER,
-        longRate: 0.0003,
-        shortRate: 0.0001,
-        spread: 0.0002,
-        expectedReturn: 0.219,
+        longRate: Percentage.fromDecimal(0.0003),
+        shortRate: Percentage.fromDecimal(0.0001),
+        spread: Percentage.fromDecimal(0.0002),
+        expectedReturn: Percentage.fromDecimal(0.219),
         longMarkPrice: 3001,
         shortMarkPrice: 3000,
         longOpenInterest: 1000000,
         shortOpenInterest: 1000000,
         timestamp: new Date(),
+        strategyType: 'perp-perp',
       } as ArbitrageOpportunity,
       maxPortfolioFor35APY: 50000,
       longBidAsk: { bestBid: 2999, bestAsk: 3001 },
@@ -241,8 +251,8 @@ describe('PortfolioOptimizer', () => {
 
       // Mock validation to pass for the first opportunity
       const currentSpread = Math.abs(
-        opportunities[0].opportunity.longRate -
-          opportunities[0].opportunity.shortRate,
+        opportunities[0].opportunity.longRate.toDecimal() -
+          opportunities[0].opportunity.shortRate.toDecimal(),
       );
       // Make sure historical spread is different from current
       mockHistoricalService.getAverageSpread.mockReturnValue(
@@ -363,12 +373,13 @@ describe('PortfolioOptimizer', () => {
   describe('calculateDataQualityRiskFactor', () => {
     const createMockOpportunity = (): ArbitrageOpportunity => ({
       symbol: 'ETHUSDT',
+      strategyType: 'perp-perp',
       longExchange: ExchangeType.LIGHTER,
       shortExchange: ExchangeType.ASTER,
-      longRate: 0.0003,
-      shortRate: 0.0001,
-      spread: 0.0002,
-      expectedReturn: 0.219,
+      longRate: Percentage.fromDecimal(0.0003),
+      shortRate: Percentage.fromDecimal(0.0001),
+      spread: Percentage.fromDecimal(0.0002),
+      expectedReturn: Percentage.fromDecimal(0.219),
       longMarkPrice: 3001,
       shortMarkPrice: 3000,
       longOpenInterest: 1000000,
@@ -447,12 +458,13 @@ describe('PortfolioOptimizer', () => {
   describe('validateHistoricalDataQuality', () => {
     const createMockOpportunity = (): ArbitrageOpportunity => ({
       symbol: 'ETHUSDT',
+      strategyType: 'perp-perp',
       longExchange: ExchangeType.LIGHTER,
       shortExchange: ExchangeType.ASTER,
-      longRate: 0.0003,
-      shortRate: 0.0001,
-      spread: 0.0002,
-      expectedReturn: 0.219,
+      longRate: Percentage.fromDecimal(0.0003),
+      shortRate: Percentage.fromDecimal(0.0001),
+      spread: Percentage.fromDecimal(0.0002),
+      expectedReturn: Percentage.fromDecimal(0.219),
       longMarkPrice: 3001,
       shortMarkPrice: 3000,
       longOpenInterest: 1000000,
@@ -477,7 +489,7 @@ describe('PortfolioOptimizer', () => {
       const opportunity = createMockOpportunity();
       // Historical spread must be different from current spread to pass validation
       const currentSpread = Math.abs(
-        opportunity.longRate - opportunity.shortRate,
+        opportunity.longRate.toDecimal() - opportunity.shortRate.toDecimal(),
       );
       const historicalSpread = currentSpread + 0.0001; // Different from current
 
@@ -492,7 +504,7 @@ describe('PortfolioOptimizer', () => {
     it('should reject when historical spread equals current spread (fallback)', () => {
       const opportunity = createMockOpportunity();
       const currentSpread = Math.abs(
-        opportunity.longRate - opportunity.shortRate,
+        opportunity.longRate.toDecimal() - opportunity.shortRate.toDecimal(),
       );
       const historicalSpread = currentSpread; // Same as current
 

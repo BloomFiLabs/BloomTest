@@ -20,7 +20,7 @@ describe('IdleFundsManager', () => {
   beforeEach(() => {
     config = StrategyConfig.withDefaults();
     mockExecutionPlanBuilder = {
-      buildExecutionPlan: jest.fn(),
+      buildPlan: jest.fn(),
     } as any;
     mockCostCalculator = {} as any;
 
@@ -63,12 +63,13 @@ describe('IdleFundsManager', () => {
     markPrice: number,
   ): PerpPosition => {
     return new PerpPosition(
-      symbol,
       exchange,
+      symbol,
       side,
       size,
       markPrice,
       markPrice,
+      0,
       undefined,
       undefined,
       undefined,
@@ -84,6 +85,7 @@ describe('IdleFundsManager', () => {
   ): ArbitrageOpportunity => {
     return {
       symbol,
+      strategyType: 'perp-perp',
       longExchange,
       shortExchange,
       longRate: Percentage.fromDecimal(0.001),
@@ -119,17 +121,17 @@ describe('IdleFundsManager', () => {
       );
 
       expect(result.isSuccess).toBe(true);
-      expect(result.value.length).toBe(2);
+      expect((result as any).value.length).toBe(2);
       expect(
-        result.value.some(
-          (info) =>
+        (result as any).value.some(
+          (info: any) =>
             info.exchange === ExchangeType.HYPERLIQUID &&
             info.idleBalance === 1000,
         ),
       ).toBe(true);
       expect(
-        result.value.some(
-          (info) =>
+        (result as any).value.some(
+          (info: any) =>
             info.exchange === ExchangeType.LIGHTER && info.idleBalance === 500,
         ),
       ).toBe(true);
@@ -155,7 +157,7 @@ describe('IdleFundsManager', () => {
       );
 
       expect(result.isSuccess).toBe(true);
-      expect(result.value.length).toBe(0);
+      expect((result as any).value.length).toBe(0);
     });
 
     it('should detect idle funds from failed orders after timeout', async () => {
@@ -193,7 +195,7 @@ describe('IdleFundsManager', () => {
       );
 
       expect(result.isSuccess).toBe(true);
-      const failedOrderIdle = result.value.find(
+      const failedOrderIdle = (result as any).value.find(
         (info) => info.reason === 'unfilled_order',
       );
       expect(failedOrderIdle).toBeDefined();
@@ -231,7 +233,7 @@ describe('IdleFundsManager', () => {
 
       expect(result.isSuccess).toBe(true);
       // Should detect idle funds (990 - buffer)
-      const hyperliquidIdle = result.value.find(
+      const hyperliquidIdle = (result as any).value.find(
         (info) => info.exchange === ExchangeType.HYPERLIQUID,
       );
       expect(hyperliquidIdle).toBeDefined();
@@ -349,8 +351,8 @@ describe('IdleFundsManager', () => {
       );
 
       expect(result.isSuccess).toBe(true);
-      expect(result.value.length).toBeGreaterThan(0);
-      const bestPerformingAlloc = result.value.find(
+      expect((result as any).value.length).toBeGreaterThan(0);
+      const bestPerformingAlloc = (result as any).value.find(
         (alloc) => alloc.target.reason === 'best_performing',
       );
       expect(bestPerformingAlloc).toBeDefined();
@@ -399,13 +401,13 @@ describe('IdleFundsManager', () => {
       );
 
       expect(result.isSuccess).toBe(true);
-      expect(result.value.length).toBeGreaterThan(0);
-      const nextOpportunityAlloc = result.value.find(
+      expect((result as any).value.length).toBeGreaterThan(0);
+      const nextOpportunityAlloc = (result as any).value.find(
         (alloc) => alloc.target.reason === 'next_opportunity',
       );
       expect(nextOpportunityAlloc).toBeDefined();
       // Should allocate to ETHUSDT first (higher expected return)
-      const ethAlloc = result.value.find(
+      const ethAlloc = (result as any).value.find(
         (alloc) => alloc.target.opportunity.symbol === 'ETHUSDT',
       );
       expect(ethAlloc).toBeDefined();
@@ -431,7 +433,7 @@ describe('IdleFundsManager', () => {
       );
 
       expect(result.isSuccess).toBe(true);
-      expect(result.value.length).toBe(0);
+      expect((result as any).value.length).toBe(0);
     });
 
     it('should return empty array if no opportunities', () => {
@@ -454,7 +456,7 @@ describe('IdleFundsManager', () => {
       );
 
       expect(result.isSuccess).toBe(true);
-      expect(result.value.length).toBe(0);
+      expect((result as any).value.length).toBe(0);
     });
   });
 
@@ -479,7 +481,7 @@ describe('IdleFundsManager', () => {
         },
       ];
 
-      mockExecutionPlanBuilder.buildExecutionPlan.mockResolvedValue({
+      mockExecutionPlanBuilder.buildPlan.mockResolvedValue({
         isSuccess: true,
         value: {
           longOrder: { price: 100 } as any,
@@ -504,8 +506,8 @@ describe('IdleFundsManager', () => {
       );
 
       expect(result.isSuccess).toBe(true);
-      expect(result.value.allocated).toBe(100);
-      expect(result.value.allocations).toBe(1);
+      expect((result as any).value.allocated).toBe(100);
+      expect((result as any).value.allocations).toBe(1);
       expect(
         mockAdapters.get(ExchangeType.HYPERLIQUID)!.placeOrder,
       ).toHaveBeenCalled();
@@ -536,7 +538,7 @@ describe('IdleFundsManager', () => {
       mockAdapters
         .get(ExchangeType.HYPERLIQUID)!
         .cancelOrder.mockResolvedValue(true);
-      mockExecutionPlanBuilder.buildExecutionPlan.mockResolvedValue({
+      mockExecutionPlanBuilder.buildPlan.mockResolvedValue({
         isSuccess: true,
         value: {
           longOrder: { price: 100 } as any,
@@ -585,7 +587,7 @@ describe('IdleFundsManager', () => {
         },
       ];
 
-      mockExecutionPlanBuilder.buildExecutionPlan.mockResolvedValue({
+      mockExecutionPlanBuilder.buildPlan.mockResolvedValue({
         isSuccess: false,
         error: { message: 'Build failed' } as any,
       } as any);
@@ -596,16 +598,16 @@ describe('IdleFundsManager', () => {
       );
 
       expect(result.isSuccess).toBe(true);
-      expect(result.value.allocated).toBe(0);
-      expect(result.value.allocations).toBe(0);
+      expect((result as any).value.allocated).toBe(0);
+      expect((result as any).value.allocations).toBe(0);
     });
 
     it('should return empty result for empty allocations', async () => {
       const result = await manager.executeAllocations([], mockAdapters);
 
       expect(result.isSuccess).toBe(true);
-      expect(result.value.allocated).toBe(0);
-      expect(result.value.allocations).toBe(0);
+      expect((result as any).value.allocated).toBe(0);
+      expect((result as any).value.allocations).toBe(0);
     });
   });
 });

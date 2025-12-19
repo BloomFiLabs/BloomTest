@@ -56,7 +56,12 @@ describe('OptimalLeverageService', () => {
     // Mock HistoricalFundingRateService
     mockHistoricalService = {
       getHistoricalData: jest.fn().mockReturnValue([]),
-      getAggregatedHistoricalData: jest.fn().mockResolvedValue(null),
+      getHistoricalMetrics: jest.fn().mockReturnValue(null),
+      getSpreadVolatilityMetrics: jest.fn().mockReturnValue(null),
+      getConsistencyScore: jest.fn().mockReturnValue(0.5),
+      getAverageRateForPeriod: jest.fn().mockReturnValue(null),
+      getWeightedAverageRate: jest.fn().mockReturnValue(0.0001),
+      getAverageSpread: jest.fn().mockReturnValue(0.0002),
     };
 
     service = new OptimalLeverageService(
@@ -145,7 +150,7 @@ describe('OptimalLeverageService', () => {
       };
 
       const serviceWithOverride = new OptimalLeverageService(
-        configWithOverride as ConfigService,
+        configWithOverride as unknown as ConfigService,
         mockFundingPaymentsService as RealFundingPaymentsService,
         mockHistoricalService as IHistoricalFundingRateService,
       );

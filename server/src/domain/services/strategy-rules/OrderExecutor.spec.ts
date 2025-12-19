@@ -5,6 +5,8 @@ import { CostCalculator } from './CostCalculator';
 import { ExecutionPlanBuilder } from './ExecutionPlanBuilder';
 import { StrategyConfig } from '../../value-objects/StrategyConfig';
 import { PositionSize } from '../../value-objects/PositionSize';
+import { Percentage } from '../../value-objects/Percentage';
+import { Result } from '../../common/Result';
 import {
   ArbitrageExecutionPlan,
   ArbitrageExecutionResult,
@@ -35,7 +37,7 @@ describe('OrderExecutor', () => {
     config = StrategyConfig.withDefaults();
 
     mockPositionManager = {
-      handleAsymmetricFills: jest.fn().mockResolvedValue(undefined),
+      handleAsymmetricFills: jest.fn().mockResolvedValue(Result.success(undefined)),
     } as any;
 
     mockCostCalculator = {} as any;
@@ -84,9 +86,9 @@ describe('OrderExecutor', () => {
         OrderStatus.FILLED,
         'ETHUSDT',
         OrderSide.LONG,
-        1.0,
-        1.0,
-        3000,
+        undefined, // clientOrderId
+        1.0, // filledSize
+        3000, // averageFillPrice
       );
       adapter.getOrderStatus.mockResolvedValue(filledResponse);
 
@@ -126,9 +128,9 @@ describe('OrderExecutor', () => {
             OrderStatus.FILLED,
             'ETHUSDT',
             OrderSide.LONG,
-            1.0,
-            1.0,
-            3000,
+            undefined, // clientOrderId
+            1.0,       // filledSize
+            3000,      // averageFillPrice
           ),
         );
       });
@@ -228,7 +230,7 @@ describe('OrderExecutor', () => {
         ),
       );
       // Mock cancelOrder to succeed (called after max retries to prevent orphaned orders)
-      adapter.cancelOrder.mockResolvedValue(undefined);
+      adapter.cancelOrder.mockResolvedValue(true);
 
       const result = await executor.waitForOrderFill(
         adapter,
@@ -252,12 +254,13 @@ describe('OrderExecutor', () => {
     const createMockPlan = (): ArbitrageExecutionPlan => ({
       opportunity: {
         symbol: 'ETHUSDT',
+        strategyType: 'perp-perp',
         longExchange: ExchangeType.LIGHTER,
         shortExchange: ExchangeType.ASTER,
-        longRate: 0.0003,
-        shortRate: 0.0001,
-        spread: 0.0002,
-        expectedReturn: 0.219,
+        longRate: Percentage.fromDecimal(0.0003),
+        shortRate: Percentage.fromDecimal(0.0001),
+        spread: Percentage.fromDecimal(0.0002),
+        expectedReturn: Percentage.fromDecimal(0.219),
         longMarkPrice: 3001,
         shortMarkPrice: 3000,
         longOpenInterest: 1000000,
@@ -301,9 +304,9 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.LONG,
-          1.0,
-          1.0,
-          3000,
+          undefined, // clientOrderId
+          1.0,       // filledSize
+          3000,      // averageFillPrice
         ),
       );
       asterAdapter.placeOrder.mockResolvedValue(
@@ -312,9 +315,9 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.SHORT,
-          1.0,
-          1.0,
-          3001,
+          undefined, // clientOrderId
+          1.0,       // filledSize
+          3001,      // averageFillPrice
         ),
       );
 
@@ -366,9 +369,9 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.SHORT,
-          1.0,
-          1.0,
-          3001,
+          undefined, // clientOrderId
+          1.0,       // filledSize
+          3001,      // averageFillPrice
         ),
       );
 
@@ -429,12 +432,13 @@ describe('OrderExecutor', () => {
     const createMockOpportunity = () => ({
       opportunity: {
         symbol: 'ETHUSDT',
+        strategyType: 'perp-perp',
         longExchange: ExchangeType.LIGHTER,
         shortExchange: ExchangeType.ASTER,
-        longRate: 0.0003,
-        shortRate: 0.0001,
-        spread: 0.0002,
-        expectedReturn: 0.219,
+        longRate: Percentage.fromDecimal(0.0003),
+        shortRate: Percentage.fromDecimal(0.0001),
+        spread: Percentage.fromDecimal(0.0002),
+        expectedReturn: Percentage.fromDecimal(0.219),
         longMarkPrice: 3001,
         shortMarkPrice: 3000,
         longOpenInterest: 1000000,
@@ -490,7 +494,7 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.LONG,
-          1.0,
+          undefined,
           1.0,
           3000,
         ),
@@ -501,7 +505,7 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.SHORT,
-          1.0,
+          undefined,
           1.0,
           3001,
         ),
@@ -514,7 +518,7 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.LONG,
-          1.0,
+          undefined,
           1.0,
           3000,
         ),
@@ -525,7 +529,7 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.SHORT,
-          1.0,
+          undefined,
           1.0,
           3001,
         ),
@@ -574,7 +578,7 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.LONG,
-          1.0,
+          undefined,
           1.0,
           3000,
         ),
@@ -585,7 +589,7 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.SHORT,
-          1.0,
+          undefined,
           1.0,
           3001,
         ),
@@ -598,7 +602,7 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.LONG,
-          1.0,
+          undefined,
           1.0,
           3000,
         ),
@@ -609,7 +613,7 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.SHORT,
-          1.0,
+          undefined,
           1.0,
           3001,
         ),
@@ -659,7 +663,7 @@ describe('OrderExecutor', () => {
             OrderStatus.FILLED,
             'ETHUSDT',
             OrderSide.LONG,
-            1.0,
+            undefined,
             1.0,
             3000,
           ),
@@ -671,7 +675,7 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.SHORT,
-          1.0,
+          undefined,
           1.0,
           3001,
         ),
@@ -684,7 +688,7 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.LONG,
-          1.0,
+          undefined,
           1.0,
           3000,
         ),
@@ -695,7 +699,7 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.SHORT,
-          1.0,
+          undefined,
           1.0,
           3001,
         ),
@@ -753,7 +757,7 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.LONG,
-          1.0,
+          undefined,
           1.0,
           3000,
         );
@@ -768,7 +772,7 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.SHORT,
-          1.0,
+          undefined,
           1.0,
           3001,
         );
@@ -794,12 +798,23 @@ describe('OrderExecutor', () => {
             timeInForce: TimeInForce.GTC,
             reduceOnly: false,
           } as PerpOrderRequest,
-          positionSize: new PositionSize(1.0, 3000.5),
+          positionSize: PositionSize.fromBaseAsset(1.0, 2.0),
           expectedNetReturn: 10,
-          estimatedCosts: { total: 1 },
+          estimatedCosts: { total: 1, fees: 0.5, slippage: 0.5 },
           longMarkPrice: 3000,
           shortMarkPrice: 3001,
-          breakEvenDays: 1,
+          timestamp: new Date(),
+          opportunity: {
+            symbol: 'ETHUSDT',
+            strategyType: 'perp-perp',
+            longExchange: ExchangeType.LIGHTER,
+            shortExchange: ExchangeType.ASTER,
+            longRate: Percentage.fromDecimal(0.001),
+            shortRate: Percentage.fromDecimal(-0.001),
+            spread: Percentage.fromDecimal(0.01),
+            expectedReturn: Percentage.fromDecimal(0.35),
+            timestamp: new Date(),
+          },
         } as ArbitrageExecutionPlan,
         opportunity: {
           symbol: 'ETHUSDT',
@@ -848,7 +863,7 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.LONG,
-          1.0,
+          undefined,
           1.0,
           3000,
         );
@@ -863,7 +878,7 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.SHORT,
-          1.0,
+          undefined,
           1.0,
           3001,
         );
@@ -889,12 +904,23 @@ describe('OrderExecutor', () => {
             timeInForce: TimeInForce.GTC,
             reduceOnly: false,
           } as PerpOrderRequest,
-          positionSize: new PositionSize(1.0, 3000.5),
+          positionSize: PositionSize.fromBaseAsset(1.0, 2.0),
           expectedNetReturn: 10,
-          estimatedCosts: { total: 1 },
+          estimatedCosts: { total: 1, fees: 0.5, slippage: 0.5 },
           longMarkPrice: 3000,
           shortMarkPrice: 3001,
-          breakEvenDays: 1,
+          timestamp: new Date(),
+          opportunity: {
+            symbol: 'ETHUSDT',
+            strategyType: 'perp-perp',
+            longExchange: ExchangeType.LIGHTER,
+            shortExchange: ExchangeType.ASTER,
+            longRate: Percentage.fromDecimal(0.001),
+            shortRate: Percentage.fromDecimal(-0.001),
+            spread: Percentage.fromDecimal(0.01),
+            expectedReturn: Percentage.fromDecimal(0.35),
+            timestamp: new Date(),
+          },
         } as ArbitrageExecutionPlan,
         opportunity: {
           symbol: 'ETHUSDT',
@@ -952,7 +978,7 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.LONG,
-          1.0,
+          undefined,
           1.0,
           3000,
         );
@@ -967,7 +993,7 @@ describe('OrderExecutor', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.SHORT,
-          1.0,
+          undefined,
           1.0,
           3001,
         );
@@ -993,12 +1019,23 @@ describe('OrderExecutor', () => {
             timeInForce: TimeInForce.GTC,
             reduceOnly: false,
           } as PerpOrderRequest,
-          positionSize: new PositionSize(1.0, 3000.5),
+          positionSize: PositionSize.fromBaseAsset(1.0, 2.0),
           expectedNetReturn: 10,
-          estimatedCosts: { total: 1 },
+          estimatedCosts: { total: 1, fees: 0.5, slippage: 0.5 },
           longMarkPrice: 3000,
           shortMarkPrice: 3001,
-          breakEvenDays: 1,
+          timestamp: new Date(),
+          opportunity: {
+            symbol: 'ETHUSDT',
+            strategyType: 'perp-perp',
+            longExchange: ExchangeType.LIGHTER,
+            shortExchange: ExchangeType.ASTER,
+            longRate: Percentage.fromDecimal(0.001),
+            shortRate: Percentage.fromDecimal(-0.001),
+            spread: Percentage.fromDecimal(0.01),
+            expectedReturn: Percentage.fromDecimal(0.35),
+            timestamp: new Date(),
+          },
         } as ArbitrageExecutionPlan,
         opportunity: {
           symbol: 'ETHUSDT',

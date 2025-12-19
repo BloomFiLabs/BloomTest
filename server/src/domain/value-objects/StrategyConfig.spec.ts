@@ -234,10 +234,10 @@ describe('StrategyConfig', () => {
       expect(config.leverageOverrides.get('ETH')).toBe(3);
     });
 
-    it('should default to static leverage when useDynamicLeverage is false', () => {
+    it('should default to dynamic leverage (useDynamicLeverage = true)', () => {
       const config = StrategyConfig.withDefaults();
 
-      expect(config.useDynamicLeverage).toBe(false);
+      expect(config.useDynamicLeverage).toBe(true);
     });
 
     it('should have default min and max leverage values', () => {

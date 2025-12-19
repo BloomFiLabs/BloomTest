@@ -963,7 +963,7 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
         } else {
           this.logger.warn(
             `Unexpected l2Book format for ${baseCoin}: levels has ${Array.isArray(levels) ? levels.length : 'non-array'} entries`,
-          );
+            );
         }
 
         if (bestBid > 0 && bestAsk > 0) {

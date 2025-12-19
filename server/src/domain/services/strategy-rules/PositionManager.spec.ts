@@ -34,9 +34,9 @@ describe('PositionManager', () => {
             OrderStatus.FILLED,
             'ETHUSDT',
             OrderSide.LONG,
-            1.0,
-            1.0,
-            3000,
+            undefined, // clientOrderId
+            1.0,       // filledSize
+            3000,      // averageFillPrice
           ),
         ),
     } as any;
@@ -172,7 +172,7 @@ describe('PositionManager', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.SHORT,
-          1.0,
+          undefined,
           1.0,
           3000,
         ),
@@ -183,7 +183,7 @@ describe('PositionManager', () => {
           OrderStatus.FILLED,
           'BTCUSDT',
           OrderSide.LONG,
-          0.5,
+          undefined,
           0.5,
           50000,
         ),
@@ -237,7 +237,7 @@ describe('PositionManager', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.SHORT,
-          1.0,
+          undefined,
           1.0,
           3000,
         ),
@@ -344,7 +344,7 @@ describe('PositionManager', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.SHORT,
-          1.0,
+          undefined,
           1.0,
           3000,
         ),
@@ -432,6 +432,7 @@ describe('PositionManager', () => {
         longOpenInterest: 1000000,
         shortOpenInterest: 1000000,
         timestamp: new Date(),
+        strategyType: 'perp-perp',
       },
       timestamp: new Date(Date.now() - 3 * 60 * 1000), // 3 minutes ago (exceeds timeout)
     });
@@ -453,16 +454,16 @@ describe('PositionManager', () => {
       const lighterAdapter = mockAdapters.get(ExchangeType.LIGHTER)!;
       const asterAdapter = mockAdapters.get(ExchangeType.ASTER)!;
 
-      asterAdapter.cancelOrder.mockResolvedValue(undefined);
+      asterAdapter.cancelOrder.mockResolvedValue(true);
       asterAdapter.placeOrder.mockResolvedValue(
         new PerpOrderResponse(
           'market-1',
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.SHORT,
-          1.0,
-          1.0,
-          3001,
+          undefined, // clientOrderId
+          1.0,       // filledSize
+          3001,      // averageFillPrice
         ),
       );
 
@@ -499,16 +500,16 @@ describe('PositionManager', () => {
       const lighterAdapter = mockAdapters.get(ExchangeType.LIGHTER)!;
       const asterAdapter = mockAdapters.get(ExchangeType.ASTER)!;
 
-      asterAdapter.cancelOrder.mockResolvedValue(undefined);
+      asterAdapter.cancelOrder.mockResolvedValue(true);
       lighterAdapter.placeOrder.mockResolvedValue(
         new PerpOrderResponse(
           'close-1',
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.SHORT,
-          1.0,
-          1.0,
-          3001,
+          undefined, // clientOrderId
+          1.0,       // filledSize
+          3001,      // averageFillPrice
         ),
       );
 
@@ -597,7 +598,7 @@ describe('PositionManager', () => {
           OrderStatus.FILLED,
           'ETHUSDT',
           OrderSide.SHORT,
-          1.0,
+          undefined,
           1.0,
           3000,
         ),

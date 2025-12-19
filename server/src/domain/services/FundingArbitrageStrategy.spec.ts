@@ -28,6 +28,18 @@ describe('FundingArbitrageStrategy', () => {
   let strategy: FundingArbitrageStrategy;
   let mockAggregator: jest.Mocked<FundingRateAggregator>;
   let mockAdapters: Map<ExchangeType, jest.Mocked<IPerpExchangeAdapter>>;
+  let mockHistoricalService: any;
+  let mockLossTracker: any;
+  let mockPortfolioRiskAnalyzer: any;
+  let mockPortfolioOptimizer: any;
+  let mockOrderExecutor: any;
+  let mockPositionManager: any;
+  let mockBalanceManager: any;
+  let mockOpportunityEvaluator: any;
+  let mockExecutionPlanBuilder: any;
+  let mockPerpSpotExecutionPlanBuilder: any;
+  let mockCostCalculator: any;
+  let mockBalanceRebalancer: any;
 
   // Create a minimal mock implementation
   const createMockStrategy = () => {
@@ -141,6 +153,12 @@ describe('FundingArbitrageStrategy', () => {
         .mockResolvedValue({ isSuccess: () => true, value: null }),
     } as any;
 
+    const mockPerpSpotExecutionPlanBuilder = {
+      buildPlan: jest
+        .fn()
+        .mockResolvedValue({ isSuccess: () => true, value: null }),
+    } as any;
+
     const mockCostCalculator = {
       calculateTotalCosts: jest.fn().mockReturnValue(0),
       calculateSlippageCost: jest.fn().mockReturnValue(0),
@@ -162,6 +180,7 @@ describe('FundingArbitrageStrategy', () => {
       mockBalanceManager,
       mockOpportunityEvaluator,
       mockExecutionPlanBuilder,
+      mockPerpSpotExecutionPlanBuilder,
       mockCostCalculator,
       strategyConfig,
       undefined, // performanceLogger
@@ -866,6 +885,12 @@ describe('FundingArbitrageStrategy', () => {
           .mockResolvedValue({ isSuccess: () => true, value: null }),
       } as any;
 
+      const mockPerpSpotExecutionPlanBuilder = {
+        buildPlan: jest
+          .fn()
+          .mockResolvedValue({ isSuccess: () => true, value: null }),
+      } as any;
+
       const mockCostCalculator = {
         calculateTotalCosts: jest.fn().mockReturnValue(0),
         calculateSlippageCost: jest.fn().mockReturnValue(0),
@@ -896,6 +921,7 @@ describe('FundingArbitrageStrategy', () => {
         mockBalanceManager,
         mockOpportunityEvaluator,
         mockExecutionPlanBuilder,
+        mockPerpSpotExecutionPlanBuilder,
         mockCostCalculator,
         strategyConfig,
         undefined, // performanceLogger
@@ -1324,6 +1350,12 @@ describe('FundingArbitrageStrategy', () => {
           .mockResolvedValue({ isSuccess: () => true, value: null }),
       } as any;
 
+      const mockPerpSpotExecutionPlanBuilder = {
+        buildPlan: jest
+          .fn()
+          .mockResolvedValue({ isSuccess: () => true, value: null }),
+      } as any;
+
       const mockCostCalculator = {
         calculateTotalCosts: jest.fn().mockReturnValue(0),
         calculateSlippageCost: jest.fn().mockReturnValue(0),
@@ -1344,6 +1376,7 @@ describe('FundingArbitrageStrategy', () => {
         mockBalanceManager,
         mockOpportunityEvaluator,
         mockExecutionPlanBuilder,
+        mockPerpSpotExecutionPlanBuilder,
         mockCostCalculator,
         strategyConfig,
         undefined, // performanceLogger
