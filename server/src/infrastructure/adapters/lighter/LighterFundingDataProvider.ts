@@ -61,42 +61,61 @@ export class LighterFundingDataProvider
    * Fetch all funding rates from Lighter API and cache them
    */
   async refreshFundingRates(): Promise<void> {
-    try {
-      const fundingUrl = `${this.baseUrl}/api/v1/funding-rates`;
+    const maxRetries = 5;
+    const baseDelay = 3000;
+    const maxDelay = 60000;
 
-      const response = await axios.get<LighterFundingRatesResponse>(
-        fundingUrl,
-        {
-          timeout: 10000,
-        },
-      );
-
-      if (
-        response.data?.code === 200 &&
-        Array.isArray(response.data.funding_rates)
-      ) {
-        // Clear old cache
-        this.fundingRatesCache.clear();
-
-        // Populate cache with all funding rates
-        for (const rate of response.data.funding_rates) {
-          this.fundingRatesCache.set(rate.market_id, rate.rate);
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        if (attempt > 0) {
+          const delay = Math.min(baseDelay * Math.pow(2, attempt - 1), maxDelay);
+          await new Promise((resolve) => setTimeout(resolve, delay));
         }
 
-        this.lastCacheUpdate = Date.now();
-        this.logger.log(
-          `Cached ${this.fundingRatesCache.size} Lighter funding rates`,
+        const fundingUrl = `${this.baseUrl}/api/v1/funding-rates`;
+        const response = await axios.get<LighterFundingRatesResponse>(
+          fundingUrl,
+          {
+            timeout: 10000,
+          },
         );
-      } else {
-        this.logger.warn(
-          'Lighter funding-rates API returned unexpected format',
+
+        if (
+          response.data?.code === 200 &&
+          Array.isArray(response.data.funding_rates)
+        ) {
+          // Clear old cache
+          this.fundingRatesCache.clear();
+
+          // Populate cache with all funding rates
+          for (const rate of response.data.funding_rates) {
+            this.fundingRatesCache.set(rate.market_id, rate.rate);
+          }
+
+          this.lastCacheUpdate = Date.now();
+          this.logger.log(
+            `Cached ${this.fundingRatesCache.size} Lighter funding rates`,
+          );
+          return; // Success
+        } else {
+          this.logger.warn(
+            'Lighter funding-rates API returned unexpected format',
+          );
+          break;
+        }
+      } catch (error: any) {
+        const statusCode = error?.response?.status;
+        if (statusCode === 429 && attempt < maxRetries - 1) {
+          this.logger.debug(
+            `Rate limited (429) refreshing Lighter funding rates (attempt ${attempt + 1}/${maxRetries})...`,
+          );
+          continue;
+        }
+        this.logger.error(
+          `Failed to refresh Lighter funding rates: ${error.message}`,
         );
+        break;
       }
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to refresh Lighter funding rates: ${error.message}`,
-      );
-      // Don't throw - allow using stale cache if available
     }
   }
 

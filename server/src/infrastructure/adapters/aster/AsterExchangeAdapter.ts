@@ -108,6 +108,33 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
       timeout: this.config.getTimeout(),
     });
 
+    // Add retry interceptor for 429 errors
+    this.client.interceptors.response.use(
+      (response) => response,
+      async (error) => {
+        const config = error.config;
+        if (!config || error.response?.status !== 429) {
+          return Promise.reject(error);
+        }
+
+        // Retry with exponential backoff
+        config.retryCount = config.retryCount || 0;
+        const maxRetries = 5;
+        if (config.retryCount >= maxRetries) {
+          return Promise.reject(error);
+        }
+
+        config.retryCount += 1;
+        const delay = Math.min(3000 * Math.pow(2, config.retryCount - 1), 60000);
+        this.logger.debug(
+          `Aster API rate limited (429). Retrying in ${delay}ms (attempt ${config.retryCount}/${maxRetries})...`,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return this.client(config);
+      },
+    );
+
     if (user) {
       // Removed adapter initialization log - only execution logs shown
     } else if (apiKey) {

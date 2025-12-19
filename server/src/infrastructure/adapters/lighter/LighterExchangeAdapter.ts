@@ -2933,23 +2933,45 @@ export class LighterExchangeAdapter
       await this.ensureInitialized();
       const marketIndex = await this.getMarketIndex(symbol);
 
-      // Fetch market info from Lighter API
-      const response = await axios.get(`${this.config.baseUrl}/api/v1/markets`);
-      const markets = response.data?.data || response.data;
+      // Fetch market info from Lighter API with retry logic
+      const maxRetries = 3;
+      let lastError: any = null;
 
-      if (Array.isArray(markets)) {
-        const marketData = markets.find(
-          (m: any) => m.market_index === marketIndex || m.marketIndex === marketIndex,
-        );
-        if (marketData?.max_leverage || marketData?.maxLeverage) {
-          return parseFloat(marketData.max_leverage || marketData.maxLeverage);
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          if (attempt > 0) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+          }
+
+          const response = await axios.get(`${this.config.baseUrl}/api/v1/markets`, {
+            timeout: 10000,
+          });
+          const markets = response.data?.data || response.data?.markets || response.data;
+
+          if (Array.isArray(markets)) {
+            const marketData = markets.find(
+              (m: any) => m.market_index === marketIndex || m.marketIndex === marketIndex,
+            );
+            if (marketData?.max_leverage || marketData?.maxLeverage) {
+              return parseFloat(marketData.max_leverage || marketData.maxLeverage);
+            }
+          }
+          break; // If we got a valid response but no market data, break and return default
+        } catch (err: any) {
+          lastError = err;
+          if (err.response?.status === 429) continue;
+          break;
         }
       }
 
       // Default max leverage for Lighter
       return 20;
     } catch (error: any) {
-      this.logger.warn(`Failed to get max leverage for ${symbol}: ${error.message}`);
+      // Don't log full 404/429 errors as warnings to keep logs clean
+      const status = error.response?.status;
+      if (status !== 404 && status !== 429) {
+        this.logger.warn(`Failed to get max leverage for ${symbol}: ${error.message}`);
+      }
       return 10; // Safe default
     }
   }
