@@ -929,16 +929,18 @@ export class LighterExchangeAdapter
             }
 
             // Use createUnifiedOrder with MARKET order type (per Lighter docs)
-            // For opening market orders: orderExpiry = 0 (consistent with limit orders)
+            // Based on working example: Market orders have OrderExpiry=0, but ExpiredAt is still set
+            const now = Date.now();
             orderParams = {
               marketIndex,
-              clientOrderIndex: Date.now(),
+              clientOrderIndex: 0, // Using 0 to match working example pattern
               baseAmount,
               isAsk,
               orderType: LighterOrderType.MARKET,
               idealPrice: market.priceToUnits(idealPrice),
               maxSlippage: 0.01, // 1% max slippage
-              orderExpiry: 0, // 0 for opening orders (consistent with limit orders)
+              orderExpiry: 0, // 0 for market orders (IOC)
+              expiredAt: now, // Set to current time for market orders
             };
           }
         } else {
@@ -953,20 +955,25 @@ export class LighterExchangeAdapter
             request.timeInForce === TimeInForce.IOC ? 0 : 1;
 
           // ALIGNED EXPIRY: Lighter GTT orders require a MINIMUM of 10 minutes expiry.
-          // We use 15 minutes (900,000ms) to ensure we satisfy this requirement.
+          // Based on working examples:
+          // - Market order: OrderExpiry=0, ExpiredAt=current_timestamp
+          // - Limit GTT order: OrderExpiry=1766174101235 (~18min from creation), ExpiredAt=1766173020569 (current time)
+          // Pattern: ExpiredAt = now (when order is created), OrderExpiry = now + expiry duration
           // The API expects a Unix timestamp in MILLISECONDS (13 digits).
           // For IOC orders, expiry should be 0
-          // Both OrderExpiry and ExpiredAt must be set for GTT orders (based on actual working examples)
-          // Based on example: OrderExpiry is the actual expiry time, ExpiredAt may be earlier
-          const MIN_GTT_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes (actual expiry)
-          const MIN_REQUIRED_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes (minimum required)
+          // Both OrderExpiry and ExpiredAt must be set for GTT orders
           const now = Date.now();
-          const orderExpiry =
-            timeInForce === 1 ? now + MIN_GTT_EXPIRY_MS : 0;
-          // Set expiredAt to minimum required expiry (10 minutes)
-          // This matches the pattern where ExpiredAt is earlier than OrderExpiry
-          const expiredAt =
-            timeInForce === 1 ? now + MIN_REQUIRED_EXPIRY_MS : 0;
+          let orderExpiry = 0;
+          let expiredAt = 0;
+          
+          if (timeInForce === 1) {
+            // GTT order: Based on working example pattern
+            // ExpiredAt is set to current time (when order is created)
+            // OrderExpiry is set to actual expiry time (15 minutes from now, minimum 10 minutes required)
+            const MIN_GTT_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes (actual expiry, above 10min minimum)
+            expiredAt = now; // Set to current time (matches working example: ExpiredAt = creation time)
+            orderExpiry = now + MIN_GTT_EXPIRY_MS; // 15 minutes from now (actual expiry)
+          }
 
           this.logger.debug(
             `LIMIT order for ${request.symbol}: Using ${timeInForce === 1 ? 'GTC/GTT' : 'IOC'} (timeInForce=${timeInForce}) ` +
@@ -975,7 +982,7 @@ export class LighterExchangeAdapter
 
           orderParams = {
             marketIndex,
-            clientOrderIndex: Date.now(),
+            clientOrderIndex: 0, // Using 0 to match working example pattern
             baseAmount,
             price: market.priceToUnits(request.price),
             isAsk,
