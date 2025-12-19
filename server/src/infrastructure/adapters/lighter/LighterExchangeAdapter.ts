@@ -804,7 +804,7 @@ export class LighterExchangeAdapter
             const [tx, hash, error] =
               await this.signerClient!.createMarketOrder({
                 marketIndex,
-                clientOrderIndex: Date.now(),
+                clientOrderIndex: 0, // Forced to 0 as per working examples
                 baseAmount,
                 avgExecutionPrice: market.priceToUnits(adjustedPrice),
                 isAsk,
@@ -929,16 +929,18 @@ export class LighterExchangeAdapter
             }
 
             // Use createUnifiedOrder with MARKET order type (per Lighter docs)
-            // For opening market orders: orderExpiry = 0 (consistent with limit orders)
+            // For opening market orders: orderExpiry = 0
+            const now = Date.now();
             orderParams = {
               marketIndex,
-              clientOrderIndex: Date.now(),
+              clientOrderIndex: 0, // Forced to 0 as per working examples
               baseAmount,
               isAsk,
               orderType: LighterOrderType.MARKET,
               idealPrice: market.priceToUnits(idealPrice),
               maxSlippage: 0.01, // 1% max slippage
-              orderExpiry: 0, // 0 for opening orders (consistent with limit orders)
+              orderExpiry: 0, // 0 for opening orders
+              expiredAt: now, // Set to current time for market orders
             };
           }
         } else {
@@ -966,7 +968,7 @@ export class LighterExchangeAdapter
 
           orderParams = {
             marketIndex,
-            clientOrderIndex: Date.now(),
+            clientOrderIndex: 0, // Forced to 0 as per working examples
             baseAmount,
             price: market.priceToUnits(request.price),
             isAsk,
