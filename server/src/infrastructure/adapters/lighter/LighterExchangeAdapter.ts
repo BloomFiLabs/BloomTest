@@ -947,16 +947,30 @@ export class LighterExchangeAdapter
             throw new Error('Limit price is required for LIMIT orders');
           }
 
+          // Determine timeInForce: 0 = IOC, 1 = GTC/GTT (Good Till Time)
+          // For limit orders, default to GTC/GTT (1) unless explicitly IOC
+          const timeInForce =
+            request.timeInForce === TimeInForce.IOC ? 0 : 1;
+
           // ALIGNED EXPIRY: Lighter GTT orders require a MINIMUM of 10 minutes expiry.
           // We use 15 minutes (900,000ms) to ensure we satisfy this requirement.
           // The API expects a Unix timestamp in MILLISECONDS (13 digits).
-          const MIN_GTT_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
-          const orderExpiry = Date.now() + MIN_GTT_EXPIRY_MS;
-          const expiredAt = orderExpiry; 
+          // For IOC orders, expiry should be 0
+          // Both OrderExpiry and ExpiredAt must be set for GTT orders (based on actual working examples)
+          // Based on example: OrderExpiry is the actual expiry time, ExpiredAt may be earlier
+          const MIN_GTT_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes (actual expiry)
+          const MIN_REQUIRED_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes (minimum required)
+          const now = Date.now();
+          const orderExpiry =
+            timeInForce === 1 ? now + MIN_GTT_EXPIRY_MS : 0;
+          // Set expiredAt to minimum required expiry (10 minutes)
+          // This matches the pattern where ExpiredAt is earlier than OrderExpiry
+          const expiredAt =
+            timeInForce === 1 ? now + MIN_REQUIRED_EXPIRY_MS : 0;
 
           this.logger.debug(
-            `LIMIT order for ${request.symbol}: Using GTC/GTT (timeInForce=1) ` +
-              `expiry=${orderExpiry} (15 minutes from now)`
+            `LIMIT order for ${request.symbol}: Using ${timeInForce === 1 ? 'GTC/GTT' : 'IOC'} (timeInForce=${timeInForce}) ` +
+              `orderExpiry=${orderExpiry} expiredAt=${expiredAt} ${timeInForce === 1 ? `(15 minutes from now, ${new Date(orderExpiry).toISOString()})` : '(IOC - no expiry)'}`,
           );
 
           orderParams = {
@@ -968,8 +982,8 @@ export class LighterExchangeAdapter
             orderType: LighterOrderType.LIMIT,
             timeInForce, // 0 = IOC, 1 = GTC/GTT (Good Till Time)
             reduceOnly: request.reduceOnly ? 1 : 0, // Critical: must be 1 for closing orders
-            orderExpiry, 
-            expiredAt,
+            orderExpiry,
+            expiredAt, // Both fields required for GTT orders
           };
         }
 
