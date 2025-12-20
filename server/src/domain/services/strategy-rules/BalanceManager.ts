@@ -62,32 +62,32 @@ export class BalanceManager implements IBalanceManager {
     adapter: IPerpExchangeAdapter,
     exchangeType: ExchangeType,
   ): Promise<number> {
-    const totalBalance = await adapter.getBalance();
+    // Start with total equity (total account value)
+    // Then we'll subtract margin used and accrued profits
+    const totalEquity = await adapter.getEquity();
 
     if (this.profitTracker) {
       try {
         const deployable =
           await this.profitTracker.getDeployableCapital(exchangeType);
-        // Use the minimum of actual balance and deployable capital
-        // This handles edge cases where balance might have changed
-        // SAFETY: If deployable is 0 but we have balance, use total balance
+        // Use the minimum of actual equity and deployable capital
         // This handles cases where ProfitTracker hasn't synced deployedCapital yet
         const result =
-          deployable > 0 ? Math.min(totalBalance, deployable) : totalBalance; // Fallback to full balance if deployable is 0
+          deployable > 0 ? Math.min(totalEquity, deployable) : totalEquity;
         this.logger.debug(
           `Deployable capital for ${exchangeType}: $${result.toFixed(2)} ` +
-            `(total: $${totalBalance.toFixed(2)}, profit-adjusted: $${deployable.toFixed(2)})`,
+            `(equity: $${totalEquity.toFixed(2)}, profit-adjusted: $${deployable.toFixed(2)})`,
         );
         return result;
       } catch (error: any) {
         this.logger.debug(
-          `Failed to get deployable capital from ProfitTracker: ${error.message}, using full balance`,
+          `Failed to get deployable capital from ProfitTracker: ${error.message}, using full equity`,
         );
       }
     }
 
-    // If ProfitTracker not available, use full balance
-    return totalBalance;
+    // If ProfitTracker not available, use full equity
+    return totalEquity;
   }
 
   /**

@@ -3375,14 +3375,16 @@ export class LighterExchangeAdapter
       );
 
       // Determine deposit amount:
-      // - If balance is significantly larger than requested amount (3x+), deposit only requested amount
+      // - If balance is significantly larger than requested amount, deposit only requested amount
       //   (this indicates a wallet deposit, not a rebalance from withdrawal)
       // - Otherwise, deposit full balance (this handles rebalancing where withdrawal fees reduce the amount)
-      const isWalletDeposit = balanceFormatted >= amount * 3;
-      const depositAmount = isWalletDeposit ? amount : balanceFormatted;
-      const depositAmountWei = isWalletDeposit
-        ? ethers.parseUnits(depositAmount.toFixed(decimals), decimals)
-        : balanceWei;
+      // We use a small buffer to identify rebalances where fees might have reduced the arriving amount
+      const feeBuffer = Math.max(amount * 0.1, 1.0); // 10% or $1.00 buffer
+      const isRebalance = balanceFormatted <= amount + feeBuffer;
+      const depositAmount = isRebalance ? balanceFormatted : amount;
+      const depositAmountWei = isRebalance
+        ? balanceWei
+        : ethers.parseUnits(depositAmount.toFixed(decimals), decimals);
 
       // Check current allowance
       this.logger.log(
@@ -3420,15 +3422,15 @@ export class LighterExchangeAdapter
       this.logger.log(
         `🚀 Executing transfer to Lighter deposit contract ${LIGHTER_DEPOSIT_CONTRACT}...`,
       );
-      if (isWalletDeposit) {
+      if (!isRebalance) {
         this.logger.log(
           `Transferring ${depositAmount.toFixed(2)} USDC (requested amount) to Lighter deposit contract... ` +
             `(wallet has ${balanceFormatted.toFixed(2)} USDC total, depositing only ${depositAmount.toFixed(2)} USDC)`,
         );
       } else {
         this.logger.log(
-          `Transferring ${depositAmount.toFixed(2)} USDC (full wallet balance) to Lighter deposit contract... ` +
-            `(requested amount was ${amount.toFixed(2)} USDC, but depositing available balance after fees)`,
+          `Transferring ${depositAmount.toFixed(2)} USDC (available balance) to Lighter deposit contract... ` +
+            `(requested amount was ${amount.toFixed(2)} USDC, but depositing available balance to handle potential fees)`,
         );
       }
 

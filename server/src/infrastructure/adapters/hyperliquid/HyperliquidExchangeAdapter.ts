@@ -276,17 +276,28 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
       const formattedSize = formatSize(request.size.toString(), szDecimals);
 
       // For market orders, Hyperliquid requires a limit price (uses IOC for market execution)
-      // Use best bid/ask from order book for more accurate execution
+      // Use best bid/ask from order book with a small slippage buffer (0.1%) to ensure fill
       let orderPrice: number;
       if (request.price) {
         orderPrice = request.price;
       } else if (request.type === OrderType.MARKET) {
-        // Get best bid/ask from order book for accurate IOC execution
+        // Get best bid/ask from order book
         const { bestBid, bestAsk } = await this.getBestBidAsk(request.symbol);
-        // Use best ask for buy orders (we pay the ask), best bid for sell orders (we get the bid)
-        orderPrice = request.side === OrderSide.LONG ? bestAsk : bestBid;
+        
+        // Apply a 0.1% slippage buffer to the order book price to ensure the IOC order fills
+        // For buys (LONG), we pay slightly more than the ask
+        // For sells (SHORT), we receive slightly less than the bid
+        const SLIPPAGE_BUFFER = 0.001; // 0.1%
+        
+        if (request.side === OrderSide.LONG) {
+          orderPrice = bestAsk * (1 + SLIPPAGE_BUFFER);
+        } else {
+          orderPrice = bestBid * (1 - SLIPPAGE_BUFFER);
+        }
+        
         this.logger.debug(
-          `Market order: using order book price ${orderPrice} (${request.side === OrderSide.LONG ? 'ask' : 'bid'}) for ${request.symbol}`,
+          `Market order: using order book price ${orderPrice.toFixed(6)} ` +
+          `(${request.side === OrderSide.LONG ? 'ask + 0.1%' : 'bid - 0.1%'}) for ${request.symbol}`,
         );
       } else {
         throw new Error('Price is required for LIMIT orders');
@@ -332,10 +343,16 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
             const { bestBid, bestAsk } = await this.getBestBidAsk(
               request.symbol,
             );
-            orderPrice = request.side === OrderSide.LONG ? bestAsk : bestBid;
+            
+            const SLIPPAGE_BUFFER = 0.001; // 0.1%
+            if (request.side === OrderSide.LONG) {
+              orderPrice = bestAsk * (1 + SLIPPAGE_BUFFER);
+            } else {
+              orderPrice = bestBid * (1 - SLIPPAGE_BUFFER);
+            }
 
             this.logger.debug(
-              `Retry ${attempt + 1}/${MAX_RETRIES}: Updated order book price ${orderPrice} for ${request.symbol}`,
+              `Retry ${attempt + 1}/${MAX_RETRIES}: Updated order book price ${orderPrice.toFixed(6)} for ${request.symbol}`,
             );
 
             // Small delay before retry
@@ -1565,14 +1582,16 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
       }
 
       // Determine deposit amount:
-      // - If balance is significantly larger than requested amount (3x+), deposit only requested amount
+      // - If balance is significantly larger than requested amount, deposit only requested amount
       //   (this indicates a wallet deposit, not a rebalance from withdrawal)
       // - Otherwise, deposit full balance (this handles rebalancing where withdrawal fees reduce the amount)
-      const isWalletDeposit = balanceFormatted >= amount * 3;
-      const depositAmount = isWalletDeposit ? amount : balanceFormatted;
-      const depositAmountWei = isWalletDeposit
-        ? ethers.parseUnits(depositAmount.toFixed(decimals), decimals)
-        : balanceWei;
+      // We use a small buffer to identify rebalances where fees might have reduced the arriving amount
+      const feeBuffer = Math.max(amount * 0.1, 1.0); // 10% or $1.00 buffer
+      const isRebalance = balanceFormatted <= amount + feeBuffer;
+      const depositAmount = isRebalance ? balanceFormatted : amount;
+      const depositAmountWei = isRebalance
+        ? balanceWei
+        : ethers.parseUnits(depositAmount.toFixed(decimals), decimals);
 
       // Check current allowance
       const currentAllowance = await usdcContract.allowance(
@@ -1600,15 +1619,15 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
 
       // Transfer USDC to bridge contract
       // Note: Bridge2 accepts direct transfers - sending USDC to the bridge contract credits the account
-      if (isWalletDeposit) {
+      if (!isRebalance) {
         this.logger.log(
           `Transferring ${depositAmount.toFixed(2)} USDC (requested amount) to Bridge2 contract... ` +
             `(wallet has ${balanceFormatted.toFixed(2)} USDC total, depositing only ${depositAmount.toFixed(2)} USDC)`,
         );
       } else {
         this.logger.log(
-          `Transferring ${depositAmount.toFixed(2)} USDC (full wallet balance) to Bridge2 contract... ` +
-            `(requested amount was ${amount.toFixed(2)} USDC, but depositing available balance after fees)`,
+          `Transferring ${depositAmount.toFixed(2)} USDC (available balance) to Bridge2 contract... ` +
+            `(requested amount was ${amount.toFixed(2)} USDC, but depositing available balance to handle potential fees)`,
         );
       }
       const transferTx = await usdcContract.transfer(
