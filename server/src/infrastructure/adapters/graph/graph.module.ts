@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { UniswapGraphAdapter } from './UniswapGraphAdapter';
+import { BloomGraphAdapter } from './BloomGraphAdapter';
 
 @Module({
   providers: [
@@ -7,7 +8,8 @@ import { UniswapGraphAdapter } from './UniswapGraphAdapter';
       provide: 'IMarketDataProvider',
       useClass: UniswapGraphAdapter,
     },
+    BloomGraphAdapter,
   ],
-  exports: ['IMarketDataProvider'],
+  exports: ['IMarketDataProvider', BloomGraphAdapter],
 })
 export class GraphModule {}

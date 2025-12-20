@@ -52,6 +52,8 @@ import { FundingRateController } from '../controllers/FundingRateController';
 import { KeeperStrategyEventListener } from '../adapters/blockchain/KeeperStrategyEventListener';
 import { WithdrawalFulfiller } from '../adapters/blockchain/WithdrawalFulfiller';
 import { NAVReporter } from '../adapters/blockchain/NAVReporter';
+import { BloomGraphAdapter } from '../adapters/graph/BloomGraphAdapter';
+import { GraphModule } from '../adapters/graph/graph.module';
 import { PortfolioOptimizer } from '../../domain/services/strategy-rules/PortfolioOptimizer';
 import { OrderExecutor } from '../../domain/services/strategy-rules/OrderExecutor';
 import { PositionManager } from '../../domain/services/strategy-rules/PositionManager';
@@ -100,7 +102,7 @@ import { PredictionBacktester } from '../../domain/services/prediction/Predictio
  * - REST API controllers
  */
 @Module({
-  imports: [ConfigModule],
+  imports: [ConfigModule, GraphModule],
   controllers: [PerpKeeperController, FundingRateController],
   providers: [
     // Exchange adapters - conditionally use mock adapters in test mode
@@ -322,7 +324,11 @@ import { PredictionBacktester } from '../../domain/services/prediction/Predictio
         aggregator: FundingRateAggregator,
         twapOptimizer?: TWAPOptimizer,
       ) => {
-        return new ExecutionPlanBuilder(costCalculator, aggregator, twapOptimizer);
+        return new ExecutionPlanBuilder(
+          costCalculator,
+          aggregator,
+          twapOptimizer,
+        );
       },
       inject: [
         CostCalculator,
@@ -685,20 +691,23 @@ import { PredictionBacktester } from '../../domain/services/prediction/Predictio
       provide: WithdrawalFulfiller,
       useFactory: (
         configService: ConfigService,
-        eventListener: KeeperStrategyEventListener,
+        bloomGraphAdapter: BloomGraphAdapter,
+        navReporter: NAVReporter,
         hyperliquidAdapter: HyperliquidExchangeAdapter,
         perpKeeperService: PerpKeeperService,
       ) => {
         return new WithdrawalFulfiller(
           configService,
-          eventListener,
+          bloomGraphAdapter,
+          navReporter,
           hyperliquidAdapter,
           perpKeeperService,
         );
       },
       inject: [
         ConfigService,
-        KeeperStrategyEventListener,
+        BloomGraphAdapter,
+        NAVReporter,
         HyperliquidExchangeAdapter,
         PerpKeeperService,
       ],
@@ -821,7 +830,9 @@ export class PerpKeeperModule implements OnModuleInit {
     if (this.orderBookCollector && this.perpKeeperService) {
       const adapters = this.perpKeeperService.getExchangeAdapters();
       this.orderBookCollector.initialize(adapters);
-      this.logger.log(`Initialized OrderBookCollector with ${adapters.size} adapters`);
+      this.logger.log(
+        `Initialized OrderBookCollector with ${adapters.size} adapters`,
+      );
     }
   }
 }
