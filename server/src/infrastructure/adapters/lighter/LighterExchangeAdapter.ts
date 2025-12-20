@@ -1527,6 +1527,82 @@ export class LighterExchangeAdapter
     }
   }
 
+  /**
+   * Modify an existing order
+   */
+  async modifyOrder(
+    orderId: string,
+    request: PerpOrderRequest,
+  ): Promise<PerpOrderResponse> {
+    try {
+      await this.ensureInitialized();
+
+      const marketIndex = await this.getMarketIndex(request.symbol);
+      const helper = this.marketHelpers.get(marketIndex);
+      if (!helper) {
+        throw new Error(`No market helper for market ${marketIndex}`);
+      }
+
+      // Convert orderId to orderIndex if needed
+      const orderIndex = parseInt(orderId, 10);
+      if (isNaN(orderIndex)) {
+        throw new Error(`Invalid order index format: ${orderId}`);
+      }
+
+      this.logger.debug(
+        `🔄 Modifying order ${orderIndex} on Lighter: ${request.symbol} @ ${request.price}`,
+      );
+
+      // Format parameters
+      const amount = BigInt(Math.round(request.size * 1e8));
+      const price = BigInt(Math.round((request.price || 0) * 1e8));
+
+      // Lighter SDK updateOrder
+      const [tx, txHash, error] = await (this.signerClient as any).updateOrder({
+        marketIndex,
+        orderIndex,
+        side: request.side === OrderSide.LONG ? 0 : 1,
+        amount,
+        price,
+        orderType:
+          request.type === OrderType.MARKET
+            ? LighterOrderType.MARKET
+            : LighterOrderType.LIMIT,
+      });
+
+      if (error) {
+        throw new Error(error);
+      }
+
+      // Wait for transaction
+      try {
+        await this.signerClient!.waitForTransaction(txHash, 30000, 2000);
+      } catch (waitError: any) {
+        this.logger.debug(`Update wait timeout: ${waitError.message}`);
+      }
+
+      return new PerpOrderResponse(
+        orderIndex.toString(),
+        OrderStatus.SUBMITTED,
+        request.symbol,
+        request.side,
+        request.clientOrderId,
+        undefined,
+        undefined,
+        undefined,
+        new Date(),
+      );
+    } catch (error: any) {
+      this.logger.error(`Failed to modify order ${orderId}: ${error.message}`);
+      throw new ExchangeError(
+        `Failed to modify order: ${error.message}`,
+        ExchangeType.LIGHTER,
+        undefined,
+        error,
+      );
+    }
+  }
+
   async cancelOrder(orderId: string, symbol?: string): Promise<boolean> {
     try {
       await this.ensureInitialized();
@@ -2665,6 +2741,24 @@ export class LighterExchangeAdapter
         error,
       );
     }
+  }
+
+  /**
+   * Get the tick size (minimum price increment) for a symbol
+   */
+  async getTickSize(symbol: string): Promise<number> {
+    try {
+      await this.ensureInitialized();
+      const marketIndex = await this.getMarketIndex(symbol);
+      const market = this.marketHelpers.get(marketIndex);
+      if (market) {
+        // market.tickSize is available in Lighter MarketHelper
+        return parseFloat(market.tickSize.toString()) / 1e8; // Lighter uses 1e8 for prices
+      }
+    } catch (error: any) {
+      this.logger.debug(`Failed to get tick size for ${symbol}: ${error.message}`);
+    }
+    return 0.0001; // Default fallback
   }
 
   async getBalance(): Promise<number> {

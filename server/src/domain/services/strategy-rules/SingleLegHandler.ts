@@ -406,13 +406,25 @@ export class SingleLegHandler {
 
       const closeSide =
         position.side === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG;
+
+      // Get current mark price to act as maker
+      let markPrice: number | undefined;
+      try {
+        markPrice = await adapter.getMarkPrice(position.symbol);
+      } catch (priceError: any) {
+        this.logger.warn(
+          `Could not get mark price for ${position.symbol} closure, using entry price: ${priceError.message}`,
+        );
+        markPrice = position.entryPrice;
+      }
+
       const closeOrder = new PerpOrderRequest(
         position.symbol,
         closeSide,
-        OrderType.MARKET,
+        OrderType.LIMIT,
         position.size,
-        undefined,
-        TimeInForce.IOC,
+        markPrice,
+        TimeInForce.GTC,
         true, // reduceOnly
       );
 

@@ -178,24 +178,24 @@ export class PerpSpotExecutionPlanBuilder {
       const perpSide = perpRate > 0 ? OrderSide.SHORT : OrderSide.LONG;
       const spotSide = perpRate > 0 ? OrderSide.LONG : OrderSide.SHORT;
 
-      // Step 4: Create orders
+      // Step 4: Create orders as LIMIT at mark price to act as a maker
       const perpOrder = new PerpOrderRequest(
         opportunity.symbol,
         perpSide,
-        OrderType.MARKET,
+        OrderType.LIMIT,
         positionSize.toBaseAsset(),
-        undefined, // Market order
-        TimeInForce.IOC,
+        markPrice, // Use mark price for limit order
+        TimeInForce.GTC,
         false, // Not reduce-only
       );
 
       const spotOrder = new SpotOrderRequest(
         opportunity.symbol,
         spotSide,
-        OrderType.MARKET,
+        OrderType.LIMIT,
         positionSize.toBaseAsset(), // Same size for delta neutrality
-        undefined, // Market order
-        TimeInForce.IOC,
+        markPrice, // Use mark price for limit order
+        TimeInForce.GTC,
       );
 
       // Step 5: Calculate costs

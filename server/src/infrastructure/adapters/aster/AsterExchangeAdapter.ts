@@ -845,6 +845,35 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
     }
   }
 
+  /**
+   * Modify an existing order
+   * Note: Aster uses cancel and replace for order modification
+   */
+  async modifyOrder(
+    orderId: string,
+    request: PerpOrderRequest,
+  ): Promise<PerpOrderResponse> {
+    try {
+      this.logger.debug(
+        `🔄 Modifying order ${orderId} on Aster (Cancel + Place): ${request.symbol} @ ${request.price}`,
+      );
+
+      // 1. Cancel the existing order
+      await this.cancelOrder(orderId, request.symbol);
+
+      // 2. Place the new order
+      return await this.placeOrder(request);
+    } catch (error: any) {
+      this.logger.error(`Failed to modify order ${orderId}: ${error.message}`);
+      throw new ExchangeError(
+        `Failed to modify order: ${error.message}`,
+        ExchangeType.ASTER,
+        undefined,
+        error,
+      );
+    }
+  }
+
   async cancelOrder(orderId: string, symbol?: string): Promise<boolean> {
     try {
       if (!symbol) {
@@ -1011,6 +1040,19 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
       undefined,
       lastError || undefined,
     );
+  }
+
+  /**
+   * Get the tick size (minimum price increment) for a symbol
+   */
+  async getTickSize(symbol: string): Promise<number> {
+    try {
+      const { tickSize } = await this.getSymbolPrecision(symbol);
+      return tickSize;
+    } catch (error: any) {
+      this.logger.debug(`Failed to get tick size for ${symbol}: ${error.message}`);
+      return 0.0001; // Default fallback
+    }
   }
 
   async getBalance(): Promise<number> {

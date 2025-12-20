@@ -558,14 +558,14 @@ export class DeltaNeutralFundingStrategy implements IExecutableStrategy {
     );
     await tx2.wait();
 
-    // 3. Short perp
+    // 3. Short perp: place order at mark price to act as maker
     const perpSize = BigInt(Math.round(sizeETH * 1e8));
-    const limitPrice = BigInt(Math.round(price * 0.98 * 1e8));
+    const limitPrice = BigInt(Math.round(price * 1e8));
     const tx3 = await this.contract.placePerpOrder(
-      false,
+      false, // isLong=false (short)
       perpSize,
-      limitPrice,
-      false,
+      limitPrice, // Exact mark price
+      false, // reduceOnly=false
     );
     await tx3.wait();
 

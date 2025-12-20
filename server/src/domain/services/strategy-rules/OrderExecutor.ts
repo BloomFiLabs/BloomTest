@@ -557,7 +557,7 @@ export class OrderExecutor implements IOrderExecutor {
           longOrder.symbol,
         );
 
-        // Update order registry with actual order ID
+        // Update order registry with actual order ID, price and reduceOnly
         if (this.executionLockService) {
           this.executionLockService.updateOrderStatus(
             longExchange,
@@ -565,6 +565,8 @@ export class OrderExecutor implements IOrderExecutor {
             'LONG',
             longResponse.isSuccess() ? 'PLACED' : 'FAILED',
             longResponse.orderId,
+            longOrder.price,
+            longOrder.reduceOnly
           );
         }
 
@@ -610,7 +612,7 @@ export class OrderExecutor implements IOrderExecutor {
           shortOrder.symbol,
         );
 
-        // Update order registry with actual order ID
+        // Update order registry with actual order ID, price and reduceOnly
         if (this.executionLockService) {
           this.executionLockService.updateOrderStatus(
             shortExchange,
@@ -618,6 +620,8 @@ export class OrderExecutor implements IOrderExecutor {
             'SHORT',
             shortResponse.isSuccess() ? 'PLACED' : 'FAILED',
             shortResponse.orderId,
+            shortOrder.price,
+            shortOrder.reduceOnly
           );
         }
 
@@ -726,17 +730,26 @@ export class OrderExecutor implements IOrderExecutor {
               this.logger.warn(
                 `⚠️ LONG order ${longResponse.orderId} already filled - placing closing order for rollback`,
               );
+
+              // Get current mark price for rollback maker order
+              let markPrice: number | undefined;
+              try {
+                markPrice = await longAdapter.getMarkPrice(longOrder.symbol);
+              } catch (priceError: any) {
+                markPrice = longOrder.price;
+              }
+
               const closeOrder = new PerpOrderRequest(
                 longOrder.symbol,
                 OrderSide.SHORT, // Opposite side to close
-                OrderType.MARKET,
+                OrderType.LIMIT,
                 longResponse.filledSize || longOrder.size,
-                undefined,
-                TimeInForce.IOC,
+                markPrice,
+                TimeInForce.GTC,
                 true, // reduceOnly
               );
               await longAdapter.placeOrder(closeOrder);
-              this.logger.log(`✅ Closed LONG position for rollback`);
+              this.logger.log(`✅ Placed rollback LIMIT order @ mark price for LONG position`);
             }
           } catch (rollbackError: any) {
             this.logger.error(
@@ -795,17 +808,26 @@ export class OrderExecutor implements IOrderExecutor {
               this.logger.warn(
                 `⚠️ SHORT order ${shortResponse.orderId} already filled - placing closing order for rollback`,
               );
+
+              // Get current mark price for rollback maker order
+              let markPrice: number | undefined;
+              try {
+                markPrice = await shortAdapter.getMarkPrice(shortOrder.symbol);
+              } catch (priceError: any) {
+                markPrice = shortOrder.price;
+              }
+
               const closeOrder = new PerpOrderRequest(
                 shortOrder.symbol,
                 OrderSide.LONG, // Opposite side to close
-                OrderType.MARKET,
+                OrderType.LIMIT,
                 shortResponse.filledSize || shortOrder.size,
-                undefined,
-                TimeInForce.IOC,
+                markPrice,
+                TimeInForce.GTC,
                 true, // reduceOnly
               );
               await shortAdapter.placeOrder(closeOrder);
-              this.logger.log(`✅ Closed SHORT position for rollback`);
+              this.logger.log(`✅ Placed rollback LIMIT order @ mark price for SHORT position`);
             }
           } catch (rollbackError: any) {
             this.logger.error(
@@ -976,6 +998,8 @@ export class OrderExecutor implements IOrderExecutor {
     pollIntervalMs: number = 2000,
     isClosingPosition: boolean = false,
     orderSide?: 'LONG' | 'SHORT',
+    expectedPrice?: number,
+    reduceOnly?: boolean,
   ): Promise<PerpOrderResponse> {
     const operationType = isClosingPosition ? 'CLOSE' : 'OPEN';
 
@@ -987,6 +1011,8 @@ export class OrderExecutor implements IOrderExecutor {
         orderSide,
         'WAITING_FILL',
         orderId,
+        expectedPrice,
+        reduceOnly
       );
     }
     const isLighter = exchangeType === ExchangeType.LIGHTER;
@@ -1994,6 +2020,8 @@ export class OrderExecutor implements IOrderExecutor {
                 this.config.orderWaitBaseInterval,
                 false,
                 'LONG',
+                longOrder.price,
+                longOrder.reduceOnly
               );
             }
 
@@ -2011,6 +2039,8 @@ export class OrderExecutor implements IOrderExecutor {
                 this.config.orderWaitBaseInterval,
                 false,
                 'SHORT',
+                shortOrder.price,
+                shortOrder.reduceOnly
               );
             }
 

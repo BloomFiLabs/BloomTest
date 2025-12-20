@@ -483,32 +483,15 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
         );
       }
 
-      // Calculate limit prices: use mark price directly for Hyperliquid and Lighter
-      // This ensures orders are close to mark price and fill quickly, avoiding "price too high" rejections
-      // For other exchanges: use best bid/ask without price improvement
-      // LONG orders: at mark price (for Hyperliquid/Lighter) or best bid (for others)
-      // SHORT orders: at mark price (for Hyperliquid/Lighter) or best ask (for others)
-      const longLimitPrice =
-        opportunity.longExchange === ExchangeType.HYPERLIQUID ||
-        opportunity.longExchange === ExchangeType.LIGHTER
-          ? finalLongMarkPrice
-          : longBidAsk.bestBid;
-      const shortLimitPrice =
-        opportunity.shortExchange === ExchangeType.HYPERLIQUID ||
-        opportunity.shortExchange === ExchangeType.LIGHTER
-          ? finalShortMarkPrice
-          : shortBidAsk.bestAsk;
+      // Calculate limit prices: use mark price directly for all exchanges
+      // This ensures orders are close to mark price and we act as a maker on the book
+      // LONG orders: at mark price
+      // SHORT orders: at mark price
+      const longLimitPrice = finalLongMarkPrice;
+      const shortLimitPrice = finalShortMarkPrice;
 
-      const longPriceSource =
-        opportunity.longExchange === ExchangeType.HYPERLIQUID ||
-        opportunity.longExchange === ExchangeType.LIGHTER
-          ? 'mark'
-          : 'best bid';
-      const shortPriceSource =
-        opportunity.shortExchange === ExchangeType.HYPERLIQUID ||
-        opportunity.shortExchange === ExchangeType.LIGHTER
-          ? 'mark'
-          : 'best ask';
+      const longPriceSource = 'mark';
+      const shortPriceSource = 'mark';
 
       this.logger.debug(
         `Limit order prices for ${opportunity.symbol}: ` +

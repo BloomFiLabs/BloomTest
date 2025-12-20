@@ -20,6 +20,8 @@ export interface IOrderExecutor {
     pollIntervalMs?: number,
     isClosingPosition?: boolean,
     orderSide?: 'LONG' | 'SHORT',
+    expectedPrice?: number,
+    reduceOnly?: boolean,
   ): Promise<PerpOrderResponse>;
 
   executeSinglePosition(

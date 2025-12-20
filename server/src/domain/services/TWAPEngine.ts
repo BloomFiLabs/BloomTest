@@ -363,24 +363,24 @@ export class TWAPEngine {
 
       const sliceSizeBase = sliceSizeUsd / ((longPrice + shortPrice) / 2);
 
-      // Create orders for both legs
+      // Create orders for both legs as LIMIT at mark price to act as maker
       const longOrder = new PerpOrderRequest(
         state.strategy.symbol,
         OrderSide.LONG,
-        OrderType.MARKET,
+        OrderType.LIMIT,
         sliceSizeBase,
-        undefined,
-        TimeInForce.IOC,
+        longPrice, // Use mark price
+        TimeInForce.GTC,
         false,
       );
 
       const shortOrder = new PerpOrderRequest(
         state.strategy.symbol,
         OrderSide.SHORT,
-        OrderType.MARKET,
+        OrderType.LIMIT,
         sliceSizeBase,
-        undefined,
-        TimeInForce.IOC,
+        shortPrice, // Use mark price
+        TimeInForce.GTC,
         false,
       );
 

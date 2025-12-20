@@ -231,6 +231,22 @@ export interface IPerpExchangeAdapter {
    * @returns Maximum leverage allowed
    */
   getMaxLeverage?(symbol: string): Promise<number>;
+
+  /**
+   * Get the tick size (minimum price increment) for a symbol
+   * @param symbol Trading symbol
+   * @returns Tick size (e.g., 0.01, 0.0001)
+   */
+  getTickSize(symbol: string): Promise<number>;
+
+  /**
+   * Modify an existing order (price or size)
+   * @param orderId Exchange-provided order ID
+   * @param request New order parameters
+   * @returns Order response with new order ID (if changed) and status
+   * @throws ExchangeError if modification fails
+   */
+  modifyOrder?(orderId: string, request: PerpOrderRequest): Promise<PerpOrderResponse>;
 }
 
 /**

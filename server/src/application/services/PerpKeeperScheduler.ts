@@ -2304,19 +2304,29 @@ export class PerpKeeperScheduler implements OnModuleInit {
         return false;
       }
 
-      // Try to open missing side
+      // Try to open missing side: use LIMIT at mark price to act as maker
       this.logger.log(
-        `🔄 Retry ${retryInfo.retryCount + 1}/5: Opening missing ${missingSide} side for ${position.symbol} on ${missingExchange}`,
+        `🔄 Retry ${retryInfo.retryCount + 1}/5: Opening missing ${missingSide} side for ${position.symbol} on ${missingExchange} (Maker order @ Mark Price)`,
       );
 
-      // Create market order to open missing side (same size as existing position)
+      // Get current mark price
+      let markPrice: number | undefined;
+      try {
+        markPrice = await adapter.getMarkPrice(position.symbol);
+      } catch (priceError: any) {
+        this.logger.warn(
+          `Could not get mark price for ${position.symbol} retry, using fallback: ${priceError.message}`,
+        );
+      }
+
+      // Create limit order to open missing side at mark price
       const openOrder = new PerpOrderRequest(
         position.symbol,
         missingSide,
-        OrderType.MARKET,
+        OrderType.LIMIT,
         position.size,
-        undefined, // price
-        TimeInForce.IOC,
+        markPrice,
+        TimeInForce.GTC,
         false, // not reduceOnly
       );
 
@@ -2371,7 +2381,6 @@ export class PerpKeeperScheduler implements OnModuleInit {
       }
 
       // CRITICAL: Verify position still exists before attempting to close
-      // This prevents "No position exists" errors when position was already closed
       const currentPositions = await adapter.getPositions();
       const normalizeSymbol = (s: string) =>
         s
@@ -2402,126 +2411,88 @@ export class PerpKeeperScheduler implements OnModuleInit {
       const closeSide =
         position.side === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG;
 
-      // Progressive price improvement: start with market, then try worse prices
-      const priceImprovements = [0, 0.001, 0.005, 0.01, 0.02, 0.05]; // 0%, 0.1%, 0.5%, 1%, 2%, 5% worse
-      let positionClosed = false;
+      this.logger.error(
+        `🚨 Closing single-leg position ${position.symbol} (${position.side}) on ${position.exchangeType} (Maker order @ Mark Price)...`,
+      );
 
-      for (let attempt = 0; attempt < priceImprovements.length; attempt++) {
-        const priceImprovement = priceImprovements[attempt];
+      // Simple limit order at mark price to act as maker
+      let markPrice: number | undefined;
+      try {
+        markPrice = await adapter.getMarkPrice(position.symbol);
+      } catch (priceError: any) {
+        this.logger.warn(
+          `Could not get mark price for ${position.symbol} closure, using entry price: ${priceError.message}`,
+        );
+        markPrice = position.entryPrice;
+      }
 
-        try {
-          // Get current market price for limit orders (if not first attempt)
-          let limitPrice: number | undefined = undefined;
-          if (attempt > 0 && position.exchangeType === ExchangeType.LIGHTER) {
-            // For Lighter, get order book price and apply price improvement
-            try {
-              const markPrice = await adapter.getMarkPrice(position.symbol);
-              if (markPrice > 0) {
-                // For closing LONG: we SELL, so use bid price (worse = lower)
-                // For closing SHORT: we BUY, so use ask price (worse = higher)
-                if (position.side === OrderSide.LONG) {
-                  limitPrice = markPrice * (1 - priceImprovement);
-                } else {
-                  limitPrice = markPrice * (1 + priceImprovement);
-                }
-              }
-            } catch (priceError: any) {
-              // Fall back to market order
-            }
-          }
+      const closeOrder = new PerpOrderRequest(
+        position.symbol,
+        closeSide,
+        OrderType.LIMIT,
+        position.size,
+        markPrice,
+        TimeInForce.GTC,
+        true, // Reduce only
+      );
 
-          const closeOrder = new PerpOrderRequest(
-            position.symbol,
-            closeSide,
-            limitPrice ? OrderType.LIMIT : OrderType.MARKET,
-            position.size,
-            limitPrice,
-            TimeInForce.IOC,
-            true, // Reduce only
-          );
+      const closeResponse = await adapter.placeOrder(closeOrder);
 
-          if (attempt === 0) {
-            this.logger.error(
-              `🚨 Closing single-leg position ${position.symbol} (${position.side}) on ${position.exchangeType}...`,
+      // Wait and check if order filled
+      if (!closeResponse.isFilled() && closeResponse.orderId) {
+        const maxPollRetries = 10;
+        const pollIntervalMs = 3000;
+
+        for (let pollAttempt = 0; pollAttempt < maxPollRetries; pollAttempt++) {
+          await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+
+          try {
+            const statusResponse = await adapter.getOrderStatus(
+              closeResponse.orderId,
+              position.symbol,
             );
-          }
-
-          const closeResponse = await adapter.placeOrder(closeOrder);
-
-          // Wait and check if order filled
-          if (!closeResponse.isFilled() && closeResponse.orderId) {
-            const maxRetries = 5;
-            const pollIntervalMs = 2000;
-
-            for (let pollAttempt = 0; pollAttempt < maxRetries; pollAttempt++) {
-              if (pollAttempt > 0) {
-                await new Promise((resolve) =>
-                  setTimeout(resolve, pollIntervalMs),
-                );
-              }
-
-              try {
-                const statusResponse = await adapter.getOrderStatus(
-                  closeResponse.orderId,
-                  position.symbol,
-                );
-                if (statusResponse.isFilled()) {
-                  break;
-                }
-                if (
-                  statusResponse.status === OrderStatus.CANCELLED ||
-                  statusResponse.error
-                ) {
-                  break;
-                }
-              } catch (pollError: any) {
-                // Continue polling
-              }
+            if (statusResponse.isFilled()) {
+              break;
             }
+            if (
+              statusResponse.status === OrderStatus.CANCELLED ||
+              statusResponse.error
+            ) {
+              break;
+            }
+          } catch (pollError: any) {
+            // Continue polling
           }
-
-          // Check if position is actually closed
-          // Wait longer to ensure position updates propagate
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-
-          // Clear any position caches before checking
-          if (
-            'clearPositionCache' in adapter &&
-            typeof (adapter as any).clearPositionCache === 'function'
-          ) {
-            (adapter as any).clearPositionCache();
-          }
-
-          const currentPositions = await adapter.getPositions();
-          const positionStillExists = currentPositions.some(
-            (p) =>
-              p.symbol === position.symbol &&
-              p.exchangeType === position.exchangeType &&
-              Math.abs(p.size) > 0.0001, // Filter out very small positions (rounding errors)
-          );
-
-          if (closeResponse.isFilled() && !positionStillExists) {
-            positionClosed = true;
-            this.logger.log(
-              `✅ Closed single-leg position: ${position.symbol} on ${position.exchangeType}`,
-            );
-            break; // Position closed successfully
-          }
-
-          if (attempt < priceImprovements.length - 1) {
-            await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait before next attempt
-          }
-        } catch (attemptError: any) {
-          if (attempt === priceImprovements.length - 1) {
-            break;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       }
 
-      if (!positionClosed) {
-        this.logger.error(
-          `❌ Failed to close single-leg position ${position.symbol} on ${position.exchangeType} after ${priceImprovements.length} attempts`,
+      // Check if position is actually closed
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+
+      // Clear any position caches
+      if (
+        'clearPositionCache' in adapter &&
+        typeof (adapter as any).clearPositionCache === 'function'
+      ) {
+        (adapter as any).clearPositionCache();
+      }
+
+      const updatedPositions = await adapter.getPositions();
+      const stillExists = updatedPositions.some(
+        (p) =>
+          normalizeSymbol(p.symbol) === normalizedSymbol &&
+          p.exchangeType === position.exchangeType &&
+          Math.abs(p.size) > 0.0001,
+      );
+
+      if (!stillExists) {
+        this.logger.log(
+          `✅ Successfully closed single-leg position for ${position.symbol}`,
+        );
+      } else {
+        this.logger.warn(
+          `⚠️ Position for ${position.symbol} still exists after limit order attempt. ` +
+            `It may be resting on the book or the market moved away.`,
         );
       }
     } catch (error: any) {
@@ -2544,33 +2515,42 @@ export class PerpKeeperScheduler implements OnModuleInit {
         return;
       }
 
+      // Get current mark price to act as maker
+      let markPrice: number | undefined;
+      try {
+        markPrice = await adapter.getMarkPrice(position.symbol);
+      } catch (priceError: any) {
+        this.logger.warn(
+          `Could not get mark price for ${position.symbol} closure, using fallback: ${priceError.message}`,
+        );
+        markPrice = position.markPrice;
+      }
+
       const closeOrder = new PerpOrderRequest(
         position.symbol,
         position.side === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG,
-        OrderType.MARKET,
+        OrderType.LIMIT,
         position.size,
-        undefined, // price
-        TimeInForce.IOC,
+        markPrice,
+        TimeInForce.GTC,
         true, // Reduce only
       );
 
       const closeResponse = await adapter.placeOrder(closeOrder);
 
-      // Record closing costs (fees + slippage)
+      // Record closing costs (fees only for limit orders)
       if (closeResponse.isSuccess()) {
-        const positionValue = position.size * (position.markPrice || 0);
-        // Estimate fees for market order (taker fee)
+        const positionValue = position.size * (markPrice || position.markPrice || 0);
+        // For limit orders, use maker fee rate (which is usually 0 or lower than taker)
         const exchangeType = position.exchangeType;
-        const takerFeeRate = this.strategyConfig.getTakerFeeRate(exchangeType) || 0.0005;
-        const estimatedFees = positionValue * takerFeeRate;
+        const makerFeeRate = this.strategyConfig.exchangeFeeRates.get(exchangeType) || 0.0001;
+        const estimatedFees = positionValue * makerFeeRate;
         
-        // Estimate market order slippage (0.1% conservative for market close)
-        const estimatedSlippage = positionValue * 0.001;
-        
-        this.performanceLogger.recordTradingCosts(estimatedFees + estimatedSlippage);
+        // No slippage expected for maker limit order at mark price
+        this.performanceLogger.recordTradingCosts(estimatedFees);
         this.logger.debug(
-          `Recorded closing costs for ${position.symbol} on ${exchangeType}: ` +
-          `$${(estimatedFees + estimatedSlippage).toFixed(4)} (Fees: $${estimatedFees.toFixed(4)}, Slippage: $${estimatedSlippage.toFixed(4)})`
+          `Recorded closing costs for maker order ${position.symbol} on ${exchangeType}: ` +
+          `$${estimatedFees.toFixed(4)} (Fees: $${estimatedFees.toFixed(4)})`
         );
       }
 

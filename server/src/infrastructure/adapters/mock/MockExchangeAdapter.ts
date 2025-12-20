@@ -639,6 +639,24 @@ export class MockExchangeAdapter implements IPerpExchangeAdapter {
     return positions;
   }
 
+  /**
+   * Modify an existing order
+   */
+  async modifyOrder(
+    orderId: string,
+    request: PerpOrderRequest,
+  ): Promise<PerpOrderResponse> {
+    this.logger.debug(
+      `🔄 Modifying order ${orderId} on Mock: ${request.symbol} @ ${request.price}`,
+    );
+
+    // Cancel existing order
+    await this.cancelOrder(orderId, request.symbol);
+
+    // Place new order
+    return await this.placeOrder(request);
+  }
+
   async cancelOrder(orderId: string, symbol?: string): Promise<boolean> {
     this.logger.debug(`[MOCK] Cancelling order ${orderId}`);
 
@@ -734,6 +752,13 @@ export class MockExchangeAdapter implements IPerpExchangeAdapter {
   async getMarkPrice(symbol: string): Promise<number> {
     // Use REAL mark price from actual exchange
     return await this.realAdapter.getMarkPrice(symbol);
+  }
+
+  /**
+   * Get the tick size (minimum price increment) for a symbol
+   */
+  async getTickSize(symbol: string): Promise<number> {
+    return 0.01; // Mock default
   }
 
   async getBalance(): Promise<number> {

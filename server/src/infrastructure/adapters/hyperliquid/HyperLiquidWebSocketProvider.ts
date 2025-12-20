@@ -19,6 +19,18 @@ interface WsActiveAssetCtx {
   };
 }
 
+interface L2Level {
+  px: string;
+  sz: string;
+  n: number;
+}
+
+interface WsL2Book {
+  coin: string;
+  levels: [L2Level[], L2Level[]]; // [bids, asks]
+  time: number;
+}
+
 interface WsMessage {
   channel?: string;
   data?: any;
@@ -48,6 +60,10 @@ export class HyperLiquidWebSocketProvider
   // Cache for asset context data (key: coin symbol, value: asset context)
   private assetCtxCache: Map<string, WsActiveAssetCtx['ctx']> = new Map();
   private subscribedAssets: Set<string> = new Set();
+  
+  // Cache for L2 book data (key: coin symbol, value: { bids, asks })
+  private l2BookCache: Map<string, { bids: L2Level[]; asks: L2Level[] }> = new Map();
+  private subscribedL2Books: Set<string> = new Set();
 
   // Track if we've received initial data for each asset
   private hasInitialData: Set<string> = new Set();
@@ -166,7 +182,61 @@ export class HyperLiquidWebSocketProvider
       this.hasInitialData.add(coin);
 
       // Debug logs removed - only log errors
+    } else if (message.channel === 'l2Book' && message.data) {
+      const l2Book: WsL2Book = message.data;
+      const coin = l2Book.coin.toUpperCase();
+      
+      this.l2BookCache.set(coin, {
+        bids: l2Book.levels[0],
+        asks: l2Book.levels[1]
+      });
     }
+  }
+
+  /**
+   * Subscribe to L2 book updates for a specific coin
+   */
+  subscribeToL2Book(coin: string): void {
+    const normalizedCoin = coin.toUpperCase();
+
+    if (this.subscribedL2Books.has(normalizedCoin)) {
+      return; // Already subscribed
+    }
+
+    this.subscribedL2Books.add(normalizedCoin);
+
+    if (this.isConnected && this.ws) {
+      const subscription = {
+        method: 'subscribe',
+        subscription: {
+          type: 'l2Book',
+          coin: normalizedCoin,
+        },
+      };
+
+      this.ws.send(JSON.stringify(subscription));
+    }
+  }
+
+  /**
+   * Get best bid/ask for a coin
+   */
+  getBestBidAsk(coin: string): { bestBid: number; bestAsk: number } | null {
+    const normalizedCoin = coin.toUpperCase();
+    const book = this.l2BookCache.get(normalizedCoin);
+    
+    if (!book || book.bids.length === 0 || book.asks.length === 0) {
+      // Auto-subscribe if not already subscribed
+      if (!this.subscribedL2Books.has(normalizedCoin)) {
+        this.subscribeToL2Book(normalizedCoin);
+      }
+      return null;
+    }
+    
+    return {
+      bestBid: parseFloat(book.bids[0].px),
+      bestAsk: parseFloat(book.asks[0].px)
+    };
   }
 
   /**
@@ -209,9 +279,16 @@ export class HyperLiquidWebSocketProvider
    */
   private resubscribeAll(): void {
     if (this.subscribedAssets.size > 0) {
-      // Removed WebSocket resubscription log - only execution logs shown
       for (const coin of this.subscribedAssets) {
         this.subscribeToAsset(coin);
+      }
+    }
+    
+    if (this.subscribedL2Books.size > 0) {
+      for (const coin of this.subscribedL2Books) {
+        // Reset the set before calling subscribeToL2Book which adds to it
+        this.subscribedL2Books.delete(coin);
+        this.subscribeToL2Book(coin);
       }
     }
   }

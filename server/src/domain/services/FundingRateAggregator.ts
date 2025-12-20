@@ -180,14 +180,22 @@ export class FundingRateAggregator {
       hyperliquidAssets.length > 0
     ) {
       this.hyperliquidWsProvider.subscribeToAssets(hyperliquidAssets);
+      // Also subscribe to L2 books for maker efficiency
+      hyperliquidAssets.forEach((asset) =>
+        this.hyperliquidWsProvider.subscribeToL2Book(asset),
+      );
       this.logger.log(
-        `📡 Subscribed to ${hyperliquidAssets.length} Hyperliquid assets via WebSocket`,
+        `📡 Subscribed to ${hyperliquidAssets.length} Hyperliquid assets and orderbooks via WebSocket`,
       );
     }
 
     // Subscribe to Lighter markets via WebSocket
     if (lighterMarketIndexes.length > 0 && this.lighterWsProvider) {
       this.lighterWsProvider.subscribeToMarkets(lighterMarketIndexes);
+      // Also subscribe to orderbooks for maker efficiency
+      lighterMarketIndexes.forEach((marketIndex) =>
+        this.lighterWsProvider?.subscribeToOrderbook(marketIndex),
+      );
 
       if (this.lighterWsProvider.isWsConnected()) {
         this.logger.log(

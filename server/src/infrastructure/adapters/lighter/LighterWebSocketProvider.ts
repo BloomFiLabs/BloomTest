@@ -26,6 +26,20 @@ interface MarketStatsMessage {
   type: string;
 }
 
+interface OrderBookLevel {
+  price: string;
+  size: string;
+}
+
+interface OrderBookMessage {
+  channel: string;
+  type: string;
+  data: {
+    bids: OrderBookLevel[];
+    asks: OrderBookLevel[];
+  };
+}
+
 interface WsMessage {
   channel?: string;
   type?: string;
@@ -58,6 +72,10 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
     { openInterest: number; markPrice: number; volume24h: number }
   > = new Map();
   private subscribedMarkets: Set<number> = new Set();
+  
+  // Cache for orderbook data (key: marketIndex, value: { bids, asks })
+  private orderbookCache: Map<number, { bids: OrderBookLevel[]; asks: OrderBookLevel[] }> = new Map();
+  private subscribedOrderbooks: Set<number> = new Set();
 
   // Track if we've received initial data for each market
   private hasInitialData: Set<number> = new Set();
@@ -216,6 +234,7 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
 
     // Handle market_stats updates - check for market_stats field first (more reliable)
     if (message.market_stats) {
+      // ... existing logic for market_stats ...
       const marketStats = message.market_stats;
       const marketIndex = marketStats.market_id;
 
@@ -229,7 +248,7 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
       try {
         const openInterestRaw = marketStats.open_interest || '0';
         const markPriceRaw = marketStats.mark_price || '0';
-        const volume24hRaw = marketStats.daily_quote_token_volume || 0; // Already in USD (quote = USDC)
+        const volume24hRaw = marketStats.daily_quote_token_volume || 0;
         const openInterest = parseFloat(openInterestRaw);
         const markPrice = parseFloat(markPriceRaw);
         const volume24h =
@@ -237,26 +256,9 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
             ? parseFloat(volume24hRaw)
             : volume24hRaw;
 
-        // Log parsing results for debugging
-        if (isNaN(openInterest) || isNaN(markPrice)) {
-          this.logger.warn(
-            `Failed to parse market_stats for market ${marketIndex}: ` +
-              `open_interest="${openInterestRaw}", mark_price="${markPriceRaw}"`,
-          );
-          return;
-        }
-
-        // Cache data if mark price is valid (open interest can be 0)
         if (markPrice > 0) {
-          // According to Lighter API docs, open_interest is a STRING
-          // Based on testing, open_interest appears to already be in USD (not contracts)
-          // Values are typically in millions/billions for major assets
-          // We use the value as-is since it's already in USD
-          const oiUsd = openInterest;
-
-          const wasNew = !this.marketStatsCache.has(marketIndex);
           this.marketStatsCache.set(marketIndex, {
-            openInterest: oiUsd,
+            openInterest: openInterest,
             markPrice: markPrice,
             volume24h: isNaN(volume24h) ? 0 : volume24h,
           });
@@ -264,17 +266,22 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
           if (!this.hasInitialData.has(marketIndex)) {
             this.hasInitialData.add(marketIndex);
           }
-        } else {
-          this.logger.warn(
-            `Invalid mark price for market ${marketIndex}: ${markPriceRaw}`,
-          );
         }
       } catch (error: any) {
         this.logger.error(
           `Failed to parse market_stats for market ${marketIndex}: ${error.message}`,
         );
-        this.logger.debug(`Message: ${JSON.stringify(message)}`);
       }
+      return;
+    }
+
+    // Handle orderbook updates
+    if (message.channel?.startsWith('orderbook/') && message.data) {
+      const marketIndex = parseInt(message.channel.split('/')[1]);
+      this.orderbookCache.set(marketIndex, {
+        bids: message.data.bids || [],
+        asks: message.data.asks || []
+      });
       return;
     }
 
@@ -299,6 +306,43 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
         `Received unhandled WebSocket message: ${JSON.stringify(message)}`,
       );
     }
+  }
+
+  /**
+   * Subscribe to orderbook for a specific market
+   */
+  subscribeToOrderbook(marketIndex: number): void {
+    if (this.subscribedOrderbooks.has(marketIndex)) {
+      return;
+    }
+
+    this.subscribedOrderbooks.add(marketIndex);
+
+    if (this.isConnected && this.ws) {
+      const subscribeMessage = {
+        type: 'subscribe',
+        channel: `orderbook/${marketIndex}`,
+      };
+      this.ws.send(JSON.stringify(subscribeMessage));
+    }
+  }
+
+  /**
+   * Get best bid/ask for a market
+   */
+  getBestBidAsk(marketIndex: number): { bestBid: number; bestAsk: number } | null {
+    const book = this.orderbookCache.get(marketIndex);
+    if (!book || book.bids.length === 0 || book.asks.length === 0) {
+      if (!this.subscribedOrderbooks.has(marketIndex)) {
+        this.subscribeToOrderbook(marketIndex);
+      }
+      return null;
+    }
+
+    return {
+      bestBid: parseFloat(book.bids[0].price),
+      bestAsk: parseFloat(book.asks[0].price)
+    };
   }
 
   /**
@@ -452,18 +496,21 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
   private resubscribeAll(): void {
     if (this.subscribedMarkets.size > 0) {
       this.logger.log(
-        `Resubscribing to ${this.subscribedMarkets.size} Lighter markets...`,
+        `Resubscribing to ${this.subscribedMarkets.size} Lighter market stats...`,
       );
       const markets = Array.from(this.subscribedMarkets);
-      // Force resubscribe to ensure all markets are subscribed
       markets.forEach((index) => this.subscribeToMarket(index, true));
+    }
+    
+    if (this.subscribedOrderbooks.size > 0) {
       this.logger.log(
-        `Successfully resubscribed to ${markets.length} Lighter markets`,
+        `Resubscribing to ${this.subscribedOrderbooks.size} Lighter orderbooks...`,
       );
-    } else {
-      this.logger.debug(
-        'No Lighter markets to resubscribe (subscribedMarkets is empty)',
-      );
+      const markets = Array.from(this.subscribedOrderbooks);
+      markets.forEach((index) => {
+        this.subscribedOrderbooks.delete(index);
+        this.subscribeToOrderbook(index);
+      });
     }
   }
 

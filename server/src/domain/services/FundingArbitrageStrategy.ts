@@ -3500,20 +3500,32 @@ export class FundingArbitrageStrategy {
 
       const closeSide =
         position.side === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG;
+
+      // Get current mark price to act as maker
+      let markPrice: number | undefined;
+      try {
+        markPrice = await adapter.getMarkPrice(position.symbol);
+      } catch (priceError: any) {
+        this.logger.warn(
+          `Could not get mark price for ${position.symbol} closure, using entry price: ${priceError.message}`,
+        );
+        markPrice = position.entryPrice;
+      }
+
       const closeOrder = new PerpOrderRequest(
         position.symbol,
         closeSide,
-        OrderType.MARKET,
+        OrderType.LIMIT,
         position.size,
-        undefined, // price
-        TimeInForce.IOC,
+        markPrice,
+        TimeInForce.GTC,
         true, // reduceOnly
       );
 
       const closeResult = await adapter.placeOrder(closeOrder);
       if (closeResult && closeResult.orderId) {
         this.logger.log(
-          `✅ Closed single-leg position ${position.symbol} (${position.side}) on ${position.exchangeType}`,
+          `✅ Placed limit order @ mark price to close single-leg position ${position.symbol} (${position.side}) on ${position.exchangeType}`,
         );
       } else {
         this.logger.warn(
@@ -3685,13 +3697,25 @@ export class FundingArbitrageStrategy {
       try {
         const adapter = adapters.get(position.exchangeType);
         if (adapter) {
+          // Get mark price for closure
+          let markPrice: number | undefined;
+          try {
+            markPrice = await adapter.getMarkPrice(position.symbol);
+          } catch (priceError: any) {
+            markPrice = position.markPrice;
+          }
+
           const closeOrder = new PerpOrderRequest(
             position.symbol,
             position.side === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG,
-            OrderType.MARKET,
+            OrderType.LIMIT,
             position.size,
+            markPrice,
+            TimeInForce.GTC,
+            true, // reduceOnly
           );
           await adapter.placeOrder(closeOrder);
+          this.logger.log(`✅ Placed limit closure order for worst-case scenario on ${position.exchangeType}`);
         }
       } catch (error: any) {
         this.logger.warn(`Failed to close position: ${error.message}`);

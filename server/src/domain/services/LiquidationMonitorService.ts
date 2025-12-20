@@ -558,20 +558,31 @@ export class LiquidationMonitorService implements ILiquidationMonitor {
     // Retry logic for emergency closes
     for (let attempt = 1; attempt <= this.config.maxCloseRetries; attempt++) {
       try {
-        // Create market order to close position (opposite side, reduceOnly)
+        // Get current mark price to act as maker
+        let markPrice: number | undefined;
+        try {
+          markPrice = await adapter.getMarkPrice(position.symbol);
+        } catch (priceError: any) {
+          this.logger.warn(
+            `Could not get mark price for ${position.symbol} emergency close, using risk price: ${priceError.message}`,
+          );
+          markPrice = risk.markPrice;
+        }
+
+        // Create limit order to close position at mark price (opposite side, reduceOnly)
         const closeOrder = new PerpOrderRequest(
           position.symbol,
           side === 'LONG' ? OrderSide.SHORT : OrderSide.LONG, // Opposite side to close
-          OrderType.MARKET,
+          OrderType.LIMIT,
           risk.positionSize,
-          undefined,
-          TimeInForce.IOC,
+          markPrice,
+          TimeInForce.GTC,
           true, // reduceOnly
         );
 
         this.logger.log(
           `📤 Emergency close ${side} ${position.symbol} on ${exchange}: ` +
-            `size=${risk.positionSize.toFixed(4)} (attempt ${attempt}/${this.config.maxCloseRetries})`,
+            `size=${risk.positionSize.toFixed(4)} @ $${markPrice.toFixed(4)} (attempt ${attempt}/${this.config.maxCloseRetries})`,
         );
 
         const response = await adapter.placeOrder(closeOrder);

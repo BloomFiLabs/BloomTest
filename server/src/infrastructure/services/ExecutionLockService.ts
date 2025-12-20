@@ -19,6 +19,7 @@ export interface ActiveOrder {
     | 'CANCELLED';
   size?: number;
   price?: number;
+  reduceOnly?: boolean;
 }
 
 /**
@@ -80,8 +81,14 @@ export class ExecutionLockService {
   }
 
   /**
+   * Get all active orders currently being tracked
+   */
+  getAllActiveOrders(): ActiveOrder[] {
+    return Array.from(this.activeOrders.values());
+  }
+
+  /**
    * Try to acquire global execution lock
-   * @returns true if lock acquired, false if already held
    */
   tryAcquireGlobalLock(threadId: string, operation: string): boolean {
     // Check for stale lock
@@ -400,6 +407,8 @@ export class ExecutionLockService {
     side: 'LONG' | 'SHORT',
     status: ActiveOrder['status'],
     orderId?: string,
+    price?: number,
+    reduceOnly?: boolean,
   ): void {
     const key = this.getOrderKey(exchange, symbol, side);
     const order = this.activeOrders.get(key);
@@ -409,9 +418,19 @@ export class ExecutionLockService {
       return;
     }
 
-    // Update order ID if provided (for cases where ID isn't known until after placement)
+    // Update order ID if provided
     if (orderId && order.orderId !== orderId) {
       order.orderId = orderId;
+    }
+
+    // Update price if provided
+    if (price !== undefined) {
+      order.price = price;
+    }
+
+    // Update reduceOnly if provided
+    if (reduceOnly !== undefined) {
+      order.reduceOnly = reduceOnly;
     }
 
     const previousStatus = order.status;

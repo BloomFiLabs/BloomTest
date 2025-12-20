@@ -286,55 +286,30 @@ export class PositionManager implements IPositionManager {
           const priceImprovement = priceImprovements[attempt];
 
           try {
-            // Get current market price for limit orders (if not first attempt)
-            let limitPrice: number | undefined = undefined;
-            if (attempt > 0 && position.exchangeType === ExchangeType.LIGHTER) {
-              // For Lighter, get order book price and apply price improvement
-              try {
-                const markPrice = await adapter.getMarkPrice(position.symbol);
-                if (markPrice > 0) {
-                  // For closing LONG: we SELL, so use bid price (worse = lower)
-                  // For closing SHORT: we BUY, so use ask price (worse = higher)
-                  if (position.side === OrderSide.LONG) {
-                    // Closing LONG = SELL = use bid price, make it worse (lower)
-                    limitPrice = markPrice * (1 - priceImprovement);
-                  } else {
-                    // Closing SHORT = BUY = use ask price, make it worse (higher)
-                    limitPrice = markPrice * (1 + priceImprovement);
-                  }
-                  this.logger.debug(
-                    `Attempt ${attempt + 1}/${priceImprovements.length}: Using limit price ${limitPrice.toFixed(6)} ` +
-                      `(${(priceImprovement * 100).toFixed(2)}% ${position.side === OrderSide.LONG ? 'worse' : 'worse'} than market)`,
-                  );
-                }
-              } catch (priceError: any) {
-                this.logger.debug(
-                  `Failed to get market price for progressive close: ${priceError.message}`,
-                );
-                // Fall back to market order
-              }
+            // Simple limit order at mark price to act as maker
+            let markPrice: number | undefined;
+            try {
+              markPrice = await adapter.getMarkPrice(position.symbol);
+            } catch (priceError: any) {
+              this.logger.warn(
+                `Could not get mark price for ${position.symbol} closure, using entry price: ${priceError.message}`,
+              );
+              markPrice = position.entryPrice;
             }
 
             const closeOrder = new PerpOrderRequest(
               position.symbol,
               closeSide,
-              limitPrice ? OrderType.LIMIT : OrderType.MARKET,
+              OrderType.LIMIT,
               positionSize,
-              limitPrice,
-              limitPrice ? TimeInForce.IOC : TimeInForce.IOC, // IOC for both market and limit
+              markPrice,
+              TimeInForce.GTC,
               true, // Reduce only - ensures we're closing, not opening
             );
 
-            if (attempt === 0) {
-              this.logger.log(
-                `📤 Closing position: ${position.symbol} ${position.side} ${positionSize.toFixed(4)} on ${position.exchangeType}`,
-              );
-            } else {
-              this.logger.warn(
-                `🔄 Retry ${attempt}/${priceImprovements.length - 1}: Closing ${position.symbol} with ` +
-                  `${(priceImprovement * 100).toFixed(2)}% worse price (${limitPrice?.toFixed(6)})`,
-              );
-            }
+            this.logger.log(
+              `📤 Closing position: ${position.symbol} ${position.side} ${positionSize.toFixed(4)} on ${position.exchangeType} (Maker order @ Mark Price)`,
+            );
 
             const closeResponse = await adapter.placeOrder(closeOrder);
 
@@ -350,17 +325,19 @@ export class PositionManager implements IPositionManager {
                 position.symbol,
                 position.exchangeType,
                 positionSize,
-                this.config.maxOrderWaitRetries,
+                10, // Increase max retries for limit orders
                 this.config.orderWaitBaseInterval,
-                true, // isClosingPosition = true (enables longer backoff)
+                true, // isClosingPosition = true
                 closeSide,
+                markPrice,
+                true // reduceOnly
               );
             }
 
             finalResponse = response;
 
             // Check if position is actually closed
-            await new Promise((resolve) => setTimeout(resolve, 500)); // Small delay for position to update
+            await new Promise((resolve) => setTimeout(resolve, 2000));
             const currentPositions = await adapter.getPositions();
             const positionStillExists = currentPositions.some(
               (p) =>
@@ -371,28 +348,21 @@ export class PositionManager implements IPositionManager {
 
             if (response.isFilled() && !positionStillExists) {
               positionClosed = true;
-              if (attempt > 0) {
-                this.logger.log(
-                  `✅ Successfully closed position ${position.symbol} on attempt ${attempt + 1} ` +
-                    `with ${(priceImprovement * 100).toFixed(2)}% worse price`,
-                );
-              }
               break; // Position closed successfully
-            }
-
-            if (attempt < priceImprovements.length - 1) {
+            } else {
               this.logger.warn(
-                `⚠️ Close order for ${position.symbol} didn't fill on attempt ${attempt + 1}, ` +
-                  `trying with worse price...`,
+                `⚠️ Position for ${position.symbol} still exists after limit order attempt. ` +
+                  `It may be resting on the book or the market moved away.`,
               );
-              await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait before next attempt
+              // Break and let the scheduler retry in the next cycle if needed
+              break;
             }
           } catch (error: any) {
             this.logger.warn(
               `Error on close attempt ${attempt + 1} for ${position.symbol}: ${error.message}`,
             );
             if (attempt === priceImprovements.length - 1) {
-              // Last attempt failed, break and try fallback
+              // Last attempt failed, break
               break;
             }
             await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait before retry
@@ -455,27 +425,47 @@ export class PositionManager implements IPositionManager {
               );
 
               if (currentPosition) {
+                // Get current mark price for final limit order
+                let finalMarkPrice: number | undefined;
+                try {
+                  finalMarkPrice = await adapter.getMarkPrice(currentPosition.symbol);
+                } catch (priceError: any) {
+                  finalMarkPrice = currentPosition.entryPrice;
+                }
+
                 const finalCloseOrder = new PerpOrderRequest(
                   currentPosition.symbol,
                   currentPosition.side === OrderSide.LONG
                     ? OrderSide.SHORT
                     : OrderSide.LONG,
-                  OrderType.MARKET,
-                  Math.abs(currentPosition.size), // Use absolute size
-                  0, // No limit price for market orders
-                  TimeInForce.IOC, // Immediate or cancel
+                  OrderType.LIMIT,
+                  Math.abs(currentPosition.size),
+                  finalMarkPrice,
+                  TimeInForce.GTC,
                   true, // Reduce only
                 );
 
                 this.logger.log(
-                  `🔄 Final fallback: Force closing ${currentPosition.symbol} ${currentPosition.side} ${Math.abs(currentPosition.size).toFixed(4)} on ${currentPosition.exchangeType} with market order...`,
+                  `🔄 Final fallback: Force closing ${currentPosition.symbol} ${currentPosition.side} ${Math.abs(currentPosition.size).toFixed(4)} on ${currentPosition.exchangeType} with limit order @ mark price ($${finalMarkPrice.toFixed(4)})...`,
                 );
 
                 const fallbackResponse =
                   await adapter.placeOrder(finalCloseOrder);
 
-                // Wait a bit for the order to fill
-                await new Promise((resolve) => setTimeout(resolve, 2000));
+                // Wait longer for the limit order to fill
+                if (fallbackResponse.orderId) {
+                  await this.orderExecutor.waitForOrderFill(
+                    adapter,
+                    fallbackResponse.orderId,
+                    currentPosition.symbol,
+                    currentPosition.exchangeType,
+                    Math.abs(currentPosition.size),
+                    10, // 10 retries
+                    3000, // 3s interval
+                    true,
+                    currentPosition.side === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG,
+                  );
+                }
 
                 // Verify position is closed
                 const verifyPositions = await adapter.getPositions();
@@ -486,11 +476,11 @@ export class PositionManager implements IPositionManager {
                     Math.abs(p.size) > 0.0001,
                 );
 
-                if (!stillExists && fallbackResponse.isSuccess()) {
+                if (!stillExists) {
                   // Mark as closed (release lock and record)
                   this.markAsClosed(position.exchangeType, position.symbol);
                   this.logger.log(
-                    `✅ Successfully closed position with final fallback market order: ${position.symbol} on ${position.exchangeType}`,
+                    `✅ Successfully closed position with final fallback limit order: ${position.symbol} on ${position.exchangeType}`,
                   );
                   closed.push(position);
                 } else {
@@ -500,7 +490,7 @@ export class PositionManager implements IPositionManager {
                     position.symbol,
                   );
                   this.logger.error(
-                    `❌ Final fallback market order failed: ${position.symbol} on ${position.exchangeType}. ` +
+                    `❌ Final fallback limit order failed to fill: ${position.symbol} on ${position.exchangeType}. ` +
                       `Position still exists. Margin remains locked.`,
                   );
                   result.errors.push(
@@ -757,14 +747,14 @@ export class PositionManager implements IPositionManager {
             }
           }
 
-          // If price improvement didn't work, place market order
+          // If price improvement didn't work, place limit order at mark price
           if (!improvedOrderFilled) {
             // Cancel unfilled GTC order if it still exists
             if (unfilledOrderId) {
               try {
                 await unfilledAdapter.cancelOrder(unfilledOrderId, symbol);
                 this.logger.log(
-                  `✅ Cancelled GTC order ${unfilledOrderId} on ${unfilledExchange}`,
+                  `✅ Cancelled original GTC order ${unfilledOrderId} on ${unfilledExchange}`,
                 );
               } catch (error: any) {
                 // Order might already be cancelled or filled
@@ -774,32 +764,86 @@ export class PositionManager implements IPositionManager {
               }
             }
 
-            // Place market order to complete the pair
+            // Get current mark price for the unfilled side
+            let markPrice: number | undefined;
+            try {
+              markPrice = await unfilledAdapter.getMarkPrice(symbol);
+            } catch (priceError: any) {
+              this.logger.warn(
+                `Could not get mark price for ${symbol} completion, using original mark price: ${priceError.message}`,
+              );
+              markPrice =
+                unfilledSide === OrderSide.LONG
+                  ? profitability.opportunity.longMarkPrice
+                  : profitability.opportunity.shortMarkPrice;
+            }
+
+            // Place limit order at mark price to act as maker
             this.logger.log(
-              `📤 ${symbol}: Placing market order to complete arbitrage pair...`,
+              `📤 ${symbol}: Placing limit order @ mark price ($${markPrice.toFixed(4)}) to complete arbitrage pair...`,
             );
-            const marketOrder = new PerpOrderRequest(
+            const completionOrder = new PerpOrderRequest(
               symbol,
               unfilledSide,
-              OrderType.MARKET,
+              OrderType.LIMIT,
               positionSize,
+              markPrice,
+              TimeInForce.GTC,
+              false,
             );
 
-            const marketResponse =
-              await unfilledAdapter.placeOrder(marketOrder);
+            const completionResponse =
+              await unfilledAdapter.placeOrder(completionOrder);
 
-            if (marketResponse.isSuccess() && marketResponse.isFilled()) {
+            if (completionResponse.isSuccess() && completionResponse.isFilled()) {
               this.logger.log(
-                `✅ ${symbol}: Market order filled, arbitrage pair complete. ` +
+                `✅ ${symbol}: Limit order filled immediately, arbitrage pair complete. ` +
                   `Net return: $${profitability.expectedNetReturn.toFixed(4)}/period`,
               );
+            } else if (completionResponse.orderId) {
+              this.logger.log(
+                `⏳ ${symbol}: Limit order placed, waiting for fill...`,
+              );
+              const waitResult = await this.orderExecutor.waitForOrderFill(
+                unfilledAdapter,
+                completionResponse.orderId,
+                symbol,
+                unfilledExchange,
+                positionSize,
+                10, // 10 retries
+                3000, // 3s interval
+                false,
+                unfilledSide,
+                markPrice,
+                false // reduceOnly
+              );
+
+              if (waitResult.isFilled()) {
+                this.logger.log(
+                  `✅ ${symbol}: Limit order filled after wait, arbitrage pair complete.`,
+                );
+              } else {
+                this.logger.warn(
+                  `⚠️ ${symbol}: Limit order failed to fill after wait. ` +
+                    `Falling back to closing filled position...`,
+                );
+                // Fall through to Option 1
+                await this.closeFilledPosition(
+                  filledAdapter,
+                  symbol,
+                  filledSide,
+                  positionSize,
+                  filledExchange,
+                  result,
+                );
+              }
             } else {
               this.logger.warn(
-                `⚠️ ${symbol}: Market order failed to fill. ` +
+                `⚠️ ${symbol}: Limit order failed to fill. ` +
                   `Falling back to closing filled position...`,
               );
               // Fall through to Option 1
-              const closeResult = await this.closeFilledPosition(
+              await this.closeFilledPosition(
                 filledAdapter,
                 symbol,
                 filledSide,
@@ -807,9 +851,6 @@ export class PositionManager implements IPositionManager {
                 filledExchange,
                 result,
               );
-              if (closeResult.isFailure) {
-                // Error already logged in closeFilledPosition
-              }
             }
           }
         } else {
@@ -903,18 +944,28 @@ export class PositionManager implements IPositionManager {
         );
       }
 
+      // Get current mark price to act as maker
+      let markPrice: number | undefined;
+      try {
+        markPrice = await adapter.getMarkPrice(symbol);
+      } catch (priceError: any) {
+        this.logger.warn(
+          `Could not get mark price for ${symbol} closure, using fallback: ${priceError.message}`,
+        );
+      }
+
       const closeOrder = new PerpOrderRequest(
         symbol,
         side === 'LONG' ? OrderSide.SHORT : OrderSide.LONG,
-        OrderType.MARKET,
+        OrderType.LIMIT,
         actualSize,
-        0, // No limit price for market orders
-        TimeInForce.IOC, // Immediate or cancel
+        markPrice,
+        TimeInForce.GTC,
         true, // Reduce only
       );
 
       this.logger.log(
-        `📤 Closing ${side} position: ${symbol} ${actualSize.toFixed(4)}`,
+        `📤 Closing ${side} position: ${symbol} ${actualSize.toFixed(4)} @ $${markPrice?.toFixed(4)} (Maker order @ Mark Price)`,
       );
 
       const closeResponse = await adapter.placeOrder(closeOrder);
@@ -927,19 +978,31 @@ export class PositionManager implements IPositionManager {
           closeResponse.orderId,
           symbol,
           exchangeType,
-          size,
-          this.config.maxOrderWaitRetries,
-          this.config.orderWaitBaseInterval,
+          actualSize,
+          10, // 10 retries
+          3000, // 3s interval
           true, // isClosingPosition
           closeSide,
+          markPrice,
+          true // reduceOnly
         );
       }
 
-      if (closeResponse.isSuccess() && closeResponse.isFilled()) {
+      // Check if position is actually closed
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const currentPositionsAfter = await adapter.getPositions();
+      const stillExists = currentPositionsAfter.some(
+        (p) =>
+          p.symbol === symbol &&
+          p.exchangeType === exchangeType &&
+          Math.abs(p.size) > 0.0001,
+      );
+
+      if (!stillExists) {
         this.logger.log(`✅ Successfully closed ${side} position: ${symbol}`);
         return Result.success(undefined);
       } else {
-        this.logger.warn(`⚠️ Failed to close ${side} position: ${symbol}`);
+        this.logger.warn(`⚠️ Failed to close ${side} position: ${symbol} (still exists after limit order)`);
         result.errors.push(`Failed to close ${side} position ${symbol}`);
         return Result.failure(
           new PositionNotFoundException(symbol, exchangeType, {

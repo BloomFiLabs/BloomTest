@@ -674,6 +674,95 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
     }
   }
 
+  /**
+   * Modify an existing order
+   */
+  async modifyOrder(
+    orderId: string,
+    request: PerpOrderRequest,
+  ): Promise<PerpOrderResponse> {
+    try {
+      await this.ensureSymbolConverter();
+      const baseCoin = request.symbol
+        .replace('USDT', '')
+        .replace('USDC', '')
+        .replace('-PERP', '');
+      const assetId = this.symbolConverter!.getAssetId(baseCoin);
+      
+      if (assetId === undefined) {
+        throw new Error(`Could not find asset ID for "${baseCoin}"`);
+      }
+
+      const isPerp = request.symbol.includes('-PERP');
+      const meta = await this.infoClient.meta();
+      const asset = meta.universe[assetId];
+      const szDecimals = asset.szDecimals;
+
+      const formattedSize = formatSize(request.size, szDecimals);
+      const formattedPrice = formatPrice(
+        (request.price || 0).toString(),
+        szDecimals,
+        isPerp,
+      );
+
+      this.logger.debug(
+        `🔄 Modifying order ${orderId} on Hyperliquid: ${request.symbol} @ ${formattedPrice}`,
+      );
+
+      // Use the dedicated updateOrder method for atomic modification
+      const result = await this.exchangeClient.updateOrder({
+        order: {
+          asset: assetId,
+          isBuy: request.side === OrderSide.LONG,
+          limitPx: formattedPrice,
+          sz: formattedSize,
+          reduceOnly: request.reduceOnly || false,
+          tif: request.timeInForce === TimeInForce.IOC ? 'Ioc' : 'Gtc',
+        },
+        oid: parseInt(orderId),
+      });
+
+      if (result.status === 'ok' && result.response?.type === 'order') {
+        const status = result.response.data.statuses[0];
+        let newOrderId: string = 'unknown';
+        let orderStatus: OrderStatus = OrderStatus.SUBMITTED;
+        let filledSize: number | undefined;
+        let avgFillPrice: number | undefined;
+
+        if ('filled' in status && status.filled) {
+          newOrderId = status.filled.oid?.toString() || 'unknown';
+          orderStatus = OrderStatus.FILLED;
+          filledSize = parseFloat(status.filled.totalSz || '0');
+          avgFillPrice = status.filled.avgPx ? parseFloat(status.filled.avgPx) : undefined;
+        } else if ('resting' in status && status.resting) {
+          newOrderId = status.resting.oid?.toString() || 'unknown';
+        }
+
+        return new PerpOrderResponse(
+          newOrderId,
+          orderStatus,
+          request.symbol,
+          request.side,
+          request.clientOrderId,
+          filledSize,
+          avgFillPrice,
+          undefined,
+          new Date(),
+        );
+      }
+
+      throw new Error(`Failed to modify order: ${JSON.stringify(result)}`);
+    } catch (error: any) {
+      this.logger.error(`Failed to modify order ${orderId}: ${error.message}`);
+      throw new ExchangeError(
+        `Failed to modify order: ${error.message}`,
+        ExchangeType.HYPERLIQUID,
+        undefined,
+        error,
+      );
+    }
+  }
+
   async cancelOrder(orderId: string, symbol?: string): Promise<boolean> {
     try {
       await this.ensureSymbolConverter();
@@ -1095,6 +1184,28 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
     this.logger.debug(
       'Balance cache cleared - next getBalance() will fetch fresh data',
     );
+  }
+
+  /**
+   * Get the tick size (minimum price increment) for a symbol
+   */
+  async getTickSize(symbol: string): Promise<number> {
+    try {
+      await this.ensureSymbolConverter();
+      // Hyperliquid uses 5 significant figures for price.
+      // We can derive a safe tick size from the current mark price.
+      const markPrice = await this.getMarkPrice(symbol);
+      if (markPrice <= 0) return 0.0001;
+      
+      // Calculate order of magnitude
+      const magnitude = Math.floor(Math.log10(markPrice));
+      // Tick size should be roughly 1/10000th or 1/100000th of the price
+      // For 5 sig figs, it's 10^(magnitude - 4)
+      return Math.pow(10, magnitude - 4);
+    } catch (error: any) {
+      this.logger.debug(`Failed to get tick size for ${symbol}: ${error.message}`);
+      return 0.0001; // Default fallback
+    }
   }
 
   async getBalance(): Promise<number> {

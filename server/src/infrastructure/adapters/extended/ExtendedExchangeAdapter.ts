@@ -458,6 +458,34 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
    * Cancel order by ID
    * API: DELETE /api/v1/user/order/{id}
    */
+  /**
+   * Modify an existing order
+   */
+  async modifyOrder(
+    orderId: string,
+    request: PerpOrderRequest,
+  ): Promise<PerpOrderResponse> {
+    try {
+      this.logger.debug(
+        `🔄 Modifying order ${orderId} on Extended (Cancel + Place): ${request.symbol} @ ${request.price}`,
+      );
+
+      // Cancel existing order
+      await this.cancelOrder(orderId, request.symbol);
+
+      // Place new order
+      return await this.placeOrder(request);
+    } catch (error: any) {
+      this.logger.error(`Failed to modify order ${orderId}: ${error.message}`);
+      throw new ExchangeError(
+        `Failed to modify order: ${error.message}`,
+        ExchangeType.EXTENDED,
+        undefined,
+        error,
+      );
+    }
+  }
+
   async cancelOrder(orderId: string, symbol?: string): Promise<boolean> {
     try {
       const response = await this.client.delete(
@@ -598,6 +626,24 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
    * API: GET /api/v1/user/balance
    * Returns 404 if balance is 0
    */
+  /**
+   * Get the tick size (minimum price increment) for a symbol
+   */
+  async getTickSize(symbol: string): Promise<number> {
+    try {
+      const response = await this.client.get('/api/v1/info/markets');
+      if (response.data?.status === 'ok' && response.data.data) {
+        const market = response.data.data.find((m: any) => m.symbol === symbol);
+        if (market?.priceTickSize) {
+          return parseFloat(market.priceTickSize);
+        }
+      }
+    } catch (error: any) {
+      this.logger.debug(`Failed to get tick size for ${symbol}: ${error.message}`);
+    }
+    return 0.0001; // Default fallback
+  }
+
   async getBalance(): Promise<number> {
     try {
       const response = await this.client.get('/api/v1/user/balance');

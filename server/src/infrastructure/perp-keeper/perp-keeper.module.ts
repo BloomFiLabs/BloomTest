@@ -64,6 +64,7 @@ import { PerpSpotBalanceManager } from '../../domain/services/strategy-rules/Per
 import { PerpSpotExecutionPlanBuilder } from '../../domain/services/strategy-rules/PerpSpotExecutionPlanBuilder';
 import { PredictedBreakEvenCalculator } from '../../domain/services/strategy-rules/PredictedBreakEvenCalculator';
 import { StrategyConfig } from '../../domain/value-objects/StrategyConfig';
+import { MakerEfficiencyService } from '../../domain/services/strategy-rules/MakerEfficiencyService';
 import { SimpleEventBus } from '../events/SimpleEventBus';
 import { TWAPEngine } from '../../domain/services/TWAPEngine';
 import {
@@ -627,6 +628,9 @@ import { PredictionBacktester } from '../../domain/services/prediction/Predictio
     // Execution lock service for symbol-level locking
     ExecutionLockService,
 
+    // Maker efficiency service - ensures we are best maker on book
+    MakerEfficiencyService,
+
     // Liquidation monitoring service - monitors position risk and triggers emergency closes
     LiquidationMonitorService,
 
@@ -746,6 +750,8 @@ import { PredictionBacktester } from '../../domain/services/prediction/Predictio
     KeeperStrategyEventListener,
     WithdrawalFulfiller,
     NAVReporter,
+    // Maker efficiency service
+    MakerEfficiencyService,
     // Prediction services
     FundingRatePredictionService,
     'IFundingRatePredictionService',
