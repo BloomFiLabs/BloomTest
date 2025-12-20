@@ -30,8 +30,8 @@ describe('RateLimiterService', () => {
     it('should initialize with default limits', () => {
       const lighterLimit = service.getLimit(ExchangeType.LIGHTER);
       expect(lighterLimit).toBeDefined();
-      expect(lighterLimit?.maxRequestsPerSecond).toBe(5);
-      expect(lighterLimit?.maxRequestsPerMinute).toBe(100);
+      expect(lighterLimit?.maxRequestsPerSecond).toBe(12);
+      expect(lighterLimit?.maxRequestsPerMinute).toBe(60);
     });
 
     it('should have limits for all exchanges', () => {
@@ -51,7 +51,7 @@ describe('RateLimiterService', () => {
       await service.acquire(ExchangeType.LIGHTER);
 
       const usage = service.getUsage(ExchangeType.LIGHTER);
-      expect(usage.currentRequestsPerSecond).toBe(3);
+      expect(usage.currentWeightPerSecond).toBe(3);
     });
 
     it('should track per-exchange limits independently', async () => {
@@ -62,8 +62,8 @@ describe('RateLimiterService', () => {
       const lighterUsage = service.getUsage(ExchangeType.LIGHTER);
       const hyperliquidUsage = service.getUsage(ExchangeType.HYPERLIQUID);
 
-      expect(lighterUsage.currentRequestsPerSecond).toBe(2);
-      expect(hyperliquidUsage.currentRequestsPerSecond).toBe(1);
+      expect(lighterUsage.currentWeightPerSecond).toBe(2);
+      expect(hyperliquidUsage.currentWeightPerSecond).toBe(1);
     });
   });
 
@@ -94,18 +94,18 @@ describe('RateLimiterService', () => {
 
       const usage = service.getUsage(ExchangeType.LIGHTER);
 
-      expect(usage.currentRequestsPerSecond).toBe(2);
-      expect(usage.currentRequestsPerMinute).toBe(2);
-      expect(usage.maxRequestsPerSecond).toBe(5);
-      expect(usage.maxRequestsPerMinute).toBe(100);
+      expect(usage.currentWeightPerSecond).toBe(2);
+      expect(usage.currentWeightPerMinute).toBe(2);
+      expect(usage.maxWeightPerSecond).toBe(12);
+      expect(usage.maxWeightPerMinute).toBe(60);
       expect(usage.queuedRequests).toBe(0);
     });
 
     it('should return zero for unknown exchange', () => {
       const usage = service.getUsage('UNKNOWN' as ExchangeType);
 
-      expect(usage.currentRequestsPerSecond).toBe(0);
-      expect(usage.maxRequestsPerSecond).toBe(0);
+      expect(usage.currentWeightPerSecond).toBe(0);
+      expect(usage.maxWeightPerSecond).toBe(0);
     });
   });
 
@@ -117,11 +117,11 @@ describe('RateLimiterService', () => {
       const allUsage = service.getAllUsage();
 
       expect(allUsage.size).toBeGreaterThan(0);
-      expect(allUsage.get(ExchangeType.LIGHTER)?.currentRequestsPerSecond).toBe(
+      expect(allUsage.get(ExchangeType.LIGHTER)?.currentWeightPerSecond).toBe(
         1,
       );
       expect(
-        allUsage.get(ExchangeType.HYPERLIQUID)?.currentRequestsPerSecond,
+        allUsage.get(ExchangeType.HYPERLIQUID)?.currentWeightPerSecond,
       ).toBe(1);
     });
   });
@@ -145,12 +145,12 @@ describe('RateLimiterService', () => {
       await service.acquire(ExchangeType.LIGHTER);
 
       let usage = service.getUsage(ExchangeType.LIGHTER);
-      expect(usage.currentRequestsPerSecond).toBe(2);
+      expect(usage.currentWeightPerSecond).toBe(2);
 
       service.reset(ExchangeType.LIGHTER);
 
       usage = service.getUsage(ExchangeType.LIGHTER);
-      expect(usage.currentRequestsPerSecond).toBe(0);
+      expect(usage.currentWeightPerSecond).toBe(0);
     });
   });
 
@@ -164,8 +164,8 @@ describe('RateLimiterService', () => {
       const lighterUsage = service.getUsage(ExchangeType.LIGHTER);
       const hyperliquidUsage = service.getUsage(ExchangeType.HYPERLIQUID);
 
-      expect(lighterUsage.currentRequestsPerSecond).toBe(0);
-      expect(hyperliquidUsage.currentRequestsPerSecond).toBe(0);
+      expect(lighterUsage.currentWeightPerSecond).toBe(0);
+      expect(hyperliquidUsage.currentWeightPerSecond).toBe(0);
     });
   });
 

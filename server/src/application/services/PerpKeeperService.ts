@@ -28,6 +28,7 @@ import {
   RebalanceResult,
 } from '../../domain/services/ExchangeBalanceRebalancer';
 import { ArbitrageOpportunity } from '../../domain/services/FundingRateAggregator';
+import { RateLimiterService } from '../../infrastructure/services/RateLimiterService';
 
 /**
  * PerpKeeperService - Implements IPerpKeeperService
@@ -70,6 +71,7 @@ export class PerpKeeperService implements IPerpKeeperService {
     private readonly performanceLogger: PerpKeeperPerformanceLogger,
     private readonly balanceRebalancer: ExchangeBalanceRebalancer,
     private readonly configService: ConfigService,
+    private readonly rateLimiter: RateLimiterService,
   ) {
     // Check if test mode is enabled
     const testMode = this.configService.get<string>('TEST_MODE') === 'true';
@@ -89,18 +91,18 @@ export class PerpKeeperService implements IPerpKeeperService {
       // Create real adapters if they're null (for market data)
       // Mock adapters need real adapters to get market data
       const aster =
-        asterAdapter || new AsterExchangeAdapter(this.configService);
+        asterAdapter || new AsterExchangeAdapter(this.configService, this.rateLimiter);
       const lighter =
-        lighterAdapter || new LighterExchangeAdapter(this.configService);
+        lighterAdapter || new LighterExchangeAdapter(this.configService, this.rateLimiter);
       const hyperliquid =
         hyperliquidAdapter ||
-        new HyperliquidExchangeAdapter(this.configService, null as any);
+        new HyperliquidExchangeAdapter(this.configService, null as any, this.rateLimiter);
 
       // Extended adapter is optional - only create if API key is available
       let extended: ExtendedExchangeAdapter | null = extendedAdapter;
       if (!extended) {
         try {
-          extended = new ExtendedExchangeAdapter(this.configService);
+          extended = new ExtendedExchangeAdapter(this.configService, this.rateLimiter);
         } catch (e: any) {
           this.logger.warn(
             `Extended adapter not available in test mode: ${e.message}`,

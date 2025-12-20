@@ -705,7 +705,8 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
       );
 
       // Use the dedicated updateOrder method for atomic modification
-      const result = await this.callExchange(this.WEIGHT_EXCHANGE, () => this.exchangeClient.updateOrder({
+      // Type assertion needed as SDK types may not include updateOrder
+      const result = await this.callExchange(this.WEIGHT_EXCHANGE, () => (this.exchangeClient as any).updateOrder({
         order: {
           asset: assetId,
           isBuy: request.side === OrderSide.LONG,
@@ -715,7 +716,7 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
           tif: request.timeInForce === TimeInForce.IOC ? 'Ioc' : 'Gtc',
         },
         oid: parseInt(orderId),
-      }));
+      })) as any;
 
       if (result.status === 'ok' && result.response?.type === 'order') {
         const status = result.response.data.statuses[0];
@@ -1508,7 +1509,7 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
       ) {
         const result = await this.callExchange(this.WEIGHT_EXCHANGE, () => (
           this.exchangeClient as any
-        ).transferBetweenSpotAndPerp(amount, toPerp));
+        ).transferBetweenSpotAndPerp(amount, toPerp)) as any;
 
         if (result.status === 'ok') {
           const txHash =
@@ -1903,7 +1904,7 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
         const result = await this.callExchange(this.WEIGHT_EXCHANGE, () => (this.exchangeClient as any).withdraw3({
           destination: destination,
           amount: amount,
-        }));
+        })) as any;
 
         if (result && result.status === 'ok') {
           // Hyperliquid withdraw3 returns { status: 'ok', response: { type: 'default' } }

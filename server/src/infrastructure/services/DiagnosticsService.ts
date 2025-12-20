@@ -1888,10 +1888,10 @@ export class DiagnosticsService {
 
     for (const [exchange, usage] of allUsage) {
       byExchange[exchange] = {
-        currentPerSecond: usage.currentRequestsPerSecond,
-        maxPerSecond: usage.maxRequestsPerSecond,
-        currentPerMinute: usage.currentRequestsPerMinute,
-        maxPerMinute: usage.maxRequestsPerMinute,
+        currentPerSecond: usage.currentWeightPerSecond,
+        maxPerSecond: usage.maxWeightPerSecond,
+        currentPerMinute: usage.currentWeightPerMinute,
+        maxPerMinute: usage.maxWeightPerMinute,
         queued: usage.queuedRequests,
       };
     }

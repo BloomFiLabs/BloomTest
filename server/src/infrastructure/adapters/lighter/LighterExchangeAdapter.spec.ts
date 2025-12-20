@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { LighterExchangeAdapter } from './LighterExchangeAdapter';
 import { DiagnosticsService } from '../../services/DiagnosticsService';
+import { RateLimiterService } from '../../services/RateLimiterService';
 import {
   OrderSide,
   OrderType,
@@ -41,6 +42,7 @@ describe('LighterExchangeAdapter Nonce Handling', () => {
   let adapter: LighterExchangeAdapter;
   let mockConfigService: jest.Mocked<ConfigService>;
   let mockDiagnosticsService: jest.Mocked<DiagnosticsService>;
+  let mockRateLimiter: jest.Mocked<RateLimiterService>;
 
   beforeEach(async () => {
     jest.useFakeTimers();
@@ -63,6 +65,19 @@ describe('LighterExchangeAdapter Nonce Handling', () => {
       recordOrder: jest.fn(),
     } as any;
 
+    mockRateLimiter = {
+      acquire: jest.fn().mockResolvedValue(undefined),
+      tryAcquire: jest.fn().mockReturnValue(true),
+      getUsage: jest.fn().mockReturnValue({
+        currentWeightPerSecond: 0,
+        currentWeightPerMinute: 0,
+        maxWeightPerSecond: 12,
+        maxWeightPerMinute: 60,
+        queuedRequests: 0,
+        budgetHealth: 1.0,
+      }),
+    } as any;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         {
@@ -70,11 +85,12 @@ describe('LighterExchangeAdapter Nonce Handling', () => {
           useFactory: () =>
             new LighterExchangeAdapter(
               mockConfigService,
-              mockDiagnosticsService,
+              mockRateLimiter,
             ),
         },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: DiagnosticsService, useValue: mockDiagnosticsService },
+        { provide: RateLimiterService, useValue: mockRateLimiter },
       ],
     }).compile();
 
@@ -164,6 +180,7 @@ describe('LighterExchangeAdapter ReduceOnly Validation', () => {
   let adapter: LighterExchangeAdapter;
   let mockConfigService: jest.Mocked<ConfigService>;
   let mockDiagnosticsService: jest.Mocked<DiagnosticsService>;
+  let mockRateLimiter: jest.Mocked<RateLimiterService>;
 
   beforeEach(async () => {
     mockConfigService = {
@@ -184,6 +201,19 @@ describe('LighterExchangeAdapter ReduceOnly Validation', () => {
       recordOrder: jest.fn(),
     } as any;
 
+    mockRateLimiter = {
+      acquire: jest.fn().mockResolvedValue(undefined),
+      tryAcquire: jest.fn().mockReturnValue(true),
+      getUsage: jest.fn().mockReturnValue({
+        currentWeightPerSecond: 0,
+        currentWeightPerMinute: 0,
+        maxWeightPerSecond: 12,
+        maxWeightPerMinute: 60,
+        queuedRequests: 0,
+        budgetHealth: 1.0,
+      }),
+    } as any;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         {
@@ -191,11 +221,12 @@ describe('LighterExchangeAdapter ReduceOnly Validation', () => {
           useFactory: () =>
             new LighterExchangeAdapter(
               mockConfigService,
-              mockDiagnosticsService,
+              mockRateLimiter,
             ),
         },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: DiagnosticsService, useValue: mockDiagnosticsService },
+        { provide: RateLimiterService, useValue: mockRateLimiter },
       ],
     }).compile();
 

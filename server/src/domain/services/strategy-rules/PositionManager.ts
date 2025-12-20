@@ -774,11 +774,15 @@ export class PositionManager implements IPositionManager {
               );
               markPrice =
                 unfilledSide === OrderSide.LONG
-                  ? profitability.opportunity.longMarkPrice
-                  : profitability.opportunity.shortMarkPrice;
+                  ? opportunity.longMarkPrice
+                  : opportunity.shortMarkPrice;
             }
 
             // Place limit order at mark price to act as maker
+            if (!markPrice) {
+              this.logger.error(`Cannot place completion order: mark price unavailable for ${symbol}`);
+              continue;
+            }
             this.logger.log(
               `📤 ${symbol}: Placing limit order @ mark price ($${markPrice.toFixed(4)}) to complete arbitrage pair...`,
             );

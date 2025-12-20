@@ -313,7 +313,7 @@ export class RateLimiterService {
       bucket.secondWindow = [];
       bucket.minuteWindow = [];
       // Release all waiting requests
-      bucket.waitQueue.forEach((resolve) => resolve());
+      bucket.waitQueue.forEach((entry) => entry.resolve());
       bucket.waitQueue = [];
     }
   }

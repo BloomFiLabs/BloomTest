@@ -6,8 +6,6 @@ import { HyperLiquidWebSocketProvider } from '../../../infrastructure/adapters/h
 import { LighterWebSocketProvider } from '../../../infrastructure/adapters/lighter/LighterWebSocketProvider';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { OrderSide, OrderType, PerpOrderRequest, TimeInForce } from '../../value-objects/PerpOrder';
-
-import { MakerEfficiencyService } from '../../../domain/services/strategy-rules/MakerEfficiencyService';
 import { RateLimiterService } from '../../../infrastructure/services/RateLimiterService';
 
 /**

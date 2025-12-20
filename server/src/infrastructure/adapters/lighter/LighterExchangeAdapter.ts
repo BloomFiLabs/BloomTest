@@ -1570,7 +1570,7 @@ export class LighterExchangeAdapter
       const price = BigInt(Math.round((request.price || 0) * 1e8));
 
       // Lighter SDK updateOrder
-      const [tx, txHash, error] = await this.callApi(this.WEIGHT_TX, () => (this.signerClient as any).updateOrder({
+      const result = await this.callApi(this.WEIGHT_TX, () => (this.signerClient as any).updateOrder({
         marketIndex,
         orderIndex,
         side: request.side === OrderSide.LONG ? 0 : 1,
@@ -1580,7 +1580,8 @@ export class LighterExchangeAdapter
           request.type === OrderType.MARKET
             ? LighterOrderType.MARKET
             : LighterOrderType.LIMIT,
-      }));
+      })) as [any, string, string | null];
+      const [tx, txHash, error] = result;
 
       if (error) {
         throw new Error(error);
@@ -1770,12 +1771,13 @@ export class LighterExchangeAdapter
         );
 
         // SDK types are incorrect - it actually accepts { marketIndex, orderIndex } object
-        const [tx, txHash, error] = await this.callApi(this.WEIGHT_TX, () => (
+        const result = await this.callApi(this.WEIGHT_TX, () => (
           this.signerClient as any
         ).cancelOrder({
           marketIndex,
           orderIndex,
-        }));
+        })) as [any, string, string | null];
+        const [tx, txHash, error] = result;
 
         if (error) {
           this.logger.error(`❌ Cancel order failed: ${error}`);
@@ -2765,7 +2767,11 @@ export class LighterExchangeAdapter
       const market = this.marketHelpers.get(marketIndex);
       if (market) {
         // market.tickSize is available in Lighter MarketHelper
-        return parseFloat(market.tickSize.toString()) / 1e8; // Lighter uses 1e8 for prices
+        // MarketHelper may have tickSize as a property or method
+        const tickSize = (market as any).tickSize || (market as any).getTickSize?.();
+        if (tickSize) {
+          return parseFloat(tickSize.toString()) / 1e8; // Lighter uses 1e8 for prices
+        }
       }
     } catch (error: any) {
       this.logger.debug(`Failed to get tick size for ${symbol}: ${error.message}`);
@@ -2811,7 +2817,7 @@ export class LighterExchangeAdapter
         const response = await this.callApi(this.WEIGHT_INFO, () => (accountApi.getAccount as any)({
           by: 'index',
           value: String(accountIndex),
-        }));
+        })) as any;
 
         // Response structure from actual API call:
         // { code: 200, total: 1, accounts: [{ collateral, available_balance, status, ... }] }

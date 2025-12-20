@@ -80,12 +80,6 @@ export class ExecutionLockService {
     return `thread-${++this.threadCounter}-${Date.now()}`;
   }
 
-  /**
-   * Get all active orders currently being tracked
-   */
-  getAllActiveOrders(): ActiveOrder[] {
-    return Array.from(this.activeOrders.values());
-  }
 
   /**
    * Try to acquire global execution lock
