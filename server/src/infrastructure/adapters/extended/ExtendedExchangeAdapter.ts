@@ -55,6 +55,11 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
   private marketCacheTimestamp: number = 0;
   private readonly MARKET_CACHE_TTL = 3600000; // 1 hour
 
+  // Rate limit weights
+  private readonly WEIGHT_INFO_LIGHT = 1;
+  private readonly WEIGHT_INFO_HEAVY = 5;
+  private readonly WEIGHT_TX = 1;
+
   private async callApi<T>(weight: number, fn: () => Promise<T>): Promise<T> {
     await this.rateLimiter.acquire(ExchangeType.EXTENDED, weight);
     return await fn();
@@ -187,7 +192,7 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
 
     try {
       // Extended API uses /api/v1/ prefix
-      const response = await this.client.get('/api/v1/info/markets');
+      const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get('/api/v1/info/markets'));
       if (response.data?.status === 'ok' && Array.isArray(response.data.data)) {
         this.marketInfoCache.clear();
         for (const market of response.data.data) {
@@ -347,7 +352,7 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
       };
 
       // Submit order to Extended API
-      const response = await this.client.post('/api/v1/user/order', payload);
+      const response = await this.callApi(this.WEIGHT_TX, () => this.client.post('/api/v1/user/order', payload));
 
       if (response.data?.status === 'OK' && response.data.data) {
         const resultOrderId =
@@ -418,7 +423,7 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
    */
   async getPositions(): Promise<PerpPosition[]> {
     try {
-      const response = await this.callApi(1, () => this.client.get('/api/v1/user/positions'));
+      const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get('/api/v1/user/positions'));
 
       if (
         response.data?.status !== 'OK' ||
@@ -497,9 +502,9 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
 
   async cancelOrder(orderId: string, symbol?: string): Promise<boolean> {
     try {
-      const response = await this.client.delete(
+      const response = await this.callApi(this.WEIGHT_TX, () => this.client.delete(
         `/api/v1/user/order/${orderId}`,
-      );
+      ));
 
       if (response.data?.status === 'OK') {
         this.logger.log(`✅ Order cancelled on Extended: ${orderId}`);
@@ -527,9 +532,9 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
     try {
       const marketName = await this.getMarketName(symbol);
 
-      const response = await this.client.post('/api/v1/user/order/massCancel', {
+      const response = await this.callApi(this.WEIGHT_TX, () => this.client.post('/api/v1/user/order/massCancel', {
         markets: [marketName],
-      });
+      }));
 
       // Extended mass cancel is async, returns status
       if (response.data?.status === 'OK') {
@@ -561,7 +566,7 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
     symbol?: string,
   ): Promise<PerpOrderResponse> {
     try {
-      const response = await this.client.get(`/api/v1/user/orders/${orderId}`);
+      const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get(`/api/v1/user/orders/${orderId}`));
 
       if (response.data?.status !== 'OK' || !response.data.data) {
         throw new Error(`Order not found: ${orderId}`);
@@ -610,9 +615,9 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
   async getMarkPrice(symbol: string): Promise<number> {
     try {
       const marketName = await this.getMarketName(symbol);
-      const response = await this.client.get(
+      const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get(
         `/api/v1/info/markets/${marketName}/stats`,
-      );
+      ));
 
       if (response.data?.status === 'OK' && response.data.data?.markPrice) {
         return parseFloat(response.data.data.markPrice);
@@ -640,7 +645,7 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
    */
   async getTickSize(symbol: string): Promise<number> {
     try {
-      const response = await this.client.get('/api/v1/info/markets');
+      const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get('/api/v1/info/markets'));
       if (response.data?.status === 'ok' && response.data.data) {
         const market = response.data.data.find((m: any) => m.symbol === symbol);
         if (market?.priceTickSize) {
@@ -655,7 +660,7 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
 
   async getBalance(): Promise<number> {
     try {
-      const response = await this.callApi(1, () => this.client.get('/api/v1/user/balance'));
+      const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get('/api/v1/user/balance'));
 
       if (response.data?.status === 'OK' && response.data.data) {
         // availableForTrade = Available Balance for Trading
@@ -685,7 +690,7 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
    */
   async getEquity(): Promise<number> {
     try {
-      const response = await this.client.get('/api/v1/user/balance');
+      const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get('/api/v1/user/balance'));
 
       if (response.data?.status === 'OK' && response.data.data) {
         return parseFloat(response.data.data.equity || '0');
@@ -722,9 +727,9 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
    */
   async testConnection(): Promise<void> {
     try {
-      const response = await this.client.get('/api/v1/info/markets', {
+      const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get('/api/v1/info/markets', {
         timeout: 5000,
-      });
+      }));
       if (response.data?.status !== 'ok') {
         throw new Error('Invalid response from Extended API');
       }
@@ -750,10 +755,10 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
 
       const signature = await this.signingService.signTransfer(transferData);
 
-      const response = await this.client.post('/api/v1/user/transfer', {
+      const response = await this.callApi(this.WEIGHT_TX, () => this.client.post('/api/v1/user/transfer', {
         ...transferData,
         signature,
-      });
+      }));
 
       if (response.data && response.data.transferId) {
         return response.data.transferId.toString();
@@ -787,14 +792,14 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
 
     try {
       // Get bridge quote from Extended API
-      const quoteResponse = await this.client.get('/v1/bridge/quote', {
+      const quoteResponse = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get('/v1/bridge/quote', {
         params: {
           fromChain: 'arbitrum',
           toChain: 'starknet',
           asset: asset.toUpperCase(),
           amount: amount.toString(),
         },
-      });
+      }));
 
       if (!quoteResponse.data || !quoteResponse.data.depositAddress) {
         throw new Error('Failed to get deposit address from Extended');
@@ -864,14 +869,14 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
 
     try {
       // Get bridge quote
-      const quoteResponse = await this.client.get('/v1/bridge/quote', {
+      const quoteResponse = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get('/v1/bridge/quote', {
         params: {
           fromChain: 'starknet',
           toChain: 'arbitrum',
           asset: asset.toUpperCase(),
           amount: amount.toString(),
         },
-      });
+      }));
 
       if (!quoteResponse.data) {
         throw new Error('Failed to get withdrawal quote from Extended');
@@ -890,11 +895,11 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
         await this.signingService.signWithdrawal(withdrawalData);
 
       // Submit withdrawal request
-      const response = await this.client.post('/api/v1/user/withdrawal', {
+      const response = await this.callApi(this.WEIGHT_TX, () => this.client.post('/api/v1/user/withdrawal', {
         ...withdrawalData,
         signature,
         vaultNumber: this.vaultNumber,
-      });
+      }));
 
       if (response.data && response.data.withdrawalId) {
         const withdrawalId = response.data.withdrawalId.toString();
@@ -935,12 +940,12 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
       const fromTime = startTime || now - 7 * 24 * 60 * 60 * 1000;
 
       // Extended requires fromTime parameter
-      const response = await this.client.get('/api/v1/user/funding/history', {
+      const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get('/api/v1/user/funding/history', {
         params: {
           fromTime: fromTime,
         },
         timeout: 30000,
-      });
+      }));
 
       if (response.data?.status === 'OK' && Array.isArray(response.data.data)) {
         return response.data.data
@@ -980,7 +985,7 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
         params.market = await this.getMarketName(symbol);
       }
 
-      const response = await this.client.get('/api/v1/user/orders', { params });
+      const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get('/api/v1/user/orders', { params }));
 
       if (response.data?.status === 'OK' && Array.isArray(response.data.data)) {
         return response.data.data;

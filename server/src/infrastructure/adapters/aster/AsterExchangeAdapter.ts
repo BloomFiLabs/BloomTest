@@ -43,6 +43,11 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
   private symbolPricePrecisionCache: Map<string, number> = new Map(); // Cache price precision per symbol
   private symbolTickSizeCache: Map<string, number> = new Map(); // Cache tickSize per symbol
 
+  // Rate limit weights
+  private readonly WEIGHT_INFO_LIGHT = 1;
+  private readonly WEIGHT_INFO_HEAVY = 5;
+  private readonly WEIGHT_TX = 1;
+
   private async callApi<T>(weight: number, fn: () => Promise<T>): Promise<T> {
     await this.rateLimiter.acquire(ExchangeType.ASTER, weight);
     return await fn();
@@ -349,7 +354,7 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
    */
   async getMaxLeverage(symbol: string): Promise<number> {
     try {
-      const response = await this.client.get('/fapi/v1/exchangeInfo');
+      const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get('/fapi/v1/exchangeInfo'));
       if (response.data?.symbols) {
         const symbolInfo = response.data.symbols.find(
           (s: any) => s.symbol === symbol,
@@ -419,12 +424,12 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
         headers['X-MBX-APIKEY'] = this.apiKey;
       }
 
-      await this.client.post('/fapi/v1/leverage', formData.toString(), {
+      await this.callApi(this.WEIGHT_TX, () => this.client.post('/fapi/v1/leverage', formData.toString(), {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           ...headers,
         },
-      });
+      }));
 
       this.logger.debug(`✅ Set leverage to ${leverage}x for ${symbol}`);
       return true;
@@ -630,7 +635,7 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
 
     try {
       // Fetch exchange info to get stepSize and tickSize
-      const response = await this.client.get('/fapi/v1/exchangeInfo');
+      const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get('/fapi/v1/exchangeInfo'));
       const symbolInfo = response.data.symbols?.find(
         (s: any) => s.symbol === symbol,
       );
@@ -757,12 +762,12 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
         queryParams.join('&') +
         (signatureParam.length > 0 ? `&${signatureParam[0]}` : '');
 
-      const response = await this.client.get(
+      const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get(
         `/fapi/v2/positionRisk?${queryString}`,
         {
           headers,
         },
-      );
+      ));
 
       const positions: PerpPosition[] = [];
       if (Array.isArray(response.data)) {
@@ -900,9 +905,9 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
         formData.append(key, String(value));
       }
 
-      await this.client.delete('/fapi/v3/order', {
+      await this.callApi(this.WEIGHT_TX, () => this.client.delete('/fapi/v3/order', {
         params: Object.fromEntries(formData),
-      });
+      }));
 
       return true;
     } catch (error: any) {
@@ -927,9 +932,9 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
         formData.append(key, String(value));
       }
 
-      const response = await this.client.delete('/fapi/v3/allOpenOrders', {
+      const response = await this.callApi(this.WEIGHT_TX, () => this.client.delete('/fapi/v3/allOpenOrders', {
         params: Object.fromEntries(formData),
-      });
+      }));
 
       // Aster returns the number of cancelled orders
       return response.data?.count || 0;
@@ -962,9 +967,9 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
         formData.append(key, String(value));
       }
 
-      const response = await this.client.get('/fapi/v3/order', {
+      const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get('/fapi/v3/order', {
         params: Object.fromEntries(formData),
-      });
+      }));
 
       const data = response.data;
       const side = data.side === 'BUY' ? OrderSide.LONG : OrderSide.SHORT;
@@ -1015,10 +1020,10 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
           );
         }
 
-        const response = await this.client.get('/fapi/v1/ticker/price', {
+        const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get('/fapi/v1/ticker/price', {
           params: { symbol },
           timeout: 10000,
-        });
+        }));
 
         const price = parseFloat(response.data.price);
         if (price > 0) {
@@ -1084,7 +1089,7 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
       const params = this.signParams({}, nonce);
 
       // Use v3 endpoint as per official documentation
-      const response = await this.callApi(1, () => this.client.get('/fapi/v3/balance', {
+      const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get('/fapi/v3/balance', {
         params,
       }));
 
@@ -1186,12 +1191,12 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
         queryParams.join('&') +
         (signatureParam.length > 0 ? `&${signatureParam[0]}` : '');
 
-      const response = await this.client.get(
+      const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get(
         `/fapi/v2/account?${queryString}`,
         {
           headers,
         },
-      );
+      ));
 
       return parseFloat(response.data.totalWalletBalance || '0');
     } catch (error: any) {
@@ -1245,12 +1250,12 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
         queryParams.join('&') +
         (signatureParam.length > 0 ? `&${signatureParam[0]}` : '');
 
-      const response = await this.client.get(
+      const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get(
         `/fapi/v2/account?${queryString}`,
         {
           headers,
         },
-      );
+      ));
 
       // Aster provides availableBalance which is margin available for new positions
       const availableBalance = parseFloat(
@@ -1291,7 +1296,7 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
   async testConnection(): Promise<void> {
     try {
       // Test connection by fetching exchange info
-      await this.client.get('/fapi/v1/exchangeInfo');
+      await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get('/fapi/v1/exchangeInfo'));
     } catch (error: any) {
       throw new ExchangeError(
         `Connection test failed: ${error.message}`,
@@ -1347,11 +1352,11 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
         queryParams.join('&') +
         (signatureParam.length > 0 ? `&${signatureParam[0]}` : '');
 
-      const response = await this.client.post(
+      const response = await this.callApi(this.WEIGHT_TX, () => this.client.post(
         `/fapi/v1/transfer?${finalQueryString}`,
         {},
         { headers },
-      );
+      ));
 
       if (response.data && response.data.tranId) {
         const tranId = response.data.tranId;
@@ -1785,7 +1790,7 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
 
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-          const response = await this.client.post(
+          const response = await this.callApi(this.WEIGHT_TX, () => this.client.post(
             `/fapi/aster/user-withdraw?${finalQueryString}`,
             {}, // Empty body
             {
@@ -1795,7 +1800,7 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
               },
               timeout: 30000,
             },
-          );
+          ));
 
           // Handle response (per Aster API documentation section 6)
           // /fapi/aster/user-withdraw returns: { withdrawId, hash }
@@ -1998,7 +2003,7 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
           (signatureParam.length > 0 ? `&${signatureParam[0]}` : '');
 
         try {
-          const response = await this.client.get(
+          const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get(
             `/fapi/v1/income?${queryString}`,
             {
               headers: {
@@ -2006,7 +2011,7 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
               },
               timeout: 30000,
             },
-          );
+          ));
 
           if (Array.isArray(response.data)) {
             const payments: FundingPayment[] = [];
@@ -2051,10 +2056,10 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
         );
 
         try {
-          const response = await this.client.get('/fapi/v3/income', {
+          const response = await this.callApi(this.WEIGHT_INFO_LIGHT, () => this.client.get('/fapi/v3/income', {
             params,
             timeout: 30000,
-          });
+          }));
 
           if (Array.isArray(response.data)) {
             const payments: FundingPayment[] = [];

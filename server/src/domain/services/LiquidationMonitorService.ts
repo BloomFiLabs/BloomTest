@@ -714,20 +714,5 @@ export class LiquidationMonitorService implements ILiquidationMonitor {
       }
     }
   }
-
-        if (attempt < this.config.maxCloseRetries) {
-          // Wait before retry with exponential backoff
-          await new Promise((resolve) =>
-            setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)),
-          );
-        }
-      }
-    }
-
-    return {
-      success: false,
-      error: `Failed after ${this.config.maxCloseRetries} attempts`,
-    };
-  }
 }
 
