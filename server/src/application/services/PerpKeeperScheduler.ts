@@ -43,6 +43,7 @@ import {
 import { LiquidationMonitorService } from '../../domain/services/LiquidationMonitorService';
 import { MarketStateService } from '../../infrastructure/services/MarketStateService';
 import { OrderBookCollector } from '../../domain/services/twap/OrderBookCollector';
+import { BalanceManager } from '../../domain/services/strategy-rules/BalanceManager';
 
 import { StrategyConfig } from '../../domain/value-objects/StrategyConfig';
 
@@ -111,6 +112,7 @@ export class PerpKeeperScheduler implements OnModuleInit {
     private readonly liquidationMonitor?: LiquidationMonitorService,
     @Optional() private readonly marketStateService?: MarketStateService,
     @Optional() private readonly orderBookCollector?: OrderBookCollector,
+    @Optional() private readonly balanceManager?: BalanceManager,
   ) {
     // Initialize orchestrator with exchange adapters
     const adapters = this.keeperService.getExchangeAdapters();
@@ -1668,66 +1670,19 @@ export class PerpKeeperScheduler implements OnModuleInit {
    * This proactively deposits wallet funds to exchanges that need capital
    */
   private async checkAndDepositWalletFunds(): Promise<void> {
+    if (!this.balanceManager) {
+      return;
+    }
+
     try {
-      const walletBalance = await this.getWalletUsdcBalance();
-      if (walletBalance <= 0) {
-        return;
-      }
-
-      // Removed wallet deposit log - only execution logs shown
-
-      // Get all exchange adapters
       const adapters = this.keeperService.getExchangeAdapters();
-      if (adapters.size === 0) {
-        return;
-      }
-
-      // Distribute wallet funds equally to all exchanges
-      const exchangesToDeposit = Array.from(adapters.keys());
-      if (exchangesToDeposit.length === 0) {
-        return;
-      }
-
-      let remainingWalletBalance = walletBalance;
-      const amountPerExchange = walletBalance / exchangesToDeposit.length;
-
-      for (const exchange of exchangesToDeposit) {
-        if (remainingWalletBalance <= 0) {
-          break;
-        }
-
-        const adapter = adapters.get(exchange);
-        if (!adapter) continue;
-
-        const depositAmount = Math.min(
-          amountPerExchange,
-          remainingWalletBalance,
-        );
-        if (depositAmount < 5) {
-          // Minimum deposit is usually $5
-          continue;
-        }
-
-        try {
-          await adapter.depositExternal(depositAmount, 'USDC');
-          this.logger.log(
-            `✅ Deposited $${depositAmount.toFixed(2)} to ${exchange}`,
-          );
-          remainingWalletBalance -= depositAmount;
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-        } catch (error: any) {
-          // Check if it's a 404 error (endpoint doesn't exist) - Aster may require on-chain deposits
-          if (
-            error.message?.includes('404') ||
-            error.message?.includes('on-chain')
-          ) {
-            continue;
-          }
-          // Silently fail - will retry next cycle
-        }
-      }
+      const uniqueExchanges = new Set(adapters.keys());
+      await this.balanceManager.checkAndDepositWalletFunds(
+        adapters,
+        uniqueExchanges,
+      );
     } catch (error: any) {
-      // Silently fail
+      this.logger.warn(`Failed to check/deposit wallet funds: ${error.message}`);
     }
   }
 

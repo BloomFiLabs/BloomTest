@@ -28,6 +28,7 @@ import type { ProfitTracker } from '../../../infrastructure/services/ProfitTrack
 @Injectable()
 export class BalanceManager implements IBalanceManager {
   private readonly logger = new Logger(BalanceManager.name);
+  private isDepositing = false;
 
   // ProfitTracker for excluding accrued profits from deployable capital
   private profitTracker?: ProfitTracker;
@@ -198,6 +199,12 @@ export class BalanceManager implements IBalanceManager {
     adapters: Map<ExchangeType, IPerpExchangeAdapter>,
     uniqueExchanges: Set<ExchangeType>,
   ): Promise<Result<void, DomainException>> {
+    if (this.isDepositing) {
+      this.logger.debug('Deposit already in progress, skipping');
+      return Result.success(undefined);
+    }
+
+    this.isDepositing = true;
     try {
       const walletBalanceResult = await this.getWalletUsdcBalance();
       if (walletBalanceResult.isFailure) {
@@ -215,6 +222,9 @@ export class BalanceManager implements IBalanceManager {
       this.logger.log(
         `💰 Found $${walletBalance.toFixed(2)} USDC in wallet, checking if deposits are needed...`,
       );
+
+      // ... rest of the method ...
+      // I'll use a more comprehensive replacement to ensure the finally block is added correctly.
 
       // Get current balances on exchanges for logging
       const exchangeBalances = new Map<ExchangeType, number>();
@@ -317,6 +327,8 @@ export class BalanceManager implements IBalanceManager {
           { error: error.message },
         ),
       );
+    } finally {
+      this.isDepositing = false;
     }
 
     // Return success even if some deposits failed (errors are logged)
