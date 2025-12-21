@@ -71,9 +71,9 @@ export class LighterExchangeAdapter
   private readonly WEIGHT_TX = 6;
   private readonly WEIGHT_INFO = 1; // Standard REST GET is usually weight 1 or low
 
-  private async callApi<T>(weight: number, fn: () => Promise<T>): Promise<T> {
+  private async callApi<T>(weight: number, fn: () => Promise<T>, priority: RateLimitPriority = RateLimitPriority.NORMAL): Promise<T> {
     try {
-      await this.rateLimiter.acquire(ExchangeType.LIGHTER, weight);
+      await this.rateLimiter.acquire(ExchangeType.LIGHTER, weight, priority);
       return await fn();
     } catch (error: any) {
       if (error.response?.status === 429 || error.message?.includes('429') || error.message?.includes('Too Many Requests')) {
@@ -477,7 +477,7 @@ export class LighterExchangeAdapter
    * Convert symbol to market index
    * Uses cached Explorer API data, with fallback to hardcoded mapping
    */
-  private async getMarketIndex(symbol: string): Promise<number> {
+  async getMarketIndex(symbol: string): Promise<number> {
     // Refresh cache if needed
     await this.refreshMarketIndexCache();
 
@@ -1546,42 +1546,57 @@ export class LighterExchangeAdapter
       await this.ensureInitialized();
 
       const marketIndex = await this.getMarketIndex(request.symbol);
-      const helper = this.marketHelpers.get(marketIndex);
-      if (!helper) {
-        throw new Error(`No market helper for market ${marketIndex}`);
-      }
+      const market = await this.getMarketHelper(marketIndex);
 
-      // Convert orderId to orderIndex if needed
-      const orderIndex = parseInt(orderId, 10);
-      if (isNaN(orderIndex)) {
-        throw new Error(`Invalid order index format: ${orderId}`);
+      // CRITICAL FIX: Lighter's modifyOrder requires numeric orderIndex
+      // If we have a transaction hash (orderId), we must find the corresponding orderIndex first
+      let orderIndex = parseInt(orderId, 10);
+      
+      const isTransactionHash = orderId.length > 20 && /^[0-9a-f]+$/i.test(orderId);
+      if (isTransactionHash || isNaN(orderIndex) || orderIndex === 0) {
+        this.logger.debug(`Searching for orderIndex for ${request.symbol} ${request.side} (tx: ${orderId.substring(0, 8)}...)`);
+        
+        // Find order index from active orders
+        const activeOrders = await this.getOpenOrders();
+        const matchingOrder = activeOrders.find(o => 
+          o.symbol === request.symbol && 
+          o.side.toLowerCase() === request.side.toLowerCase()
+        );
+
+        if (!matchingOrder) {
+          throw new Error(`Could not find active order index for ${request.symbol} ${request.side}`);
+        }
+
+        orderIndex = Math.floor(parseFloat(matchingOrder.orderId));
+        this.logger.debug(`Found orderIndex ${orderIndex} for ${request.symbol}`);
       }
 
       this.logger.debug(
         `🔄 Modifying order ${orderIndex} on Lighter: ${request.symbol} @ ${request.price}`,
       );
 
-      // Format parameters
-      const amount = BigInt(Math.round(request.size * 1e8));
-      const price = BigInt(Math.round((request.price || 0) * 1e8));
+      // Format parameters using market helper units
+      const amount = market.amountToUnits(request.size);
+      const price = market.priceToUnits(request.price || 0);
+      const triggerPrice = BigInt(0); // No trigger price for non-conditional orders
 
-      // Lighter SDK updateOrder
-      const result = await this.callApi(this.WEIGHT_TX, () => (this.signerClient as any).updateOrder({
+      // Use positional arguments matching modify_order.ts example
+      // Pass RateLimitPriority.HIGH to callApi for maker repositioning
+      const result = await this.callApi(this.WEIGHT_TX, () => (this.signerClient as any).modifyOrder(
         marketIndex,
         orderIndex,
-        side: request.side === OrderSide.LONG ? 0 : 1,
         amount,
         price,
-        orderType:
-          request.type === OrderType.MARKET
-            ? LighterOrderType.MARKET
-            : LighterOrderType.LIMIT,
-      })) as [any, string, string | null];
+        triggerPrice,
+      ), RateLimitPriority.HIGH) as [any, string, string | null];
+      
       const [tx, txHash, error] = result;
 
       if (error) {
         throw new Error(error);
       }
+
+      this.logger.log(`✅ Order ${orderIndex} modified successfully: ${txHash}`);
 
       // Wait for transaction
       try {

@@ -9,7 +9,7 @@ import {
   FundingDataRequest,
 } from '../../../domain/ports/IFundingDataProvider';
 import { ExchangeType } from '../../../domain/value-objects/ExchangeConfig';
-import { RateLimiterService } from '../../../infrastructure/services/RateLimiterService';
+import { RateLimiterService, RateLimitPriority } from '../../../infrastructure/services/RateLimiterService';
 
 interface LighterFundingRate {
   market_id: number;
@@ -58,8 +58,8 @@ export class LighterFundingDataProvider
   /**
    * Helper method to wrap API calls with rate limiting
    */
-  private async callApi<T>(weight: number, fn: () => Promise<T>): Promise<T> {
-    await this.rateLimiter.acquire(ExchangeType.LIGHTER, weight);
+  private async callApi<T>(weight: number, fn: () => Promise<T>, priority: RateLimitPriority = RateLimitPriority.NORMAL): Promise<T> {
+    await this.rateLimiter.acquire(ExchangeType.LIGHTER, weight, priority);
     return await fn();
   }
 

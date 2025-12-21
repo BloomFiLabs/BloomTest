@@ -80,7 +80,8 @@ export class MakerEfficiencyService implements OnModuleInit {
     } else if (exchange === ExchangeType.LIGHTER) {
       // Lighter Standard: 60 weight/min. updateOrder = 6 weight.
       // Max 10 updates per minute across ALL orders.
-      baseIntervalMs = Math.max(6000 * orders.length, 10000);
+      // Floor at 6s to allow one update every 6 seconds for a single order.
+      baseIntervalMs = Math.max(6000 * orders.length, 6000);
     }
 
     // 3. Scale interval based on budget health (Global Token Bank)

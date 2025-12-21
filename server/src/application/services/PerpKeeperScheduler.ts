@@ -739,6 +739,28 @@ export class PerpKeeperScheduler implements OnModuleInit {
       (opp) => !this.isBlacklisted(opp.symbol),
     );
 
+    // Filter out symbols that already have positions
+    if (this.marketStateService) {
+      const existingPositions = this.marketStateService.getAllPositions();
+      const symbolsWithPositions = new Set(
+        existingPositions.map((p) => this.normalizeSymbol(p.symbol))
+      );
+
+      if (symbolsWithPositions.size > 0) {
+        const beforeCount = filtered.length;
+        filtered = filtered.filter(
+          (opp) => !symbolsWithPositions.has(this.normalizeSymbol(opp.symbol))
+        );
+        const filteredCount = beforeCount - filtered.length;
+        if (filteredCount > 0) {
+          this.logger.debug(
+            `🔍 Filtered out ${filteredCount} opportunity(ies) for symbols with existing positions: ` +
+            Array.from(symbolsWithPositions).join(', ')
+          );
+        }
+      }
+    }
+
     // Apply dynamic market quality filter (automatic blacklisting based on execution failures)
     if (this.marketQualityFilter) {
       const {
@@ -777,12 +799,39 @@ export class PerpKeeperScheduler implements OnModuleInit {
 
       if (allPositions.length === 0) return;
 
+      // Group positions by symbol
+      const positionsBySymbol = new Map<string, PerpPosition[]>();
+      for (const pos of allPositions) {
+        const sym = this.normalizeSymbol(pos.symbol);
+        if (!positionsBySymbol.has(sym)) positionsBySymbol.set(sym, []);
+        positionsBySymbol.get(sym)!.push(pos);
+      }
+
       // 1. Handle single-leg positions (Emergency Fix)
       const remainingPositions = await this.handleSingleLegPositions(allPositions);
 
       // 2. Recenter healthy positions (LP-Style)
-      for (const position of remainingPositions) {
-        await this.checkAndRecenterPosition(position);
+      // Map back to grouped structure
+      const remainingBySymbol = new Map<string, PerpPosition[]>();
+      for (const pos of remainingPositions) {
+        const sym = this.normalizeSymbol(pos.symbol);
+        if (!remainingBySymbol.has(sym)) remainingBySymbol.set(sym, []);
+        remainingBySymbol.get(sym)!.push(pos);
+      }
+
+      for (const [symbol, symbolPositions] of remainingBySymbol.entries()) {
+        const longPos = symbolPositions.find(p => p.side === OrderSide.LONG);
+        const shortPos = symbolPositions.find(p => p.side === OrderSide.SHORT);
+
+        if (longPos && shortPos) {
+          // Hedged pair - check and recenter simultaneously
+          await this.checkAndRecenterHedgedPosition(longPos, shortPos);
+        } else {
+          // Single position (should have been handled by single-leg handler, but just in case)
+          for (const pos of symbolPositions) {
+            await this.checkAndRecenterPosition(pos);
+          }
+        }
       }
 
     } catch (error: any) {
@@ -791,20 +840,44 @@ export class PerpKeeperScheduler implements OnModuleInit {
   }
 
   /**
-   * Check if a position needs "Recentering" (Laddered LP-style adjustment)
+   * Check and recenter a hedged pair simultaneously
    */
-  private async checkAndRecenterPosition(position: PerpPosition): Promise<void> {
+  private async checkAndRecenterHedgedPosition(longPos: PerpPosition, shortPos: PerpPosition): Promise<void> {
     try {
       if (!this.optimalLeverageService) return;
 
-      // 1. Get current safety distance (LP Range)
+      // Use the logic from checkAndRecenterPosition but for both sides
+      // We'll calculate reduction based on the leg that is CLOSER to liquidation (the "riskier" leg)
+      
+      const riskResults = await Promise.all([
+        this.calculatePositionRecentering(longPos),
+        this.calculatePositionRecentering(shortPos)
+      ]);
+
+      const maxReduction = Math.max(riskResults[0].reductionPercent, riskResults[1].reductionPercent);
+      const tier = riskResults[0].reductionPercent >= riskResults[1].reductionPercent ? riskResults[0].tier : riskResults[1].tier;
+
+      if (maxReduction > 0) {
+        await this.orchestrator.executeHedgedPartialClose(longPos, shortPos, maxReduction, `Recentering (${tier})`);
+      }
+    } catch (error: any) {
+      this.logger.debug(`Could not recenter hedged ${longPos.symbol}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Calculate required recentering for a single position
+   */
+  private async calculatePositionRecentering(position: PerpPosition): Promise<{ reductionPercent: number, tier: string }> {
+    try {
+      if (!this.optimalLeverageService) return { reductionPercent: 0, tier: '' };
+
       const currentPrice = position.markPrice;
       const liqPrice = position.liquidationPrice;
-      if (!liqPrice || liqPrice === 0) return;
+      if (!liqPrice || liqPrice === 0) return { reductionPercent: 0, tier: '' };
 
       const distanceToLiq = Math.abs(currentPrice - liqPrice) / currentPrice;
       
-      // 2. Get optimal target distance
       const recommendation = await this.optimalLeverageService.calculateOptimalLeverage(
         position.symbol,
         position.exchangeType,
@@ -812,36 +885,26 @@ export class PerpKeeperScheduler implements OnModuleInit {
       );
       const targetDistance = 1 / recommendation.optimalLeverage;
 
-      // 3. Proactive Laddered Rebalancing
-      // Tier 1: Proactive (30% consumed) -> 5% rebalance
-      // Tier 2: Maintaining (60% consumed) -> 10% rebalance
-      // Tier 3: Emergency (85% consumed) -> 20% rebalance
-      
-      let reductionPercent = 0;
-      let tier = '';
+      if (distanceToLiq < targetDistance * 0.15) return { reductionPercent: 0.20, tier: 'EMERGENCY (85%)' };
+      if (distanceToLiq < targetDistance * 0.40) return { reductionPercent: 0.10, tier: 'MAINTAINING (60%)' };
+      if (distanceToLiq < targetDistance * 0.70) return { reductionPercent: 0.05, tier: 'PROACTIVE (30%)' };
 
-      if (distanceToLiq < targetDistance * 0.15) { // 85% consumed
-        reductionPercent = 0.20;
-        tier = 'EMERGENCY (85%)';
-      } else if (distanceToLiq < targetDistance * 0.40) { // 60% consumed
-        reductionPercent = 0.10;
-        tier = 'MAINTAINING (60%)';
-      } else if (distanceToLiq < targetDistance * 0.70) { // 30% consumed
-        reductionPercent = 0.05;
-        tier = 'PROACTIVE (30%)';
-      }
+      return { reductionPercent: 0, tier: '' };
+    } catch {
+      return { reductionPercent: 0, tier: '' };
+    }
+  }
 
-      if (reductionPercent > 0) {
-        this.logger.warn(
-          `⚖️ ${tier} Recentering ${position.symbol}: Distance to Liq (${(distanceToLiq * 100).toFixed(1)}%) ` +
-          `vs Target (${(targetDistance * 100).toFixed(1)}%). Reducing size by ${(reductionPercent * 100).toFixed(0)}%.`
-        );
-        
-        const reductionSize = Math.abs(position.size) * reductionPercent;
-        await this.orchestrator.executePartialClose(position, reductionSize, `Recentering (${tier})`);
-      }
-    } catch (error: any) {
-      this.logger.debug(`Could not check recentering for ${position.symbol}: ${error.message}`);
+  /**
+   * Check if a position needs "Recentering" (Laddered LP-style adjustment)
+   */
+  private async checkAndRecenterPosition(position: PerpPosition): Promise<void> {
+    const { reductionPercent, tier } = await this.calculatePositionRecentering(position);
+    
+    if (reductionPercent > 0) {
+      this.logger.warn(`⚖️ ${tier} Recentering ${position.symbol}: Reducing size by ${(reductionPercent * 100).toFixed(0)}%.`);
+      const reductionSize = Math.abs(position.size) * reductionPercent;
+      await this.orchestrator.executePartialClose(position, reductionSize, `Recentering (${tier})`);
     }
   }
 
@@ -1656,12 +1719,52 @@ export class PerpKeeperScheduler implements OnModuleInit {
    * Periodic wallet balance check - runs every 10 minutes
    * Checks for new USDC in wallet and deposits to exchanges if needed
    */
-  @Interval(600000) // Every 10 minutes (600000 ms)
-  async checkWalletBalancePeriodically() {
+  @Interval(300000) // Every 5 minutes
+  async cleanupZombieExecutions() {
+    if (!this.executionLockService) return;
+
     try {
-      await this.checkAndDepositWalletFunds();
+      this.logger.log('🧹 Checking for zombie executions (orphaned legs)...');
+      const activeOrders = this.executionLockService.getAllActiveOrders();
+      
+      // Group orders by threadId
+      const threads = new Map<string, typeof activeOrders>();
+      for (const order of activeOrders) {
+        if (!threads.has(order.threadId)) {
+          threads.set(order.threadId, []);
+        }
+        threads.get(order.threadId)!.push(order);
+      }
+
+      for (const [threadId, orders] of threads.entries()) {
+        // If it's a dual-leg execution (likely from findArbitrageOpportunities)
+        // we expect 2 orders. If one is FAILED/CANCELLED and the other is PLACED/WAITING_FILL,
+        // it's a zombie.
+        if (orders.length === 1 && threadId.startsWith('thread-')) {
+          // Check if this thread had another leg that failed (not in activeOrders anymore but in registry)
+          // Wait, ExecutionLockService registry is the source of activeOrders.
+          // If there's only 1 leg left in the registry for a 'thread-' prefixed ID,
+          // it might be an orphaned leg from a parallel execution that partially failed.
+          
+          const order = orders[0];
+          this.logger.warn(`🚨 Found orphaned leg in thread ${threadId}: ${order.symbol} ${order.side} on ${order.exchange}`);
+          
+          // Cleanup: Cancel the orphaned order
+          const adapter = this.keeperService.getExchangeAdapters().get(order.exchange);
+          if (adapter) {
+            this.logger.log(`🗑️ Rolling back orphaned order ${order.orderId} for ${order.symbol}`);
+            try {
+              await adapter.cancelOrder(order.orderId, order.symbol);
+              this.executionLockService.forceClearOrder(order.exchange, order.symbol, order.side);
+              this.logger.log(`✅ Successfully rolled back zombie order ${order.orderId}`);
+            } catch (err: any) {
+              this.logger.error(`Failed to rollback zombie order: ${err.message}`);
+            }
+          }
+        }
+      }
     } catch (error: any) {
-      // Silently fail
+      this.logger.error(`Error during zombie cleanup: ${error.message}`);
     }
   }
 
