@@ -656,7 +656,7 @@ export class LiquidationMonitorService implements ILiquidationMonitor {
               position.symbol,
               exchange,
               side === 'LONG' ? 'SHORT' : 'LONG', // Side we are placing
-              threadId,
+              effectiveThreadId,
               risk.positionSize,
               markPrice
             );
@@ -749,8 +749,8 @@ export class LiquidationMonitorService implements ILiquidationMonitor {
       };
     } finally {
       // Always release symbol lock when done
-      if (this.executionLockService) {
-        this.executionLockService.releaseSymbolLock(position.symbol, threadId);
+      if (this.executionLockService && !skipLocking) {
+        this.executionLockService.releaseSymbolLock(position.symbol, effectiveThreadId);
       }
     }
   }
