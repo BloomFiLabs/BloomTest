@@ -102,12 +102,14 @@ export class HistoricalFundingRateService
    * Start periodic collection of funding rates
    */
   private startPeriodicCollection() {
-    // Collect immediately on startup
-    this.collectCurrentRates().catch((err) => {
-      this.logger.error(
-        `Failed to collect initial funding rates: ${err.message}`,
-      );
-    });
+    // Collect after a delay to avoid blocking strategy startup
+    setTimeout(() => {
+      this.collectCurrentRates().catch((err) => {
+        this.logger.error(
+          `Failed to collect initial funding rates: ${err.message}`,
+        );
+      });
+    }, 120000); // 2 minute delay
 
     // Then collect every hour
     this.refreshInterval = setInterval(

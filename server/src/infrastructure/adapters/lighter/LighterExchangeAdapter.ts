@@ -2204,6 +2204,7 @@ export class LighterExchangeAdapter
    */
   async getBestBidAsk(
     symbol: string,
+    cacheOnly: boolean = false,
   ): Promise<{ bestBid: number; bestAsk: number } | null> {
     try {
       // 1. Try WebSocket provider first (zero cost, real-time)
@@ -2218,6 +2219,8 @@ export class LighterExchangeAdapter
           // Fall back to REST if market index lookup fails
         }
       }
+
+      if (cacheOnly) return null;
 
       // 2. Fall back to existing method
       return await this.getOrderBookBidAsk(symbol);

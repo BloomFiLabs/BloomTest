@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { ExchangeType } from '../value-objects/ExchangeConfig';
 import { Percentage } from '../value-objects/Percentage';
 import { AsterFundingDataProvider } from '../../infrastructure/adapters/aster/AsterFundingDataProvider';
@@ -6,6 +6,7 @@ import { LighterFundingDataProvider } from '../../infrastructure/adapters/lighte
 import { HyperLiquidDataProvider } from '../../infrastructure/adapters/hyperliquid/HyperLiquidDataProvider';
 import { ExtendedFundingDataProvider } from '../../infrastructure/adapters/extended/ExtendedFundingDataProvider';
 import { HyperLiquidWebSocketProvider } from '../../infrastructure/adapters/hyperliquid/HyperLiquidWebSocketProvider';
+import { LighterWebSocketProvider } from '../../infrastructure/adapters/lighter/LighterWebSocketProvider';
 import {
   IFundingDataProvider,
   FundingDataRequest,
@@ -103,7 +104,7 @@ export class FundingRateAggregator {
     private readonly lighterProvider: LighterFundingDataProvider,
     private readonly hyperliquidProvider: HyperLiquidDataProvider,
     private readonly hyperliquidWsProvider: HyperLiquidWebSocketProvider,
-    @Optional() private readonly lighterWsProvider?: any, // LighterWebSocketProvider (optional to avoid circular dependency)
+    @Optional() @Inject(LighterWebSocketProvider) private readonly lighterWsProvider?: LighterWebSocketProvider,
     @Optional() private readonly extendedProvider?: ExtendedFundingDataProvider,
   ) {
     // Initialize funding providers list (all implement IFundingDataProvider)

@@ -304,14 +304,7 @@ export class OrderBookCollector implements OnModuleInit, OnModuleDestroy {
 
       // 1. Try getBestBidAsk (which we've optimized to check WS cache first)
       // But we need to ensure it doesn't fall back to REST if WS is missing.
-      // Since we can't easily change the adapter interface, we'll check if the adapter
-      // has a way to check if data is in cache.
-      
-      // For now, we'll just try to get it and catch any errors.
-      // If it takes more than 100ms, it's probably hitting a REST API or rate limiter.
-      const startTime = Date.now();
-      const bidAsk = await (adapter as any).getBestBidAsk(symbol);
-      const duration = Date.now() - startTime;
+      const bidAsk = await (adapter as any).getBestBidAsk(symbol, true); // cacheOnly = true
 
       if (bidAsk && bidAsk.bestBid && bidAsk.bestAsk) {
         // If it was fast (< 50ms), it was likely from cache.

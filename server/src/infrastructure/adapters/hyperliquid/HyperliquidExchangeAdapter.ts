@@ -1017,6 +1017,7 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
    */
   async getBestBidAsk(
     symbol: string,
+    cacheOnly: boolean = false,
   ): Promise<{ bestBid: number; bestAsk: number }> {
     await this.ensureSymbolConverter();
 
@@ -1044,6 +1045,10 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
     const cached = this.orderBookCache.get(symbol);
     if (cached && Date.now() - cached.timestamp < this.ORDER_BOOK_CACHE_TTL) {
       return { bestBid: cached.bestBid, bestAsk: cached.bestAsk };
+    }
+
+    if (cacheOnly) {
+      throw new Error(`No cached data for ${symbol} on Hyperliquid`);
     }
 
     try {
