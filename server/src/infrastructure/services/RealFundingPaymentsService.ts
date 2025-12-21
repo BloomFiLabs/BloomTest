@@ -144,7 +144,7 @@ export class RealFundingPaymentsService implements OnModuleInit {
     const allPayments: FundingPayment[] = [];
 
     // Fetch from all exchanges in parallel
-    const [hyperliquidPayments, asterPayments, lighterPayments] =
+    const [hyperliquidPayments, lighterPayments] =
       await Promise.all([
         this.fetchHyperliquidPayments(days).catch((err) => {
           this.logger.warn(
@@ -152,15 +152,19 @@ export class RealFundingPaymentsService implements OnModuleInit {
           );
           return [];
         }),
+        /* DISABLED ASTER
         this.fetchAsterPayments(days).catch((err) => {
           this.logger.warn(`Failed to fetch Aster payments: ${err.message}`);
           return [];
         }),
+        */
         this.fetchLighterPayments(days).catch((err) => {
           this.logger.warn(`Failed to fetch Lighter payments: ${err.message}`);
           return [];
         }),
       ]);
+
+    const asterPayments: FundingPayment[] = []; // DISABLED
 
     allPayments.push(
       ...hyperliquidPayments,

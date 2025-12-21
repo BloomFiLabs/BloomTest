@@ -61,8 +61,15 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
   private readonly WEIGHT_TX = 1;
 
   private async callApi<T>(weight: number, fn: () => Promise<T>): Promise<T> {
-    await this.rateLimiter.acquire(ExchangeType.EXTENDED, weight);
-    return await fn();
+    try {
+      await this.rateLimiter.acquire(ExchangeType.EXTENDED, weight);
+      return await fn();
+    } catch (error: any) {
+      if (error.response?.status === 429 || error.message?.includes('429')) {
+        this.rateLimiter.recordExternalRateLimit(ExchangeType.EXTENDED);
+      }
+      throw error;
+    }
   }
 
   constructor(
@@ -656,6 +663,15 @@ export class ExtendedExchangeAdapter implements IPerpExchangeAdapter {
       this.logger.debug(`Failed to get tick size for ${symbol}: ${error.message}`);
     }
     return 0.0001; // Default fallback
+  }
+
+  async supportsSymbol(symbol: string): Promise<boolean> {
+    try {
+      const marketName = await this.getMarketName(symbol);
+      return marketName !== undefined && marketName !== '';
+    } catch (error) {
+      return false;
+    }
   }
 
   async getBalance(): Promise<number> {

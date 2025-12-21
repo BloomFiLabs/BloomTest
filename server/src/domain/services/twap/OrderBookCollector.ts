@@ -189,6 +189,12 @@ export class OrderBookCollector implements OnModuleInit, OnModuleDestroy {
     
     for (const symbol of this.activeSymbols) {
       for (const [exchangeType, adapter] of this.adapters) {
+        // Only collect if adapter supports the symbol
+        const isSupported = await adapter.supportsSymbol(symbol);
+        if (!isSupported) {
+          continue;
+        }
+
         collectionPromises.push(
           this.collectSnapshot(symbol, exchangeType, adapter, timestamp, hourOfDay, dayOfWeek)
             .catch(err => {

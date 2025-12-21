@@ -65,7 +65,7 @@ export class HistoricalFundingRateService
     // Initialize providers array for parallel operations
     this.fundingProviders = [
       this.hyperliquidProvider,
-      this.asterProvider,
+      // this.asterProvider, // DISABLED
       this.lighterProvider,
     ];
 

@@ -761,6 +761,10 @@ export class MockExchangeAdapter implements IPerpExchangeAdapter {
     return 0.01; // Mock default
   }
 
+  async supportsSymbol(symbol: string): Promise<boolean> {
+    return true; // Mock supports everything
+  }
+
   async getBalance(): Promise<number> {
     return this.mockBalance;
   }

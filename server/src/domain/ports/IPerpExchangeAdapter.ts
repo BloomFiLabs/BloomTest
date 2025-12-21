@@ -247,6 +247,13 @@ export interface IPerpExchangeAdapter {
    * @throws ExchangeError if modification fails
    */
   modifyOrder?(orderId: string, request: PerpOrderRequest): Promise<PerpOrderResponse>;
+
+  /**
+   * Check if the exchange supports a specific symbol
+   * @param symbol Trading symbol
+   * @returns True if supported
+   */
+  supportsSymbol(symbol: string): boolean | Promise<boolean>;
 }
 
 /**

@@ -70,8 +70,15 @@ export class LighterExchangeAdapter
   private readonly WEIGHT_INFO = 1; // Standard REST GET is usually weight 1 or low
 
   private async callApi<T>(weight: number, fn: () => Promise<T>): Promise<T> {
-    await this.rateLimiter.acquire(ExchangeType.LIGHTER, weight);
-    return await fn();
+    try {
+      await this.rateLimiter.acquire(ExchangeType.LIGHTER, weight);
+      return await fn();
+    } catch (error: any) {
+      if (error.response?.status === 429 || error.message?.includes('429') || error.message?.includes('Too Many Requests')) {
+        this.rateLimiter.recordExternalRateLimit(ExchangeType.LIGHTER);
+      }
+      throw error;
+    }
   }
 
   constructor(
@@ -2793,6 +2800,22 @@ export class LighterExchangeAdapter
       this.logger.debug(`Failed to get tick size for ${symbol}: ${error.message}`);
     }
     return 0.0001; // Default fallback
+  }
+
+  async supportsSymbol(symbol: string): Promise<boolean> {
+    try {
+      await this.ensureInitialized();
+      const baseSymbol = symbol
+        .replace('USDC', '')
+        .replace('USDT', '')
+        .replace('-PERP', '')
+        .toUpperCase();
+      
+      await this.refreshMarketIndexCache();
+      return this.marketIndexCache.has(baseSymbol);
+    } catch (error) {
+      return false;
+    }
   }
 
   async getBalance(): Promise<number> {

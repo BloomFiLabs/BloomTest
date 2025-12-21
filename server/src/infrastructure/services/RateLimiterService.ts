@@ -380,6 +380,29 @@ export class RateLimiterService {
   }
 
   /**
+   * Record an external rate limit (429) hit.
+   * This will clear the current windows and force a cooldown.
+   */
+  recordExternalRateLimit(exchange: ExchangeType, cooldownMs: number = 5000): void {
+    const bucket = this.buckets.get(exchange);
+    if (!bucket) return;
+
+    this.logger.warn(`🛑 External rate limit hit for ${exchange}! Applying ${cooldownMs}ms cooldown.`);
+    
+    // Clear windows to ensure next acquisition waits
+    bucket.secondWindow = [];
+    bucket.minuteWindow = [];
+    
+    // Add dummy entries at future timestamps to block acquisition
+    const futureTimestamp = Date.now() + cooldownMs;
+    const config = this.limits.get(exchange);
+    if (config) {
+      bucket.secondWindow.push({ timestamp: futureTimestamp, weight: config.maxRequestsPerSecond });
+      bucket.minuteWindow.push({ timestamp: futureTimestamp, weight: config.maxRequestsPerMinute });
+    }
+  }
+
+  /**
    * Calculate how long to wait before the next request can be made
    */
   private calculateWaitTime(

@@ -59,13 +59,27 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
   private readonly WEIGHT_INFO_LIGHT = 2;
 
   private async callInfo<T>(weight: number, fn: () => Promise<T>): Promise<T> {
-    await this.rateLimiter.acquire(ExchangeType.HYPERLIQUID, weight);
-    return await fn();
+    try {
+      await this.rateLimiter.acquire(ExchangeType.HYPERLIQUID, weight);
+      return await fn();
+    } catch (error: any) {
+      if (error.response?.status === 429 || error.message?.includes('429')) {
+        this.rateLimiter.recordExternalRateLimit(ExchangeType.HYPERLIQUID);
+      }
+      throw error;
+    }
   }
 
   private async callExchange<T>(weight: number, fn: () => Promise<T>): Promise<T> {
-    await this.rateLimiter.acquire(ExchangeType.HYPERLIQUID, weight);
-    return await fn();
+    try {
+      await this.rateLimiter.acquire(ExchangeType.HYPERLIQUID, weight);
+      return await fn();
+    } catch (error: any) {
+      if (error.response?.status === 429 || error.message?.includes('429')) {
+        this.rateLimiter.recordExternalRateLimit(ExchangeType.HYPERLIQUID);
+      }
+      throw error;
+    }
   }
 
   constructor(
@@ -1202,6 +1216,20 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
     } catch (error: any) {
       this.logger.debug(`Failed to get tick size for ${symbol}: ${error.message}`);
       return 0.0001; // Default fallback
+    }
+  }
+
+  async supportsSymbol(symbol: string): Promise<boolean> {
+    try {
+      await this.ensureSymbolConverter();
+      const baseCoin = symbol
+        .replace('USDT', '')
+        .replace('USDC', '')
+        .replace('-PERP', '');
+      const assetId = this.symbolConverter!.getAssetId(baseCoin);
+      return assetId !== undefined;
+    } catch (error) {
+      return false;
     }
   }
 

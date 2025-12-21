@@ -49,8 +49,15 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
   private readonly WEIGHT_TX = 1;
 
   private async callApi<T>(weight: number, fn: () => Promise<T>): Promise<T> {
-    await this.rateLimiter.acquire(ExchangeType.ASTER, weight);
-    return await fn();
+    try {
+      await this.rateLimiter.acquire(ExchangeType.ASTER, weight);
+      return await fn();
+    } catch (error: any) {
+      if (error.response?.status === 429 || error.message?.includes('429') || error.message?.includes('Too Many Requests')) {
+        this.rateLimiter.recordExternalRateLimit(ExchangeType.ASTER);
+      }
+      throw error;
+    }
   }
 
   constructor(
@@ -1031,9 +1038,17 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
           this.priceCache.set(symbol, { price, timestamp: Date.now() });
           return price;
         } else {
-          throw new Error(`Invalid price returned: ${price}`);
+          // If price is 0 or missing, it might be an invalid symbol or no trades
+          // Return 0 instead of throwing to avoid retry noise for invalid symbols
+          return 0;
         }
       } catch (error: any) {
+        // If it's a 400 error with "Invalid symbol", don't retry, just return 0
+        if (error.response?.status === 400 && error.response?.data?.code === -1121) {
+          this.logger.debug(`Aster: Invalid symbol ${symbol}, returning 0 price`);
+          return 0;
+        }
+
         lastError = error;
         if (attempt === 2) {
           // Last attempt failed
@@ -1064,6 +1079,17 @@ export class AsterExchangeAdapter implements IPerpExchangeAdapter {
     } catch (error: any) {
       this.logger.debug(`Failed to get tick size for ${symbol}: ${error.message}`);
       return 0.0001; // Default fallback
+    }
+  }
+
+  async supportsSymbol(symbol: string): Promise<boolean> {
+    try {
+      // Aster uses symbol mappings derived from exchangeInfo
+      // We check if symbol exists in our precision cache or fetch it
+      const { tickSize } = await this.getSymbolPrecision(symbol);
+      return tickSize > 0;
+    } catch (error) {
+      return false;
     }
   }
 

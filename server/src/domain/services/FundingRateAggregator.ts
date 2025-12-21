@@ -108,7 +108,7 @@ export class FundingRateAggregator {
   ) {
     // Initialize funding providers list (all implement IFundingDataProvider)
     this.fundingProviders = [
-      this.asterProvider,
+      // this.asterProvider, // DISABLED
       this.lighterProvider,
       this.hyperliquidProvider,
     ];
