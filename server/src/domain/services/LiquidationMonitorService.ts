@@ -11,23 +11,17 @@
  * - Fail-safe: Defaults to closing positions if risk cannot be determined
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { ExchangeType } from '../value-objects/ExchangeConfig';
 import { LiquidationRisk } from '../value-objects/LiquidationRisk';
-import {
-  ILiquidationMonitor,
-  LiquidationCheckResult,
-  LiquidationMonitorConfig,
-  PairedPosition,
-  EmergencyCloseResult,
-  DEFAULT_LIQUIDATION_MONITOR_CONFIG,
-} from '../ports/ILiquidationMonitor';
+import { ILiquidationMonitor, LiquidationCheckResult, LiquidationMonitorConfig, PairedPosition, EmergencyCloseResult, DEFAULT_LIQUIDATION_MONITOR_CONFIG } from '../ports/ILiquidationMonitor';
 import { IPerpExchangeAdapter } from '../ports/IPerpExchangeAdapter';
 import { PerpPosition } from '../entities/PerpPosition';
 import { PerpOrderRequest, OrderSide, OrderType, TimeInForce } from '../value-objects/PerpOrder';
 import { ExecutionLockService } from '../../infrastructure/services/ExecutionLockService';
 import { RateLimiterService, RateLimitPriority } from '../../infrastructure/services/RateLimiterService';
 import { MarketStateService } from '../../infrastructure/services/MarketStateService';
+import { IOptimalLeverageService } from '../ports/IOptimalLeverageService';
 
 /**
  * Internal type for tracking paired positions.
@@ -53,9 +47,10 @@ export class LiquidationMonitorService implements ILiquidationMonitor {
   private lastCheckTime: Date | null = null;
 
   constructor(
-    private readonly executionLockService?: ExecutionLockService,
-    private readonly rateLimiter?: RateLimiterService,
-    private readonly marketStateService?: MarketStateService,
+    @Optional() private readonly executionLockService?: ExecutionLockService,
+    @Optional() private readonly rateLimiter?: RateLimiterService,
+    @Optional() private readonly marketStateService?: MarketStateService,
+    @Optional() @Inject('IOptimalLeverageService') private readonly optimalLeverageService?: IOptimalLeverageService,
   ) {
     this.config = { ...DEFAULT_LIQUIDATION_MONITOR_CONFIG };
   }
@@ -114,27 +109,46 @@ export class LiquidationMonitorService implements ILiquidationMonitor {
         if (pairedPosition) {
           result.positions.push(pairedPosition);
 
-          // Check if either leg is at risk
-          const longAtRisk = pairedPosition.longRisk.shouldEmergencyClose(
-            this.config.emergencyCloseThreshold,
-          );
-          const shortAtRisk = pairedPosition.shortRisk.shouldEmergencyClose(
-            this.config.emergencyCloseThreshold,
-          );
+          // NEW LOGIC: Calculate risk based on BUFFER CONSUMPTION
+          // A position is at risk if its current distance to liquidation is significantly
+          // smaller than its target safety buffer (derived from volatility/leverage).
+          
+          let longAtRisk = false;
+          let shortAtRisk = false;
+          let longConsumed = 0;
+          let shortConsumed = 0;
+
+          if (pair.long) {
+            const recommendation = await this.optimalLeverageService?.calculateOptimalLeverage(
+              pair.long.symbol, pair.long.exchangeType, pair.long.getPositionValue()
+            );
+            const targetBuffer = 1 / (recommendation?.optimalLeverage || pair.long.leverage || 5);
+            const currentBuffer = pairedPosition.longRisk.distanceToLiquidation;
+            longConsumed = targetBuffer > 0 ? (targetBuffer - currentBuffer) / targetBuffer : 0;
+            longAtRisk = longConsumed >= this.config.emergencyCloseThreshold;
+          }
+
+          if (pair.short) {
+            const recommendation = await this.optimalLeverageService?.calculateOptimalLeverage(
+              pair.short.symbol, pair.short.exchangeType, pair.short.getPositionValue()
+            );
+            const targetBuffer = 1 / (recommendation?.optimalLeverage || pair.short.leverage || 5);
+            const currentBuffer = pairedPosition.shortRisk.distanceToLiquidation;
+            shortConsumed = targetBuffer > 0 ? (targetBuffer - currentBuffer) / targetBuffer : 0;
+            shortAtRisk = shortConsumed >= this.config.emergencyCloseThreshold;
+          }
 
           if (longAtRisk || shortAtRisk) {
             result.positionsAtRisk++;
 
-            // Log warning
             const triggerLeg = longAtRisk ? 'LONG' : 'SHORT';
-            const triggerRisk = longAtRisk
-              ? pairedPosition.longRisk
-              : pairedPosition.shortRisk;
+            const triggerRisk = longAtRisk ? pairedPosition.longRisk : pairedPosition.shortRisk;
+            const consumed = longAtRisk ? longConsumed : shortConsumed;
 
             this.logger.warn(
               `🚨 LIQUIDATION RISK: ${pairedPosition.symbol} ${triggerLeg} leg ` +
-                `is ${(triggerRisk.proximityToLiquidation * 100).toFixed(1)}% close to liquidation! ` +
-                `Mark: $${triggerRisk.markPrice.toFixed(4)}, Liq: $${triggerRisk.liquidationPrice.toFixed(4)}`,
+                `has consumed ${(consumed * 100).toFixed(1)}% of its safety buffer! ` +
+                `Mark: $${triggerRisk.markPrice.toFixed(4)}, Liq: $${triggerRisk.liquidationPrice.toFixed(4)}`
             );
 
             // Trigger emergency close if enabled
@@ -147,17 +161,12 @@ export class LiquidationMonitorService implements ILiquidationMonitor {
               result.emergencyCloses.push(closeResult);
               result.emergencyClosesTriggered++;
             }
-          } else if (
-            pairedPosition.longRisk.proximityToLiquidation >=
-              this.config.warningThreshold ||
-            pairedPosition.shortRisk.proximityToLiquidation >=
-              this.config.warningThreshold
-          ) {
+          } else if (longConsumed >= this.config.warningThreshold || shortConsumed >= this.config.warningThreshold) {
             // Log warning for positions approaching risk
             this.logger.warn(
-              `⚠️ Liquidation warning: ${pairedPosition.symbol} ` +
-                `LONG: ${(pairedPosition.longRisk.proximityToLiquidation * 100).toFixed(1)}%, ` +
-                `SHORT: ${(pairedPosition.shortRisk.proximityToLiquidation * 100).toFixed(1)}%`,
+              `⚠️ Liquidation warning: ${pairedPosition.symbol} buffer consumption: ` +
+                `LONG: ${(longConsumed * 100).toFixed(1)}%, ` +
+                `SHORT: ${(shortConsumed * 100).toFixed(1)}%`,
             );
           }
         }
@@ -443,24 +452,30 @@ export class LiquidationMonitorService implements ILiquidationMonitor {
       return LiquidationRisk.safe('UNKNOWN', 'UNKNOWN', side);
     }
 
-    // If no liquidation price, estimate it based on leverage
+    // If no liquidation price, estimate it based on leverage and maintenance margin
     let liquidationPrice = position.liquidationPrice || 0;
     if (liquidationPrice <= 0 && position.leverage && position.leverage > 0) {
-      // Estimate liq price: for 5x leverage, liq is ~20% away from entry
-      const liqDistance = 1 / position.leverage;
+      // Theoretical liq price: for 10x leverage (10% margin), liq is when margin hits maintenance
+      // Maintenance margin is usually 0.5% - 2.0%. We'll use 1.5% as a safe default.
+      const maintenanceMargin = 0.015;
+      const initialMargin = 1 / position.leverage;
+      
+      // Distance to liquidation = InitialMargin - MaintenanceMargin
+      const liqDistance = Math.max(0.01, initialMargin - maintenanceMargin);
+      
       if (side === 'LONG') {
-        liquidationPrice = position.entryPrice * (1 - liqDistance * 0.9); // 90% of theoretical
+        liquidationPrice = position.entryPrice * (1 - liqDistance);
       } else {
-        liquidationPrice = position.entryPrice * (1 + liqDistance * 0.9);
+        liquidationPrice = position.entryPrice * (1 + liqDistance);
       }
     }
 
-    // If still no liq price, use a conservative estimate (10% from mark)
+    // If still no liq price, use a very conservative estimate (5% from mark)
     if (liquidationPrice <= 0) {
       if (side === 'LONG') {
-        liquidationPrice = position.markPrice * 0.9;
+        liquidationPrice = position.markPrice * 0.95;
       } else {
-        liquidationPrice = position.markPrice * 1.1;
+        liquidationPrice = position.markPrice * 1.05;
       }
       this.logger.debug(
         `Estimated liquidation price for ${position.symbol} ${side}: $${liquidationPrice.toFixed(4)} ` +

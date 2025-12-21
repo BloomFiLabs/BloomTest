@@ -46,11 +46,22 @@ export class LiquidationRisk {
 
   /**
    * How close we are to liquidation (0-1).
-   * 0 = safe (far from liquidation), 1 = at liquidation.
-   * This is the inverse of distanceToLiquidation.
+   * 0 = safe (at entry/far from liquidation), 1 = at liquidation price.
+   * This is calculated as the portion of the initial safety buffer that has been consumed.
+   * 
+   * Formula: (InitialBuffer - CurrentBuffer) / InitialBuffer
    */
   get proximityToLiquidation(): number {
-    return 1 - this.distanceToLiquidation;
+    // Initial buffer is approximately 1/leverage
+    const initialBuffer = this.leverage > 0 ? 1 / this.leverage : 0.1;
+    const currentBuffer = this.distanceToLiquidation;
+    
+    if (initialBuffer <= 0) return 1;
+    
+    // If current buffer is larger than initial (we are in profit), proximity is 0 (safe)
+    if (currentBuffer >= initialBuffer) return 0;
+    
+    return Math.min(1, (initialBuffer - currentBuffer) / initialBuffer);
   }
 
   /**
@@ -69,22 +80,22 @@ export class LiquidationRisk {
   }
 
   /**
-   * Risk level based on proximity to liquidation.
+   * Risk level based on buffer consumption.
    */
   get riskLevel(): 'SAFE' | 'WARNING' | 'DANGER' | 'CRITICAL' {
-    const proximity = this.proximityToLiquidation;
+    const consumption = this.proximityToLiquidation;
 
-    if (proximity >= 0.7) return 'CRITICAL'; // 70%+ close to liquidation
-    if (proximity >= 0.5) return 'DANGER'; // 50-70% close
-    if (proximity >= 0.3) return 'WARNING'; // 30-50% close
+    if (consumption >= 0.9) return 'CRITICAL'; // 90% of buffer gone
+    if (consumption >= 0.7) return 'DANGER';   // 70% gone
+    if (consumption >= 0.4) return 'WARNING';  // 40% gone
     return 'SAFE';
   }
 
   /**
    * Whether this position should trigger emergency close.
-   * @param threshold Proximity threshold (0-1). Default 0.7 (70% close to liquidation).
+   * @param threshold Consumption threshold (0-1). Default 0.9 (90% of buffer consumed).
    */
-  shouldEmergencyClose(threshold: number = 0.7): boolean {
+  shouldEmergencyClose(threshold: number = 0.9): boolean {
     return this.proximityToLiquidation >= threshold;
   }
 

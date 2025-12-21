@@ -124,7 +124,7 @@ export class PerpKeeperScheduler implements OnModuleInit {
       // Configure based on environment
       const emergencyThreshold = parseFloat(
         this.configService.get<string>('LIQUIDATION_EMERGENCY_THRESHOLD') ||
-          '0.7',
+          '0.9',
       );
       const enableEmergencyClose =
         this.configService.get<string>('LIQUIDATION_EMERGENCY_CLOSE_ENABLED') !==
