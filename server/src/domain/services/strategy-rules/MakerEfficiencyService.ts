@@ -91,17 +91,18 @@ export class MakerEfficiencyService implements OnModuleInit {
     if (budgetHealth < 0.8) {
       const healthMultiplier = 1 + (0.8 - budgetHealth) * 4; // Max multiplier of ~4.2 at health 0
       intervalMs = baseIntervalMs * healthMultiplier;
-      
-      if (budgetHealth < 0.3) {
-        this.logger.warn(
-          `⚠️ Low budget health for ${exchange} (${(budgetHealth * 100).toFixed(1)}%). ` +
-          `Slowing down maker chasing: ${intervalMs/1000}s interval.`
-        );
-      }
     }
 
     if (now - lastCheck < intervalMs) return;
     this.lastExchangeCheck.set(exchange, now);
+    
+    // Log low health warning only when we actually check (not every 2s)
+    if (budgetHealth < 0.3) {
+      this.logger.warn(
+        `⚠️ Low budget health for ${exchange} (${(budgetHealth * 100).toFixed(1)}%). ` +
+        `Slowing down maker chasing: ${intervalMs/1000}s interval.`
+      );
+    }
 
     this.logger.debug(
       `Checking efficiency for ${orders.length} orders on ${exchange} ` +

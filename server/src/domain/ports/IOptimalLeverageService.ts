@@ -96,6 +96,7 @@ export interface LeverageConfig {
   liquidationWeight: number;
   liquidityWeight: number;
   winRateWeight: number;
+  sigmaFactor?: number; // k-sigma factor (e.g. 5.0 for 5-sigma safety)
 }
 
 /**

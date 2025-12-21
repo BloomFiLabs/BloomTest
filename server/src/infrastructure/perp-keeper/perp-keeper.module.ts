@@ -55,6 +55,8 @@ import { WithdrawalFulfiller } from '../adapters/blockchain/WithdrawalFulfiller'
 import { NAVReporter } from '../adapters/blockchain/NAVReporter';
 import { BloomGraphAdapter } from '../adapters/graph/BloomGraphAdapter';
 import { GraphModule } from '../adapters/graph/graph.module';
+import { DomainModule } from '../../domain/domain.module';
+import { GarchService } from '../../domain/services/GarchService';
 import { PortfolioOptimizer } from '../../domain/services/strategy-rules/PortfolioOptimizer';
 import { OrderExecutor } from '../../domain/services/strategy-rules/OrderExecutor';
 import { PositionManager } from '../../domain/services/strategy-rules/PositionManager';
@@ -103,7 +105,7 @@ import { PredictionBacktester } from '../../domain/services/prediction/Predictio
  * - REST API controllers
  */
 @Module({
-  imports: [ConfigModule, GraphModule],
+  imports: [ConfigModule, GraphModule, DomainModule],
   controllers: [PerpKeeperController, FundingRateController],
   providers: [
     // Exchange adapters - conditionally use mock adapters in test mode
@@ -659,17 +661,20 @@ import { PredictionBacktester } from '../../domain/services/prediction/Predictio
         configService: ConfigService,
         fundingPaymentsService: RealFundingPaymentsService,
         historicalService: IHistoricalFundingRateService,
+        garchService: GarchService,
       ) => {
         return new OptimalLeverageService(
           configService,
           fundingPaymentsService,
           historicalService,
+          garchService,
         );
       },
       inject: [
         ConfigService,
         RealFundingPaymentsService,
         'IHistoricalFundingRateService',
+        GarchService,
       ],
     },
     {

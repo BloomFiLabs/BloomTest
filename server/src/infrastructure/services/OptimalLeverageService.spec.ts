@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { OptimalLeverageService } from './OptimalLeverageService';
 import { RealFundingPaymentsService } from './RealFundingPaymentsService';
 import { ExchangeType } from '../../domain/value-objects/ExchangeConfig';
+import { GarchService } from '../../domain/services/GarchService';
 import type { IHistoricalFundingRateService } from '../../domain/ports/IHistoricalFundingRateService';
 
 describe('OptimalLeverageService', () => {
@@ -10,8 +11,13 @@ describe('OptimalLeverageService', () => {
   let mockConfigService: Partial<ConfigService>;
   let mockFundingPaymentsService: Partial<RealFundingPaymentsService>;
   let mockHistoricalService: Partial<IHistoricalFundingRateService>;
+  let mockGarchService: Partial<GarchService>;
 
   beforeEach(async () => {
+    // Mock GarchService
+    mockGarchService = {
+      calculateVolatility: jest.fn().mockReturnValue({ value: 0.15 }), // 15% annualized
+    };
     // Mock ConfigService
     mockConfigService = {
       get: jest.fn((key: string) => {
@@ -68,6 +74,7 @@ describe('OptimalLeverageService', () => {
       mockConfigService as ConfigService,
       mockFundingPaymentsService as RealFundingPaymentsService,
       mockHistoricalService as IHistoricalFundingRateService,
+      mockGarchService as GarchService,
     );
   });
 
@@ -153,6 +160,7 @@ describe('OptimalLeverageService', () => {
         configWithOverride as unknown as ConfigService,
         mockFundingPaymentsService as RealFundingPaymentsService,
         mockHistoricalService as IHistoricalFundingRateService,
+        mockGarchService as GarchService,
       );
 
       const result = await serviceWithOverride.calculateOptimalLeverage(
@@ -336,6 +344,7 @@ describe('OptimalLeverageService', () => {
         mockConfigService as ConfigService,
         undefined, // No funding service
         mockHistoricalService as IHistoricalFundingRateService,
+        mockGarchService as GarchService,
       );
 
       const result =
@@ -424,8 +433,8 @@ describe('OptimalLeverageService', () => {
         24,
       );
 
-      // Should return default metrics
-      expect(result.dailyVolatility).toBe(0.05); // 5% default
+      // Should return default metrics (now 10% for safety)
+      expect(result.dailyVolatility).toBe(0.10); 
       expect(result.dataPoints).toBe(0);
     });
 
@@ -554,10 +563,33 @@ describe('OptimalLeverageService', () => {
     });
   });
 
-  describe('Leverage formula', () => {
-    it('should calculate leverage using composite score', async () => {
-      // The formula: optimalLeverage = minLeverage + (maxLeverage - minLeverage) * compositeScore
-      // With min=1, max=10: optimalLeverage = 1 + 9 * compositeScore
+  describe('Leverage formula (Sigma-Targeted)', () => {
+    it('should calculate leverage based on inverse volatility (1 / k*sigma)', async () => {
+      // Formula: L = 1 / (k * dailyVol)
+      // k defaults to 5.0 in code if not in config
+      jest.spyOn(service, 'getAssetVolatility').mockResolvedValue({
+        symbol: 'BTC',
+        exchange: ExchangeType.HYPERLIQUID,
+        dailyVolatility: 0.04, // 4% daily
+        hourlyVolatility: 0.008,
+        maxDrawdown24h: 0.05,
+        atr: 0,
+        lookbackHours: 24,
+        dataPoints: 100,
+        timestamp: new Date(),
+      });
+
+      // Mock high liquidity to avoid slippage penalty
+      jest.spyOn(service, 'getLiquidityAssessment').mockResolvedValue({
+        symbol: 'BTC',
+        exchange: ExchangeType.HYPERLIQUID,
+        openInterest: 100000000, // Very high OI
+        positionSizeUsd: 1000,
+        positionAsPercentOfOI: 0.001,
+        estimatedSlippage: 0.0001,
+        maxRecommendedSize: 1000000,
+        liquidityScore: 1.0,
+      });
 
       const result = await service.calculateOptimalLeverage(
         'BTC',
@@ -565,12 +597,69 @@ describe('OptimalLeverageService', () => {
         1000,
       );
 
-      // Verify the relationship
-      const expectedLeverage = 1 + 9 * result.compositeScore;
-      // The actual leverage might be constrained by safety rules
-      expect(result.optimalLeverage).toBeLessThanOrEqual(
-        expectedLeverage + 0.5,
+      // Expected: 1 / (5.0 * 0.04) = 1 / 0.20 = 5.0x
+      expect(result.optimalLeverage).toBe(5.0);
+      expect(result.reason).toContain('Sigma-Targeted');
+    });
+
+    it('should reduce leverage proportionally for higher volatility', async () => {
+      // k=5.0, dailyVol=0.10 (10%)
+      // Expected: 1 / (5.0 * 0.10) = 1 / 0.50 = 2.0x
+      jest.spyOn(service, 'getAssetVolatility').mockResolvedValue({
+        symbol: 'PEPE',
+        exchange: ExchangeType.HYPERLIQUID,
+        dailyVolatility: 0.10, 
+        hourlyVolatility: 0.02,
+        maxDrawdown24h: 0.15,
+        atr: 0,
+        lookbackHours: 24,
+        dataPoints: 100,
+        timestamp: new Date(),
+      });
+
+      const result = await service.calculateOptimalLeverage(
+        'PEPE',
+        ExchangeType.HYPERLIQUID,
+        1000,
       );
+
+      expect(result.optimalLeverage).toBe(2.0);
+    });
+
+    it('should apply liquidity penalty for large positions relative to OI', async () => {
+      jest.spyOn(service, 'getAssetVolatility').mockResolvedValue({
+        symbol: 'SMALL_CAP',
+        exchange: ExchangeType.HYPERLIQUID,
+        dailyVolatility: 0.05,
+        hourlyVolatility: 0.01,
+        maxDrawdown24h: 0.05,
+        atr: 0,
+        lookbackHours: 24,
+        dataPoints: 100,
+        timestamp: new Date(),
+      });
+
+      // Mock low liquidity
+      jest.spyOn(service, 'getLiquidityAssessment').mockResolvedValue({
+        symbol: 'SMALL_CAP',
+        exchange: ExchangeType.HYPERLIQUID,
+        openInterest: 100000, // $100k OI
+        positionSizeUsd: 10000, // $10k position (10% of OI)
+        positionAsPercentOfOI: 10,
+        estimatedSlippage: 0.02, // 2% slippage
+        maxRecommendedSize: 5000,
+        liquidityScore: 0.3,
+      });
+
+      const result = await service.calculateOptimalLeverage(
+        'SMALL_CAP',
+        ExchangeType.HYPERLIQUID,
+        10000,
+      );
+
+      // Base: 1 / (5.0 * 0.05) = 4.0x
+      // Penalty: 4.0 * (1 - 0.02) = 3.92x -> rounded to 3.9x
+      expect(result.optimalLeverage).toBe(3.9);
     });
   });
 

@@ -67,6 +67,9 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
   private reconnectAttempts = 0;
   private readonly MAX_RECONNECT_ATTEMPTS = 10;
   private readonly RECONNECT_DELAY = 5000; // 5 seconds
+  
+  // Lighter has a limit of ~50-100 subscriptions per connection
+  private readonly MAX_MARKET_STATS_SUBSCRIPTIONS = 50;
 
   // Cache for market stats data (key: marketIndex, value: { openInterest: number, markPrice: number, volume24h: number })
   private marketStatsCache: Map<
@@ -74,6 +77,7 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
     { openInterest: number; markPrice: number; volume24h: number }
   > = new Map();
   private subscribedMarkets: Set<number> = new Set();
+  private actuallySubscribedMarkets: Set<number> = new Set(); // Markets we've SENT subscription for
   
   // Cache for orderbook data (key: marketIndex, value: { bids, asks })
   private orderbookCache: Map<number, { bids: OrderBookLevel[]; asks: OrderBookLevel[] }> = new Map();
@@ -114,14 +118,11 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
               );
               this.resubscribeAll();
             } else {
-              this.logger.debug(
-                'No markets to resubscribe yet (subscribedMarkets is empty - markets may be discovered shortly)',
-              );
-              // Check again after a longer delay in case markets are discovered late
+              // Check again after a delay in case markets are discovered late
               setTimeout(() => {
-                if (this.subscribedMarkets.size > 0) {
+                if (this.subscribedMarkets.size > 0 && this.actuallySubscribedMarkets.size === 0) {
                   this.logger.log(
-                    `Markets discovered late - subscribing to ${this.subscribedMarkets.size} Lighter markets...`,
+                    `Markets discovered late - subscribing to up to ${this.MAX_MARKET_STATS_SUBSCRIPTIONS} Lighter markets...`,
                   );
                   this.resubscribeAll();
                 }
@@ -288,9 +289,20 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
       }
       // Silently ignore update/market_stats and update/order_book - they're already handled above
     } else if (message.error) {
-      // Log errors but don't spam
+      // Silence expected errors at subscription limits
+      const code = message.error.code;
+      if (code === 30003 || code === 23001) {
+        // 30003 = "Already Subscribed" - expected when resubscribing
+        // 23001 = "Too Many Subscriptions" - expected at limit
+        return;
+      }
+      if (code === 30009) {
+        // 30009 = "Too Many Websocket Messages" - throttle warning, silent
+        return;
+      }
+      // Log other errors
       this.logger.warn(
-        `WebSocket error: code=${message.error.code}, message=${message.error.message}`,
+        `WebSocket error: code=${code}, message=${message.error.message}`,
       );
     }
     // Don't log unhandled messages - too noisy
@@ -341,19 +353,24 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
     forceResubscribe: boolean = false,
   ): void {
     // Always track the subscription, even if WebSocket isn't connected yet
-    // This ensures we resubscribe when it reconnects
-    const wasNew = !this.subscribedMarkets.has(marketIndex);
-    if (wasNew) {
-      this.subscribedMarkets.add(marketIndex);
-    }
+    this.subscribedMarkets.add(marketIndex);
 
     if (!this.isConnected || !this.ws) {
-      // WebSocket not connected - subscription will happen on reconnect via resubscribeAll
       return;
     }
 
-    // If we already have data for this market and not forcing resubscribe, assume we're already subscribed
-    if (!forceResubscribe && !wasNew && this.hasMarketData(marketIndex)) {
+    // Already sent subscription for this market? Skip unless forcing
+    if (this.actuallySubscribedMarkets.has(marketIndex) && !forceResubscribe) {
+      return;
+    }
+
+    // Check subscription limit
+    if (this.actuallySubscribedMarkets.size >= this.MAX_MARKET_STATS_SUBSCRIPTIONS && !this.actuallySubscribedMarkets.has(marketIndex)) {
+      return; // At limit, can't subscribe to more
+    }
+
+    // If we already have data for this market, skip
+    if (!forceResubscribe && this.hasMarketData(marketIndex)) {
       return;
     }
 
@@ -369,7 +386,7 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
       }
 
       this.ws.send(JSON.stringify(subscribeMessage));
-      // Don't log individual subscriptions - too noisy
+      this.actuallySubscribedMarkets.add(marketIndex);
     } catch (error: any) {
       this.logger.error(
         `Failed to subscribe to market ${marketIndex}: ${error.message}`,
@@ -381,45 +398,44 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
    * Subscribe to multiple markets at once (with throttling to avoid rate limits)
    */
   subscribeToMarkets(marketIndexes: number[]): void {
-    // Add all markets to tracking set first
-    marketIndexes.forEach((index) => {
-      if (!this.subscribedMarkets.has(index)) {
-        this.subscribedMarkets.add(index);
-      }
-    });
+    // Track all markets but only actually subscribe to top ones
+    marketIndexes.forEach((index) => this.subscribedMarkets.add(index));
 
-    // If connected, subscribe to ALL markets (force subscribe to ensure we get data)
-    // WebSocket.OPEN = 1
-    if (this.isConnected && this.ws && this.ws.readyState === 1) {
-      // Subscribe to all markets that don't have data yet
-      const marketsToSubscribe = marketIndexes.filter(
-        (index) => !this.hasMarketData(index),
-      );
-      if (marketsToSubscribe.length > 0) {
-        // Throttle subscriptions to avoid "Too Many Websocket Messages!" error
-        // Subscribe in batches of 5 with 200ms delay between batches
-        const BATCH_SIZE = 5;
-        const BATCH_DELAY_MS = 200;
-        
-        this.logger.log(`📡 Subscribing to ${marketsToSubscribe.length} Lighter markets...`);
-        
-        for (let i = 0; i < marketsToSubscribe.length; i += BATCH_SIZE) {
-          const batch = marketsToSubscribe.slice(i, i + BATCH_SIZE);
-          const delay = Math.floor(i / BATCH_SIZE) * BATCH_DELAY_MS;
-          
-          setTimeout(() => {
-            batch.forEach((index) => {
-              this.subscribeToMarket(index, true);
-            });
-          }, delay);
-        }
+    if (!this.isConnected || !this.ws || this.ws.readyState !== 1) {
+      return;
+    }
+
+    // Filter to markets we haven't subscribed to yet and limit to remaining capacity
+    const remainingCapacity = this.MAX_MARKET_STATS_SUBSCRIPTIONS - this.actuallySubscribedMarkets.size;
+    if (remainingCapacity <= 0) {
+      return; // Already at max subscriptions
+    }
+
+    const marketsToSubscribe = marketIndexes
+      .filter((index) => !this.actuallySubscribedMarkets.has(index))
+      .slice(0, remainingCapacity);
+
+    if (marketsToSubscribe.length > 0) {
+      // Throttle subscriptions to avoid "Too Many Websocket Messages!" error
+      const BATCH_SIZE = 3;
+      const BATCH_DELAY_MS = 300;
+
+      this.logger.log(`📡 Subscribing to ${marketsToSubscribe.length} Lighter markets (limit: ${this.MAX_MARKET_STATS_SUBSCRIPTIONS})...`);
+
+      for (let i = 0; i < marketsToSubscribe.length; i += BATCH_SIZE) {
+        const batch = marketsToSubscribe.slice(i, i + BATCH_SIZE);
+        const delay = Math.floor(i / BATCH_SIZE) * BATCH_DELAY_MS;
+
+        setTimeout(() => {
+          batch.forEach((index) => this.subscribeToMarket(index, false));
+        }, delay);
       }
     }
-    // Silently queue if not connected - will subscribe on reconnect
   }
 
   /**
    * Ensure all tracked markets are subscribed (useful when markets are discovered after connection)
+   * Now respects subscription limits
    */
   ensureAllMarketsSubscribed(): void {
     if (!this.isConnected || !this.ws) {
@@ -430,27 +446,29 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // Subscribe to all markets that don't have data yet
-    const marketsToSubscribe = Array.from(this.subscribedMarkets).filter(
-      (marketIndex) => !this.hasMarketData(marketIndex),
-    );
+    // Filter to markets not yet actually subscribed and respect limit
+    const remainingCapacity = this.MAX_MARKET_STATS_SUBSCRIPTIONS - this.actuallySubscribedMarkets.size;
+    if (remainingCapacity <= 0) {
+      return;
+    }
+
+    const marketsToSubscribe = Array.from(this.subscribedMarkets)
+      .filter((index) => !this.actuallySubscribedMarkets.has(index))
+      .slice(0, remainingCapacity);
 
     if (marketsToSubscribe.length > 0) {
       this.logger.log(
         `Ensuring ${marketsToSubscribe.length} Lighter markets are subscribed...`,
       );
-      // Throttle subscriptions
-      const BATCH_SIZE = 5;
-      const BATCH_DELAY_MS = 200;
-      
+      const BATCH_SIZE = 3;
+      const BATCH_DELAY_MS = 300;
+
       for (let i = 0; i < marketsToSubscribe.length; i += BATCH_SIZE) {
         const batch = marketsToSubscribe.slice(i, i + BATCH_SIZE);
         const delay = Math.floor(i / BATCH_SIZE) * BATCH_DELAY_MS;
-        
+
         setTimeout(() => {
-          batch.forEach((index) => {
-            this.subscribeToMarket(index, true);
-          });
+          batch.forEach((index) => this.subscribeToMarket(index, false));
         }, delay);
       }
     }
@@ -458,45 +476,36 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Resubscribe to all previously subscribed markets (with throttling)
+   * Called after reconnection - clears tracking and resubscribes up to limit
    */
   private resubscribeAll(): void {
-    const BATCH_SIZE = 5;
-    const BATCH_DELAY_MS = 200;
+    // Clear tracking on reconnect - server doesn't remember our subscriptions
+    this.actuallySubscribedMarkets.clear();
     
-    if (this.subscribedMarkets.size > 0) {
+    const BATCH_SIZE = 3;
+    const BATCH_DELAY_MS = 300;
+
+    // Resubscribe to market stats (limited)
+    const marketsToSubscribe = Array.from(this.subscribedMarkets).slice(0, this.MAX_MARKET_STATS_SUBSCRIPTIONS);
+    if (marketsToSubscribe.length > 0) {
       this.logger.log(
-        `Resubscribing to ${this.subscribedMarkets.size} Lighter market stats...`,
+        `Resubscribing to ${marketsToSubscribe.length} Lighter market stats (limit: ${this.MAX_MARKET_STATS_SUBSCRIPTIONS})...`,
       );
-      const markets = Array.from(this.subscribedMarkets);
-      
-      for (let i = 0; i < markets.length; i += BATCH_SIZE) {
-        const batch = markets.slice(i, i + BATCH_SIZE);
+
+      for (let i = 0; i < marketsToSubscribe.length; i += BATCH_SIZE) {
+        const batch = marketsToSubscribe.slice(i, i + BATCH_SIZE);
         const delay = Math.floor(i / BATCH_SIZE) * BATCH_DELAY_MS;
-        
+
         setTimeout(() => {
-          batch.forEach((index) => this.subscribeToMarket(index, true));
+          batch.forEach((index) => this.subscribeToMarket(index, false));
         }, delay);
       }
     }
-    
+
+    // DON'T resubscribe to orderbooks automatically - too expensive
+    // Orderbook subscriptions will happen on-demand when needed
     if (this.subscribedOrderbooks.size > 0) {
-      this.logger.log(
-        `Resubscribing to ${this.subscribedOrderbooks.size} Lighter orderbooks...`,
-      );
-      const markets = Array.from(this.subscribedOrderbooks);
-      
-      // Clear and resubscribe with delay
       this.subscribedOrderbooks.clear();
-      
-      for (let i = 0; i < markets.length; i += BATCH_SIZE) {
-        const batch = markets.slice(i, i + BATCH_SIZE);
-        // Add offset to avoid overlap with market_stats subscriptions
-        const delay = Math.floor(i / BATCH_SIZE) * BATCH_DELAY_MS + (this.subscribedMarkets.size / BATCH_SIZE) * BATCH_DELAY_MS + 500;
-        
-        setTimeout(() => {
-          batch.forEach((index) => this.subscribeToOrderbook(index));
-        }, delay);
-      }
     }
   }
 

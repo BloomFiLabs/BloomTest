@@ -14,6 +14,7 @@ import {
 } from '../../domain/ports/IOptimalLeverageService';
 import { RealFundingPaymentsService } from './RealFundingPaymentsService';
 import type { IHistoricalFundingRateService } from '../../domain/ports/IHistoricalFundingRateService';
+import { GarchService } from '../../domain/services/GarchService';
 
 /**
  * Price candle data
@@ -69,19 +70,23 @@ export class OptimalLeverageService implements IOptimalLeverageService {
     @Optional()
     @Inject('IHistoricalFundingRateService')
     private readonly historicalService?: IHistoricalFundingRateService,
+    @Optional()
+    private readonly garchService?: GarchService,
   ) {
     // Initialize configuration from env or defaults
+    // Use longer lookback (168h = 7 days) to capture weekly volatility patterns
     this.config = {
       minLeverage: parseFloat(this.configService.get('LEVERAGE_MIN') || '1'),
-      maxLeverage: parseFloat(this.configService.get('LEVERAGE_MAX') || '10'),
+      maxLeverage: parseFloat(this.configService.get('LEVERAGE_MAX') || '5'), // Conservative 5x max
       volatilityLookbackHours: parseInt(
-        this.configService.get('LEVERAGE_LOOKBACK_HOURS') || '24',
+        this.configService.get('LEVERAGE_LOOKBACK_HOURS') || '168', // 7 days
       ),
       leverageOverrides: new Map(),
-      volatilityWeight: 0.35,
-      liquidationWeight: 0.25,
-      liquidityWeight: 0.25,
+      volatilityWeight: 0.45, // Increase volatility weight - primary safety factor
+      liquidationWeight: 0.20,
+      liquidityWeight: 0.20,
       winRateWeight: 0.15,
+      sigmaFactor: parseFloat(this.configService.get('LEVERAGE_K_FACTOR') || '5.0'), // 5-sigma safety
     };
 
     // Parse leverage overrides from env (format: "BTC:5,ETH:3,DOGE:2")
@@ -154,12 +159,28 @@ export class OptimalLeverageService implements IOptimalLeverageService {
     // Calculate composite score
     const compositeScore = this.calculateCompositeScore(factors);
 
-    // Calculate optimal leverage
-    let optimalLeverage =
-      this.config.minLeverage +
-      (this.config.maxLeverage - this.config.minLeverage) * compositeScore;
+    // Calculate optimal leverage using Sigma-Distance Model (Volatility Targeting)
+    // Non-heuristic formula: L = 1 / (k * sigma)
+    const k = this.config.sigmaFactor || 5.0;
+    
+    // We use the daily volatility from metrics
+    // If daily vol is 5%, and k=5, optimal leverage = 1 / (5 * 0.05) = 4x
+    let optimalLeverage = 1 / (k * volatilityMetrics.dailyVolatility);
 
-    // Apply safety constraints
+    // Adjust for liquidity (non-heuristic slippage penalty)
+    if (liquidityAssessment.positionAsPercentOfOI > 1) {
+      // If our position is > 1% of OI, reduce leverage by the estimated slippage
+      // This accounts for the higher risk of exiting a large position in volatile times
+      optimalLeverage *= (1 - liquidityAssessment.estimatedSlippage);
+    }
+
+    // Adjust for win rate performance
+    if (winRateScore < 0.5) {
+      // Reduce leverage if historical performance is poor
+      optimalLeverage *= (0.5 + winRateScore);
+    }
+
+    // Apply safety constraints (systematic caps)
     optimalLeverage = this.applySafetyConstraints(
       optimalLeverage,
       volatilityMetrics,
@@ -171,15 +192,11 @@ export class OptimalLeverageService implements IOptimalLeverageService {
 
     // Calculate max safe leverage (more conservative)
     const maxSafeLeverage = Math.min(
-      optimalLeverage * 1.5,
+      optimalLeverage * 1.2, // Tighter margin for safety
       this.config.maxLeverage,
     );
 
-    const reason = this.generateReason(
-      factors,
-      optimalLeverage,
-      volatilityMetrics,
-    );
+    const reason = `Sigma-Targeted: Liquidation is ${k}σ away (${(volatilityMetrics.dailyVolatility * 100).toFixed(1)}% daily vol)`;
 
     return {
       symbol: normalizedSymbol,
@@ -242,7 +259,27 @@ export class OptimalLeverageService implements IOptimalLeverageService {
       const hourlyVolatility = Math.sqrt(variance);
 
       // Annualize to daily (assume hourly candles, 24 hours per day)
-      const dailyVolatility = hourlyVolatility * Math.sqrt(24);
+      let dailyVolatility = hourlyVolatility * Math.sqrt(24);
+
+      // 🚨 NON-HEURISTIC ENHANCEMENT: Use GARCH for better volatility forecasting if available
+      if (this.garchService && returns.length >= 30) {
+        try {
+          const garchVol = this.garchService.calculateVolatility(returns);
+          // GarchService returns annualized volatility (yearly). Convert back to daily.
+          // annualized = daily * sqrt(365) => daily = annualized / sqrt(365)
+          const garchDailyVol = garchVol.value / Math.sqrt(365);
+          
+          this.logger.debug(
+            `${symbol}: GARCH Daily Vol: ${(garchDailyVol * 100).toFixed(2)}% vs ` +
+            `Historical: ${(dailyVolatility * 100).toFixed(2)}%`
+          );
+          
+          // Use the more conservative (higher) estimate
+          dailyVolatility = Math.max(dailyVolatility, garchDailyVol);
+        } catch (error: any) {
+          this.logger.debug(`GARCH calculation failed for ${symbol}: ${error.message}`);
+        }
+      }
 
       // Calculate max drawdown in period
       let peak = candles[0].high;
@@ -581,6 +618,7 @@ export class OptimalLeverageService implements IOptimalLeverageService {
 
   /**
    * Apply safety constraints to leverage
+   * More aggressive constraints to prevent quick liquidations on volatile altcoins
    */
   private applySafetyConstraints(
     leverage: number,
@@ -589,20 +627,40 @@ export class OptimalLeverageService implements IOptimalLeverageService {
   ): number {
     let constrained = leverage;
 
-    // Cap at 5x for high volatility assets (> 10% daily vol)
-    if (volatility.dailyVolatility > 0.1) {
-      constrained = Math.min(constrained, 5);
+    // If we have insufficient data, be very conservative
+    if (volatility.dataPoints < 24) {
+      constrained = Math.min(constrained, 2);
+      this.logger.debug(
+        `${volatility.symbol}: Limited data (${volatility.dataPoints} points), capping at 2x`,
+      );
     }
 
-    // Cap at 3x for very high volatility (> 15% daily vol)
-    if (volatility.dailyVolatility > 0.15) {
+    // Cap at 3x for moderate volatility (> 5% daily vol)
+    if (volatility.dailyVolatility > 0.05) {
       constrained = Math.min(constrained, 3);
     }
 
-    // Cap at 3x for low win rate assets (< 50%)
+    // Cap at 2x for high volatility (> 8% daily vol)
+    if (volatility.dailyVolatility > 0.08) {
+      constrained = Math.min(constrained, 2);
+    }
+
+    // Cap at 1.5x for very high volatility (> 12% daily vol)
+    if (volatility.dailyVolatility > 0.12) {
+      constrained = Math.min(constrained, 1.5);
+    }
+
+    // Cap based on max drawdown - if asset dropped >15% in lookback, use 2x max
+    if (volatility.maxDrawdown24h > 0.15) {
+      constrained = Math.min(constrained, 2);
+      this.logger.debug(
+        `${volatility.symbol}: High drawdown (${(volatility.maxDrawdown24h * 100).toFixed(1)}%), capping at 2x`,
+      );
+    }
+
+    // Cap at 2x for low win rate assets (< 50%)
     if (winRateScore < 0.5 / 0.7) {
-      // Win rate < 50%
-      constrained = Math.min(constrained, 3);
+      constrained = Math.min(constrained, 2);
     }
 
     // Ensure within bounds
@@ -645,18 +703,22 @@ export class OptimalLeverageService implements IOptimalLeverageService {
 
   /**
    * Get default volatility metrics when data unavailable
+   * Use CONSERVATIVE defaults to avoid over-leveraging unknown assets
    */
   private getDefaultVolatilityMetrics(
     symbol: string,
     exchange: ExchangeType,
     lookbackHours: number,
   ): VolatilityMetrics {
+    this.logger.warn(
+      `No price data for ${symbol} on ${exchange} - using conservative 10% volatility default`,
+    );
     return {
       symbol: this.normalizeSymbol(symbol),
       exchange,
-      dailyVolatility: 0.05, // 5% default
-      hourlyVolatility: 0.01,
-      maxDrawdown24h: 0.1,
+      dailyVolatility: 0.10, // 10% default - conservative for unknown assets
+      hourlyVolatility: 0.02,
+      maxDrawdown24h: 0.15, // Assume 15% max drawdown
       atr: 0,
       lookbackHours,
       dataPoints: 0,

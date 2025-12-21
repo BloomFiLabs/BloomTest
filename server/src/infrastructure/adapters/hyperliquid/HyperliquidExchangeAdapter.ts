@@ -721,22 +721,42 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
         `🔄 Modifying order ${orderId} on Hyperliquid: ${request.symbol} @ ${formattedPrice}`,
       );
 
-      // Use the dedicated updateOrder method for atomic modification
-      // Type assertion needed as SDK types may not include updateOrder
-      const result = await this.callExchange(this.WEIGHT_EXCHANGE, () => (this.exchangeClient as any).updateOrder({
-        order: {
-          asset: assetId,
-          isBuy: request.side === OrderSide.LONG,
-          limitPx: formattedPrice,
-          sz: formattedSize,
-          reduceOnly: request.reduceOnly || false,
-          tif: request.timeInForce === TimeInForce.IOC ? 'Ioc' : 'Gtc',
-        },
-        oid: parseInt(orderId),
+      // Hyperliquid SDK doesn't have updateOrder - use cancel + place
+      // 1. Cancel the old order
+      const orderIdNum = parseInt(orderId, 10);
+      if (isNaN(orderIdNum)) {
+        throw new Error(`Invalid order ID format: ${orderId}`);
+      }
+
+      const cancelResult = await this.callExchange(this.WEIGHT_EXCHANGE, () => this.exchangeClient.cancel({
+        cancels: [
+          {
+            a: assetId,
+            o: orderIdNum,
+          },
+        ],
+      }));
+
+      if (cancelResult.status !== 'ok') {
+        // Order may already be filled or cancelled - that's okay, place the new order anyway
+        this.logger.debug(`Order ${orderId} cancel returned: ${JSON.stringify(cancelResult)}`);
+      }
+
+      // 2. Place the new order (SDK uses short property names)
+      const placeResult = await this.callExchange(this.WEIGHT_EXCHANGE, () => this.exchangeClient.order({
+        orders: [{
+          a: assetId,
+          b: request.side === OrderSide.LONG, // b = isBuy
+          p: formattedPrice, // p = price
+          s: formattedSize, // s = size
+          r: request.reduceOnly || false, // r = reduceOnly
+          t: { limit: { tif: request.timeInForce === TimeInForce.IOC ? 'Ioc' : 'Gtc' } },
+        }],
+        grouping: 'na',
       })) as any;
 
-      if (result.status === 'ok' && result.response?.type === 'order') {
-        const status = result.response.data.statuses[0];
+      if (placeResult.status === 'ok' && placeResult.response?.type === 'order') {
+        const status = placeResult.response.data.statuses[0];
         let newOrderId: string = 'unknown';
         let orderStatus: OrderStatus = OrderStatus.SUBMITTED;
         let filledSize: number | undefined;
@@ -764,7 +784,7 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
         );
       }
 
-      throw new Error(`Failed to modify order: ${JSON.stringify(result)}`);
+      throw new Error(`Failed to place modified order: ${JSON.stringify(placeResult)}`);
     } catch (error: any) {
       this.logger.error(`Failed to modify order ${orderId}: ${error.message}`);
       throw new ExchangeError(
