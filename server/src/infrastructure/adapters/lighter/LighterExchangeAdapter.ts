@@ -29,7 +29,7 @@ import {
 } from '../../../domain/ports/IPerpExchangeAdapter';
 import { DiagnosticsService } from '../../services/DiagnosticsService';
 import { MarketQualityFilter } from '../../../domain/services/MarketQualityFilter';
-import { RateLimiterService } from '../../services/RateLimiterService';
+import { RateLimiterService, RateLimitPriority } from '../../services/RateLimiterService';
 
 import { LighterWebSocketProvider } from './LighterWebSocketProvider';
 

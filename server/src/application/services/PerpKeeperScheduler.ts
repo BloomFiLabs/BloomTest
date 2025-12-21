@@ -528,6 +528,18 @@ export class PerpKeeperScheduler implements OnModuleInit {
   }
 
   /**
+   * Normalize symbol for consistent cache keys
+   */
+  private normalizeSymbol(symbol: string): string {
+    return symbol
+      .toUpperCase()
+      .replace('USDT', '')
+      .replace('USDC', '')
+      .replace('-PERP', '')
+      .replace('PERP', '');
+  }
+
+  /**
    * Check if a symbol is blacklisted
    */
   private isBlacklisted(symbol: string): boolean {
@@ -1750,7 +1762,7 @@ export class PerpKeeperScheduler implements OnModuleInit {
           this.logger.warn(`🚨 Found orphaned leg in thread ${threadId}: ${order.symbol} ${order.side} on ${order.exchange}`);
           
           // Cleanup: Cancel the orphaned order
-          const adapter = this.keeperService.getExchangeAdapters().get(order.exchange);
+          const adapter = this.keeperService.getExchangeAdapters().get(order.exchange as ExchangeType);
           if (adapter) {
             this.logger.log(`🗑️ Rolling back orphaned order ${order.orderId} for ${order.symbol}`);
             try {
