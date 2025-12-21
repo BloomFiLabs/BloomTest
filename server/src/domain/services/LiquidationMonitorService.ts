@@ -124,10 +124,15 @@ export class LiquidationMonitorService implements ILiquidationMonitor {
             const triggerLeg = longAtRisk ? 'LONG' : 'SHORT';
             const triggerRisk = longAtRisk ? pairedPosition.longRisk : pairedPosition.shortRisk;
             const consumed = longAtRisk ? longConsumed : shortConsumed;
+            
+            // Calculate components for clearer logging
+            const initialBuffer = triggerRisk.leverage > 0 ? 1 / triggerRisk.leverage : 0.1;
+            const currentDistance = triggerRisk.distanceToLiquidation;
 
             this.logger.warn(
               `🚨 LIQUIDATION RISK: ${pairedPosition.symbol} ${triggerLeg} leg ` +
                 `has consumed ${(consumed * 100).toFixed(1)}% of its safety buffer! ` +
+                `(Buffer: ${(initialBuffer * 100).toFixed(1)}%, Dist: ${(currentDistance * 100).toFixed(2)}%, Lev: ${triggerRisk.leverage.toFixed(1)}x) ` +
                 `Mark: $${triggerRisk.markPrice.toFixed(4)}, Liq: $${triggerRisk.liquidationPrice.toFixed(4)}`
             );
 
@@ -485,6 +490,7 @@ export class LiquidationMonitorService implements ILiquidationMonitor {
     longAtRisk: boolean,
     shortAtRisk: boolean,
   ): Promise<EmergencyCloseResult> {
+    const threadId = this.executionLockService?.generateThreadId() || `liq-pair-${Date.now()}`;
     const result: EmergencyCloseResult = {
       symbol: position.symbol,
       longExchange: position.longExchange,
@@ -506,51 +512,86 @@ export class LiquidationMonitorService implements ILiquidationMonitor {
         `(triggered by ${result.triggerReason})`,
     );
 
-    // Close both legs in parallel for speed
-    const [longResult, shortResult] = await Promise.allSettled([
-      this.closePosition(position, 'LONG'),
-      this.closePosition(position, 'SHORT'),
-    ]);
-
-    // Process long result
-    if (longResult.status === 'fulfilled') {
-      result.longCloseSuccess = longResult.value.success;
-      result.longCloseError = longResult.value.error;
-    } else {
-      result.longCloseError = longResult.reason?.message || 'Unknown error';
-    }
-
-    // Process short result
-    if (shortResult.status === 'fulfilled') {
-      result.shortCloseSuccess = shortResult.value.success;
-      result.shortCloseError = shortResult.value.error;
-    } else {
-      result.shortCloseError = shortResult.reason?.message || 'Unknown error';
-    }
-
-    // Log result
-    if (result.longCloseSuccess && result.shortCloseSuccess) {
-      this.logger.log(
-        `✅ Emergency close successful for ${position.symbol}: both legs closed`,
+    // SYMBOL-LEVEL LOCK: Acquire once for the entire pair close operation
+    if (this.executionLockService) {
+      const lockAcquired = this.executionLockService.tryAcquireSymbolLock(
+        position.symbol,
+        threadId,
+        'emergency-close-pair'
       );
-    } else {
-      this.logger.error(
-        `❌ Emergency close PARTIAL for ${position.symbol}: ` +
-          `LONG=${result.longCloseSuccess ? 'OK' : result.longCloseError}, ` +
-          `SHORT=${result.shortCloseSuccess ? 'OK' : result.shortCloseError}`,
-      );
+      
+      if (!lockAcquired) {
+        this.logger.warn(`⏳ Symbol ${position.symbol} is already being executed - skipping emergency close pair`);
+        return result;
+      }
     }
 
-    return result;
+    // Set entry prices
+    result.longEntryPrice = position.longRisk.entryPrice;
+    result.shortEntryPrice = position.shortRisk.entryPrice;
+
+    try {
+      // Close both legs in parallel for speed
+      const [longResult, shortResult] = await Promise.allSettled([
+        this.closePosition(position, 'LONG', threadId, true), // Skip internal locking
+        this.closePosition(position, 'SHORT', threadId, true), // Skip internal locking
+      ]);
+
+      // Process long result
+      if (longResult.status === 'fulfilled') {
+        result.longCloseSuccess = longResult.value.success;
+        result.longCloseError = longResult.value.error;
+        result.longClosePrice = longResult.value.fillPrice;
+      } else {
+        result.longCloseError = longResult.reason?.message || 'Unknown error';
+      }
+
+      // Process short result
+      if (shortResult.status === 'fulfilled') {
+        result.shortCloseSuccess = shortResult.value.success;
+        result.shortCloseError = shortResult.value.error;
+        result.shortClosePrice = shortResult.value.fillPrice;
+      } else {
+        result.shortCloseError = shortResult.reason?.message || 'Unknown error';
+      }
+
+      // Log result with prices
+      const longMsg = result.longCloseSuccess 
+        ? `LONG closed @ $${result.longClosePrice?.toFixed(4)} (entry $${result.longEntryPrice?.toFixed(4)})`
+        : `LONG failed: ${result.longCloseError}`;
+      
+      const shortMsg = result.shortCloseSuccess
+        ? `SHORT closed @ $${result.shortClosePrice?.toFixed(4)} (entry $${result.shortEntryPrice?.toFixed(4)})`
+        : `SHORT failed: ${result.shortCloseError}`;
+
+      if (result.longCloseSuccess && result.shortCloseSuccess) {
+        this.logger.log(`✅ Emergency close successful for ${position.symbol}: ${longMsg}, ${shortMsg}`);
+      } else {
+        this.logger.error(`❌ Emergency close PARTIAL for ${position.symbol}: ${longMsg}, ${shortMsg}`);
+      }
+
+      return result;
+    } finally {
+      // Always release symbol lock when done
+      if (this.executionLockService) {
+        this.executionLockService.releaseSymbolLock(position.symbol, threadId);
+      }
+    }
   }
 
   /**
    * Close a single leg of a position.
+   * @param position Position pair data
+   * @param side Leg to close
+   * @param threadId Thread ID for locking
+   * @param skipLocking Whether to skip acquiring the symbol lock (if already held by caller)
    */
   private async closePosition(
     position: PairedPosition,
     side: 'LONG' | 'SHORT',
-  ): Promise<{ success: boolean; error?: string }> {
+    threadId?: string,
+    skipLocking: boolean = false,
+  ): Promise<{ success: boolean; error?: string; fillPrice?: number }> {
     const risk = side === 'LONG' ? position.longRisk : position.shortRisk;
     const exchange =
       side === 'LONG' ? position.longExchange : position.shortExchange;
@@ -564,14 +605,13 @@ export class LiquidationMonitorService implements ILiquidationMonitor {
       return { success: false, error: `No adapter for ${exchange}` };
     }
 
-    const threadId = this.executionLockService?.generateThreadId() || `liq-${Date.now()}`;
+    const effectiveThreadId = threadId || this.executionLockService?.generateThreadId() || `liq-${Date.now()}`;
 
     // SYMBOL-LEVEL LOCK: Prevent concurrent execution on the same symbol
-    // This also prevents the strategy from opening new positions while we are closing
-    if (this.executionLockService) {
+    if (this.executionLockService && !skipLocking) {
       const lockAcquired = this.executionLockService.tryAcquireSymbolLock(
         position.symbol,
-        threadId,
+        effectiveThreadId,
         `emergency-close-${side}`
       );
       
@@ -587,7 +627,8 @@ export class LiquidationMonitorService implements ILiquidationMonitor {
         const isLocked = this.executionLockService.hasActiveOrder(exchange, position.symbol, side);
         if (isLocked) {
           this.logger.debug(`⚠️ Skipping emergency close for ${position.symbol} ${side} on ${exchange}: order already active`);
-          if (this.executionLockService) this.executionLockService.releaseSymbolLock(position.symbol, threadId);
+          // Don't release lock here if we are skipping locking (caller owns it)
+          if (!skipLocking) this.executionLockService.releaseSymbolLock(position.symbol, effectiveThreadId);
           return { success: true };
         }
       }
@@ -626,14 +667,15 @@ export class LiquidationMonitorService implements ILiquidationMonitor {
             }
           }
 
-          // Create limit order to close position at mark price (opposite side, reduceOnly)
+          // Create market order to close position immediately (opposite side, reduceOnly)
+          // For emergency closes, we use MARKET to ensure execution in fast-moving markets
           const closeOrder = new PerpOrderRequest(
             position.symbol,
             closeSide,
-            OrderType.LIMIT,
+            OrderType.MARKET,
             risk.positionSize,
-            markPrice,
-            TimeInForce.GTC,
+            undefined, // Price determined by adapter for MARKET orders
+            undefined, // TIF determined by adapter for MARKET orders
             true, // reduceOnly
           );
 
@@ -661,7 +703,10 @@ export class LiquidationMonitorService implements ILiquidationMonitor {
                 true
               );
             }
-            return { success: true };
+            return { 
+              success: true, 
+              fillPrice: response.averageFillPrice || markPrice 
+            };
           } else {
             if (this.executionLockService) {
               this.executionLockService.updateOrderStatus(

@@ -594,6 +594,7 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
               Math.abs(size) > 0 ? positionValue / Math.abs(size) : entryPrice;
 
             const marginUsed = parseFloat(assetPos.position.marginUsed || '0');
+            const leverage = marginUsed > 0 ? positionValue / marginUsed : undefined;
             const liquidationPrice =
               parseFloat(assetPos.position.liquidationPx || '0') || undefined;
 
@@ -638,7 +639,7 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
                 entryPrice,
                 markPrice,
                 unrealizedPnl,
-                undefined,
+                leverage,
                 liquidationPrice,
                 marginUsed,
                 undefined,

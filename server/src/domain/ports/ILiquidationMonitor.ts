@@ -45,6 +45,10 @@ export interface EmergencyCloseResult {
   shortCloseSuccess: boolean;
   longCloseError?: string;
   shortCloseError?: string;
+  longEntryPrice?: number;
+  longClosePrice?: number;
+  shortEntryPrice?: number;
+  shortClosePrice?: number;
   closedAt: Date;
 }
 

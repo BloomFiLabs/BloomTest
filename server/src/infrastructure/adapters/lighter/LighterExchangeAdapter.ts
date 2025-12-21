@@ -1480,9 +1480,19 @@ export class LighterExchangeAdapter
             ),
           );
 
-          // Lighter API doesn't provide leverage, liquidation price, or margin used in positions response
-          // These can be calculated or fetched separately if needed
-          const leverage = undefined; // Not provided by API
+          // Lighter uses cross-margin. Leverage for a position can be estimated as PositionValue / AccountBalance
+          let leverage: number | undefined = undefined;
+          try {
+            const balance = await this.getBalance();
+            if (balance > 0) {
+              leverage = Math.abs(absSize * markPrice) / balance;
+              // Cap at 20x for sanity in case of very low balance
+              leverage = Math.min(20, Math.max(1, leverage));
+            }
+          } catch (e) {
+            // Ignore balance fetch errors for leverage estimation
+          }
+          
           const liquidationPrice = undefined; // Not provided by API
           const marginUsed = undefined; // Not provided by API
 
