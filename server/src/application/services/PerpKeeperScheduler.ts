@@ -2592,24 +2592,192 @@ export class PerpKeeperScheduler implements OnModuleInit {
       const orderResult = await adapter.placeOrder(openOrder);
 
       if (orderResult && orderResult.orderId) {
-        // Wait a bit and check if position opened
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        const updatedPositions = await adapter.getPositions();
-        const positionOpened = updatedPositions.some(
-          (p) =>
-            p.symbol === position.symbol &&
-            p.exchangeType === missingExchange &&
-            p.side === missingSide &&
-            Math.abs(p.size) > 0.0001,
+        // ================================================================================
+        // CRITICAL: Use the same order fill logic as initial order placement
+        // 1. Register order with ExecutionLockService so MakerEfficiencyService can reprice it
+        // 2. Use the same wait/poll logic with exponential backoff
+        // 3. MakerEfficiencyService will automatically reprice to stay competitive
+        // ================================================================================
+
+        const orderSide = missingSide === OrderSide.LONG ? 'LONG' : 'SHORT';
+        const threadId = this.executionLockService?.generateThreadId() || `single-leg-${Date.now()}`;
+
+        // Register the order so MakerEfficiencyService can reprice it
+        if (this.executionLockService) {
+          this.executionLockService.registerOrderPlacing(
+            orderResult.orderId,
+            position.symbol,
+            missingExchange,
+            orderSide,
+            threadId,
+            position.size,
+            markPrice,
+          );
+          this.executionLockService.updateOrderStatus(
+            missingExchange,
+            position.symbol,
+            orderSide,
+            'WAITING_FILL',
+            orderResult.orderId,
+            markPrice,
+            false, // not reduceOnly
+          );
+        }
+
+        this.logger.log(
+          `⏳ Waiting for ${missingSide} order ${orderResult.orderId} to fill on ${missingExchange} ` +
+          `(MakerEfficiencyService will reprice to stay competitive)...`,
         );
 
-        if (positionOpened) {
-          this.logger.log(
-            `✅ Opened missing ${missingSide} side for ${position.symbol} on ${missingExchange}`,
+        // Use the same wait logic as OrderExecutor - exponential backoff with max retries
+        // This matches the initial order placement behavior
+        const MAX_RETRIES = 15; // Same as OrderExecutor default
+        const BASE_POLL_INTERVAL_MS = 2000; // Same as OrderExecutor
+        const MAX_BACKOFF_MS = this.strategyConfig.maxBackoffDelayOpening || 30000;
+        const startTime = Date.now();
+        let positionOpened = false;
+
+        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+          // Wait with exponential backoff (except first attempt)
+          if (attempt > 0) {
+            const exponentialDelay = BASE_POLL_INTERVAL_MS * Math.pow(2, attempt - 1);
+            const backoffDelay = Math.min(exponentialDelay, MAX_BACKOFF_MS);
+            this.logger.debug(
+              `   Waiting ${(backoffDelay / 1000).toFixed(1)}s before attempt ${attempt + 1}/${MAX_RETRIES}...`,
+            );
+            await new Promise((resolve) => setTimeout(resolve, backoffDelay));
+          }
+
+          // Check if position opened
+          const updatedPositions = await adapter.getPositions();
+          positionOpened = updatedPositions.some(
+            (p) =>
+              this.normalizeSymbol(p.symbol) === this.normalizeSymbol(position.symbol) &&
+              p.exchangeType === missingExchange &&
+              p.side === missingSide &&
+              Math.abs(p.size) > 0.0001,
           );
-          // Reset retry count on success (mutex protected)
-          await this.clearRetryOnSuccess(retryKey);
-          return true;
+
+          if (positionOpened) {
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+            this.logger.log(
+              `✅ Opened missing ${missingSide} side for ${position.symbol} on ${missingExchange} ` +
+              `(filled after ${elapsed}s, ${attempt + 1} checks)`,
+            );
+            // Update registry to FILLED
+            if (this.executionLockService) {
+              this.executionLockService.updateOrderStatus(
+                missingExchange,
+                position.symbol,
+                orderSide,
+                'FILLED',
+                orderResult.orderId,
+              );
+            }
+            // Reset retry count on success (mutex protected)
+            await this.clearRetryOnSuccess(retryKey);
+            return true;
+          }
+
+          // Check order status
+          try {
+            const orderStatus = await adapter.getOrderStatus(orderResult.orderId, position.symbol);
+            if (orderStatus.isFilled()) {
+              this.logger.log(
+                `✅ Order ${orderResult.orderId} filled - missing ${missingSide} side opened for ${position.symbol}`,
+              );
+              if (this.executionLockService) {
+                this.executionLockService.updateOrderStatus(
+                  missingExchange,
+                  position.symbol,
+                  orderSide,
+                  'FILLED',
+                  orderResult.orderId,
+                );
+              }
+              await this.clearRetryOnSuccess(retryKey);
+              return true;
+            }
+            if (orderStatus.isCancelled() || orderStatus.isRejected()) {
+              this.logger.warn(
+                `⚠️ Order ${orderResult.orderId} was ${orderStatus.status} - will retry on next cycle`,
+              );
+              if (this.executionLockService) {
+                this.executionLockService.updateOrderStatus(
+                  missingExchange,
+                  position.symbol,
+                  orderSide,
+                  'CANCELLED',
+                  orderResult.orderId,
+                );
+              }
+              break;
+            }
+          } catch (statusError: any) {
+            this.logger.debug(`Could not check order status: ${statusError.message}`);
+          }
+
+          const elapsed = Math.round((Date.now() - startTime) / 1000);
+          this.logger.debug(
+            `⏳ Order ${orderResult.orderId} still pending on ${missingExchange} ` +
+            `(attempt ${attempt + 1}/${MAX_RETRIES}, ${elapsed}s elapsed)...`,
+          );
+        }
+
+        // Order didn't fill after all retries - CANCEL IT
+        const totalTime = Date.now() - startTime;
+        if (!positionOpened) {
+          this.logger.warn(
+            `⏰ Order ${orderResult.orderId} did not fill after ${MAX_RETRIES} attempts ` +
+            `(~${Math.round(totalTime / 1000)}s) - cancelling to prevent zombie order`,
+          );
+          try {
+            await adapter.cancelOrder(orderResult.orderId, position.symbol);
+            this.logger.log(`🗑️ Cancelled unfilled order ${orderResult.orderId}`);
+          } catch (cancelError: any) {
+            this.logger.warn(`Could not cancel order ${orderResult.orderId}: ${cancelError.message}`);
+          }
+
+          // Update registry to CANCELLED
+          if (this.executionLockService) {
+            this.executionLockService.updateOrderStatus(
+              missingExchange,
+              position.symbol,
+              orderSide,
+              'CANCELLED',
+              orderResult.orderId,
+            );
+          }
+
+          // Wait a moment for cancellation to process
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+
+          // Final check - order might have filled just as we cancelled
+          const finalPositions = await adapter.getPositions();
+          const finalCheck = finalPositions.some(
+            (p) =>
+              this.normalizeSymbol(p.symbol) === this.normalizeSymbol(position.symbol) &&
+              p.exchangeType === missingExchange &&
+              p.side === missingSide &&
+              Math.abs(p.size) > 0.0001,
+          );
+
+          if (finalCheck) {
+            this.logger.log(
+              `✅ Position opened just before cancellation - ${missingSide} side for ${position.symbol} is now open`,
+            );
+            if (this.executionLockService) {
+              this.executionLockService.updateOrderStatus(
+                missingExchange,
+                position.symbol,
+                orderSide,
+                'FILLED',
+                orderResult.orderId,
+              );
+            }
+            await this.clearRetryOnSuccess(retryKey);
+            return true;
+          }
         }
       }
 
@@ -2628,6 +2796,7 @@ export class PerpKeeperScheduler implements OnModuleInit {
 
   /**
    * Close a single-leg position with progressive price improvement
+   * CRITICAL: First cancels any pending orders on OTHER exchanges to prevent zombie orders
    */
   private async closeSingleLegPosition(position: PerpPosition): Promise<void> {
     try {
@@ -2638,6 +2807,45 @@ export class PerpKeeperScheduler implements OnModuleInit {
         this.logger.warn(`No adapter found for ${position.exchangeType}`);
         return;
       }
+
+      // ================================================================================
+      // CRITICAL: Cancel any pending orders on OTHER exchanges for this symbol first!
+      // This prevents zombie orders from being left behind when we close this position
+      // ================================================================================
+      const otherExchanges = [ExchangeType.HYPERLIQUID, ExchangeType.LIGHTER, ExchangeType.ASTER]
+        .filter(e => e !== position.exchangeType);
+
+      for (const otherExchange of otherExchanges) {
+        const otherAdapter = this.keeperService.getExchangeAdapter(otherExchange);
+        if (!otherAdapter || !otherAdapter.getOpenOrders) continue;
+
+        try {
+          const openOrders = await otherAdapter.getOpenOrders();
+          if (!openOrders) continue;
+          const matchingOrders = openOrders.filter(order => 
+            this.normalizeSymbol(order.symbol) === this.normalizeSymbol(position.symbol)
+          );
+
+          for (const order of matchingOrders) {
+            this.logger.warn(
+              `🗑️ Cancelling pending order ${order.orderId} for ${order.symbol} on ${otherExchange} ` +
+              `before closing single-leg on ${position.exchangeType}`,
+            );
+            try {
+              await otherAdapter.cancelOrder(order.orderId, order.symbol);
+              this.logger.log(`✅ Cancelled order ${order.orderId} on ${otherExchange}`);
+            } catch (cancelError: any) {
+              this.logger.warn(`Could not cancel order ${order.orderId}: ${cancelError.message}`);
+            }
+          }
+        } catch (orderError: any) {
+          this.logger.debug(`Could not check orders on ${otherExchange}: ${orderError.message}`);
+        }
+      }
+
+      // Wait a moment for cancellations to process
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // ================================================================================
 
       // CRITICAL: Verify position still exists before attempting to close
       const currentPositions = await adapter.getPositions();
