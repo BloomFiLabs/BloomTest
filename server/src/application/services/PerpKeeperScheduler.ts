@@ -562,14 +562,16 @@ export class PerpKeeperScheduler implements OnModuleInit {
       this.symbols = discoveredSymbols.filter((s) => !this.isBlacklisted(s));
       this.lastDiscoveryTime = now;
 
-      // Start order book collection for discovered symbols
-      if (this.orderBookCollector && this.symbols.length > 0) {
-        this.logger.log(`📊 Starting order book collection for ${this.symbols.length} symbols`);
-        if (!this.orderBookCollector.isCollectingStatus()) {
-          this.orderBookCollector.startCollection(this.symbols);
-        } else {
-          this.orderBookCollector.addSymbols(this.symbols);
-        }
+      // Start order book collection for discovered symbols (after a delay to give WS time to warm up)
+      if (this.orderBookCollector && this.symbols.length > 0 && !this.orderBookCollector.isCollectingStatus()) {
+        setTimeout(() => {
+          if (this.orderBookCollector && this.symbols.length > 0) {
+            this.logger.log(`📊 Starting background order book collection for ${this.symbols.length} symbols`);
+            this.orderBookCollector.startCollection(this.symbols);
+          }
+        }, 30000); // 30 second delay
+      } else if (this.orderBookCollector && this.symbols.length > 0) {
+        this.orderBookCollector.addSymbols(this.symbols);
       }
 
       // Removed discovery logs - only execution logs shown

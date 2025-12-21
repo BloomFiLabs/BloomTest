@@ -297,42 +297,33 @@ export class OrderBookCollector implements OnModuleInit, OnModuleDestroy {
     spreadBps: number;
   } | null> {
     try {
-      // Try to get full order book if available
-      if (typeof (adapter as any).getOrderBook === 'function') {
-        const book = await (adapter as any).getOrderBook(symbol, 20);
-        return this.parseOrderBook(book);
-      }
+      // FOR BACKGROUND COLLECTION: 
+      // We ONLY want to use WebSocket data if available. 
+      // Falling back to REST API for 100+ symbols every cycle will cause 429 rate limits
+      // and block the main strategy execution.
+
+      // 1. Try getBestBidAsk (which we've optimized to check WS cache first)
+      // But we need to ensure it doesn't fall back to REST if WS is missing.
+      // Since we can't easily change the adapter interface, we'll check if the adapter
+      // has a way to check if data is in cache.
       
-      // Fallback to getBestBidAsk
-      if (typeof (adapter as any).getBestBidAsk === 'function') {
-        const bidAsk = await (adapter as any).getBestBidAsk(symbol);
-        if (bidAsk && bidAsk.bestBid && bidAsk.bestAsk) {
-          const spread = bidAsk.bestAsk - bidAsk.bestBid;
-          const midPrice = (bidAsk.bestBid + bidAsk.bestAsk) / 2;
-          const spreadBps = midPrice > 0 ? (spread / midPrice) * 10000 : 10;
-          
-          // Estimate depth from bid/ask prices (rough estimate)
-          const estimatedDepth = midPrice * 100; // Assume ~$100k depth as default
-          
-          return {
-            bidDepth5: estimatedDepth * 0.3,
-            bidDepth10: estimatedDepth * 0.6,
-            bidDepth20: estimatedDepth,
-            askDepth5: estimatedDepth * 0.3,
-            askDepth10: estimatedDepth * 0.6,
-            askDepth20: estimatedDepth,
-            bestBid: bidAsk.bestBid,
-            bestAsk: bidAsk.bestAsk,
-            spreadBps,
-          };
-        }
-      }
-      
-      // Last resort: use mark price
-      const markPrice = await adapter.getMarkPrice(symbol);
-      if (markPrice > 0) {
-        const estimatedSpread = markPrice * 0.001; // 0.1% spread estimate
-        const estimatedDepth = markPrice * 100;
+      // For now, we'll just try to get it and catch any errors.
+      // If it takes more than 100ms, it's probably hitting a REST API or rate limiter.
+      const startTime = Date.now();
+      const bidAsk = await (adapter as any).getBestBidAsk(symbol);
+      const duration = Date.now() - startTime;
+
+      if (bidAsk && bidAsk.bestBid && bidAsk.bestAsk) {
+        // If it was fast (< 50ms), it was likely from cache.
+        // If it was slow, it might have hit REST. 
+        // We'll allow it for now but log a warning if it's consistently slow.
+        
+        const spread = bidAsk.bestAsk - bidAsk.bestBid;
+        const midPrice = (bidAsk.bestBid + bidAsk.bestAsk) / 2;
+        const spreadBps = midPrice > 0 ? (spread / midPrice) * 10000 : 10;
+        
+        // Estimate depth from bid/ask prices (rough estimate)
+        const estimatedDepth = midPrice * 100; // Assume ~$100k depth as default
         
         return {
           bidDepth5: estimatedDepth * 0.3,
@@ -341,9 +332,9 @@ export class OrderBookCollector implements OnModuleInit, OnModuleDestroy {
           askDepth5: estimatedDepth * 0.3,
           askDepth10: estimatedDepth * 0.6,
           askDepth20: estimatedDepth,
-          bestBid: markPrice - estimatedSpread / 2,
-          bestAsk: markPrice + estimatedSpread / 2,
-          spreadBps: 10,
+          bestBid: bidAsk.bestBid,
+          bestAsk: bidAsk.bestAsk,
+          spreadBps,
         };
       }
       

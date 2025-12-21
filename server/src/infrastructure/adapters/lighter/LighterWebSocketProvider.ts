@@ -276,8 +276,8 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
     }
 
     // Handle orderbook updates
-    if (message.channel?.startsWith('orderbook/') && message.data) {
-      const marketIndex = parseInt(message.channel.split('/')[1]);
+    if ((message.channel?.startsWith('orderbook/') || message.channel?.startsWith('orderbook:')) && message.data) {
+      const marketIndex = parseInt(message.channel.includes(':') ? message.channel.split(':')[1] : message.channel.split('/')[1]);
       this.orderbookCache.set(marketIndex, {
         bids: message.data.bids || [],
         asks: message.data.asks || []
@@ -321,7 +321,7 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
     if (this.isConnected && this.ws) {
       const subscribeMessage = {
         type: 'subscribe',
-        channel: `orderbook/${marketIndex}`,
+        channel: `orderbook:${marketIndex}`,
       };
       this.ws.send(JSON.stringify(subscribeMessage));
     }
@@ -387,7 +387,7 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
     try {
       const subscribeMessage = {
         type: 'subscribe',
-        channel: `market_stats/${marketIndex}`,
+        channel: `market_stats:${marketIndex}`,
       };
 
       const messageStr = JSON.stringify(subscribeMessage);
@@ -400,7 +400,7 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
 
       this.ws.send(messageStr);
       this.logger.log(
-        `📡 LIGHTER: Subscribed to market ${marketIndex} (channel: market_stats/${marketIndex})`,
+        `📡 LIGHTER: Subscribed to market ${marketIndex} (channel: market_stats:${marketIndex})`,
       );
       this.logger.debug(`Subscription message: ${messageStr}`);
     } catch (error: any) {

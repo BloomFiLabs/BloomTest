@@ -1117,13 +1117,17 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
         `Could not parse order book data for ${symbol}: ${JSON.stringify(l2Book).substring(0, 200)}`,
       );
     } catch (error: any) {
-      this.logger.error(
-        `CRITICAL: Failed to get order book for ${symbol}: ${error.message}. Cannot execute market orders safely without order book data.`,
-      );
+      // Only log as error if it's not a normal empty book or expected failure
+      if (error.message?.includes('is empty') || error.message?.includes('unavailable') || error.message?.includes('Could not parse')) {
+        this.logger.debug(`Order book for ${symbol} unavailable: ${error.message}`);
+      } else {
+        this.logger.warn(
+          `Failed to get order book for ${symbol}: ${error.message}`,
+        );
+      }
+      
       // Re-throw the error - don't fall back to mark price as slippage could wipe out gains
-      throw new Error(
-        `Order book unavailable for ${symbol}: ${error.message}. Manual intervention required.`,
-      );
+      throw error;
     }
   }
 
