@@ -559,8 +559,8 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
 
   async getPosition(symbol: string): Promise<PerpPosition | null> {
     // getPositions already uses callInfo
-    const positions = await this.getPositions();
-    return positions.find((p) => p.symbol === symbol) || null;
+      const positions = await this.getPositions();
+      return positions.find((p) => p.symbol === symbol) || null;
   }
 
   async getPositions(): Promise<PerpPosition[]> {
@@ -1149,7 +1149,7 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
       } else {
         this.logger.warn(
           `Failed to get order book for ${symbol}: ${error.message}`,
-        );
+      );
       }
       
       // Re-throw the error - don't fall back to mark price as slippage could wipe out gains
@@ -1884,9 +1884,9 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
 
       // Step 1: Ensure funds are in perp account (withdrawals come from perp, not spot)
       // According to Hyperliquid: "If you have USDC in your Spot Balances, transfer to Perps to make it available to withdraw"
-    try {
+      try {
       const clearinghouseState = await this.callInfo(this.WEIGHT_INFO_LIGHT, () => this.infoClient.clearinghouseState({
-        user: this.walletAddress,
+          user: this.walletAddress,
       }));
         const marginSummary = clearinghouseState.marginSummary;
         const accountValue = parseFloat(marginSummary.accountValue || '0');
@@ -2068,9 +2068,9 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
           `(${new Date(start).toISOString()} to ${new Date(end).toISOString()})`,
       );
 
-    // Call the userFunding endpoint
+      // Call the userFunding endpoint
     const response = await this.callInfo(this.WEIGHT_INFO_HEAVY, () => axios.post(
-      `${this.config.baseUrl}/info`,
+        `${this.config.baseUrl}/info`,
         {
           type: 'userFunding',
           user: this.walletAddress,

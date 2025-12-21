@@ -244,16 +244,26 @@ export class PerpKeeperScheduler implements OnModuleInit {
       return [];
     }
 
-    // Group positions by symbol
+    // Group positions by NORMALIZED symbol to handle different formats across exchanges
+    // e.g., "MEGA" (Hyperliquid) vs "MEGA-USD" (Lighter) should be grouped together
     const positionsBySymbol = new Map<string, PerpPosition[]>();
     for (const position of positions) {
-      if (!positionsBySymbol.has(position.symbol)) {
-        positionsBySymbol.set(position.symbol, []);
+      const normalizedSymbol = this.normalizeSymbol(position.symbol);
+      if (!positionsBySymbol.has(normalizedSymbol)) {
+        positionsBySymbol.set(normalizedSymbol, []);
       }
-      positionsBySymbol.get(position.symbol)!.push(position);
+      positionsBySymbol.get(normalizedSymbol)!.push(position);
     }
 
     const singleLegPositions: PerpPosition[] = [];
+
+    // Log all positions for debugging
+    this.logger.debug(
+      `🔍 Analyzing ${positions.length} positions for single-leg detection: ` +
+      `${Array.from(positionsBySymbol.entries()).map(([sym, pos]) => 
+        `${sym}: ${pos.map(p => `${p.side} on ${p.exchangeType}`).join(', ')}`
+      ).join(' | ')}`
+    );
 
     for (const [symbol, symbolPositions] of positionsBySymbol) {
       // For arbitrage, we need both LONG and SHORT positions on DIFFERENT exchanges
@@ -276,6 +286,13 @@ export class PerpKeeperScheduler implements OnModuleInit {
           !longPositions.some(
             (longPos) => longPos.exchangeType === shortPos.exchangeType,
           ),
+      );
+
+      // Log the analysis for this symbol
+      this.logger.debug(
+        `📊 ${symbol}: LONGs=${longPositions.length} (${longPositions.map(p => p.exchangeType).join(',')}), ` +
+        `SHORTs=${shortPositions.length} (${shortPositions.map(p => p.exchangeType).join(',')}), ` +
+        `hasLongOnDiffExch=${hasLongOnDifferentExchange}, hasShortOnDiffExch=${hasShortOnDifferentExchange}`
       );
 
       // If we have LONG but no SHORT on a different exchange, all LONG positions are single-leg
@@ -2322,33 +2339,97 @@ export class PerpKeeperScheduler implements OnModuleInit {
    *
    * IMPORTANT: Checks for existing pending orders before placing new ones to prevent
    * duplicate orders (e.g., 4 Lighter orders for 1 Hyperliquid position)
+   * 
+   * CRITICAL FIX: Uses the ORIGINAL opportunity's exchange assignments, not current funding rates.
+   * Funding rates change constantly - we must honor the original arbitrage plan.
    */
   private async tryOpenMissingSide(position: PerpPosition): Promise<boolean> {
     try {
-      // Find opportunity for this symbol to determine which exchange should have the missing side
-      const comparison = await this.orchestrator.compareFundingRates(
-        position.symbol,
-      );
-      if (!comparison || comparison.rates.length < 2) {
-        return false;
+      // First, check if we have stored retry info with the original exchange assignments
+      // This is crucial - we must use the ORIGINAL opportunity's exchanges, not recalculate
+      let expectedLongExchange: ExchangeType | undefined;
+      let expectedShortExchange: ExchangeType | undefined;
+      
+      // Look for existing retry info that tells us the original exchange assignments
+      for (const [, retryInfo] of this.singleLegRetries.entries()) {
+        if (
+          retryInfo.longExchange === position.exchangeType ||
+          retryInfo.shortExchange === position.exchangeType
+        ) {
+          // Found the original opportunity info - use those exchanges
+          expectedLongExchange = retryInfo.longExchange;
+          expectedShortExchange = retryInfo.shortExchange;
+          this.logger.debug(
+            `📋 Using stored retry info for ${position.symbol}: ` +
+            `LONG on ${expectedLongExchange}, SHORT on ${expectedShortExchange}`
+          );
+          break;
+        }
+      }
+      
+      // If no retry info, we need to determine exchanges based on current position
+      // The existing position tells us ONE exchange - the missing side is on the OTHER exchange
+      if (!expectedLongExchange || !expectedShortExchange) {
+        // Find all available exchanges for this symbol
+        const comparison = await this.orchestrator.compareFundingRates(
+          position.symbol,
+        );
+        if (!comparison || comparison.rates.length < 2) {
+          return false;
+        }
+        
+        // Get all exchanges that support this symbol
+        const availableExchanges = comparison.rates.map(r => r.exchange);
+        
+        // The position is on one exchange - find a DIFFERENT exchange for the missing side
+        const otherExchanges = availableExchanges.filter(e => e !== position.exchangeType);
+        if (otherExchanges.length === 0) {
+          this.logger.warn(
+            `No other exchanges available for ${position.symbol} to open missing side`
+          );
+          return false;
+        }
+        
+        // Use the first other exchange (prefer Hyperliquid if available)
+        const missingExchangeCandidate = otherExchanges.includes(ExchangeType.HYPERLIQUID)
+          ? ExchangeType.HYPERLIQUID
+          : otherExchanges[0];
+        
+        // Determine which side is missing based on position
+        if (position.side === OrderSide.LONG) {
+          // We have LONG, missing SHORT - SHORT should be on a different exchange
+          expectedLongExchange = position.exchangeType;
+          expectedShortExchange = missingExchangeCandidate;
+        } else {
+          // We have SHORT, missing LONG - LONG should be on a different exchange
+          expectedShortExchange = position.exchangeType;
+          expectedLongExchange = missingExchangeCandidate;
+        }
+        
+        this.logger.log(
+          `📋 Determined exchanges for ${position.symbol}: ` +
+          `LONG on ${expectedLongExchange}, SHORT on ${expectedShortExchange} ` +
+          `(existing position: ${position.side} on ${position.exchangeType})`
+        );
       }
 
-      // Determine which exchange should have the missing side based on funding rates
-      // LONG on exchange with lowest rate, SHORT on exchange with highest rate
-      const sortedRates = [...comparison.rates].sort(
-        (a, b) => a.currentRate - b.currentRate,
-      );
-      const expectedLongExchange = sortedRates[0].exchange;
-      const expectedShortExchange =
-        sortedRates[sortedRates.length - 1].exchange;
-
       // Determine missing exchange and side
+      // CRITICAL: The missing side MUST be on a DIFFERENT exchange than the existing position
       const missingExchange =
         position.side === OrderSide.LONG
           ? expectedShortExchange
           : expectedLongExchange;
       const missingSide =
         position.side === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG;
+      
+      // SAFETY CHECK: Ensure we're not placing on the same exchange
+      if (missingExchange === position.exchangeType) {
+        this.logger.error(
+          `🚨 BUG DETECTED: Attempted to place ${missingSide} on same exchange (${missingExchange}) ` +
+          `as existing ${position.side} position. This would NOT be delta-neutral arbitrage!`
+        );
+        return false;
+      }
 
       // Get retry key
       const retryKey = this.getRetryKey(

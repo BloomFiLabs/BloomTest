@@ -140,6 +140,16 @@ export class SingleLegHandler {
       const missingSide =
         position.side === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG;
 
+      // SAFETY CHECK: Ensure we're not placing on the same exchange as existing position
+      if (missingExchange === position.exchangeType) {
+        this.logger.error(
+          `🚨 BUG DETECTED: Attempted to place ${missingSide} on same exchange (${missingExchange}) ` +
+          `as existing ${position.side} position for ${position.symbol}. Closing single-leg instead.`
+        );
+        await this.closeSingleLegPosition(position, adapters, result);
+        return { success: false, closed: true };
+      }
+
       this.logger.log(
         `🔄 Retry ${retryInfo.retryCount + 1}/5: Attempting to open missing ${missingSide} side ` +
           `for ${position.symbol} on ${missingExchange}...`,
