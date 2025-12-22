@@ -57,6 +57,7 @@ import {
 } from '../events/ArbitrageEvents';
 import { DiagnosticsService } from '../../infrastructure/services/DiagnosticsService';
 import { Percentage } from '../value-objects/Percentage';
+import type { IFundingRatePredictionService } from '../ports/IFundingRatePredictor';
 
 /**
  * Execution plan for an arbitrage opportunity
@@ -176,6 +177,9 @@ export class FundingArbitrageStrategy {
     @Inject('IOptimalLeverageService')
     private readonly optimalLeverageService?: IOptimalLeverageService,
     @Optional() private readonly diagnosticsService?: DiagnosticsService,
+    @Optional()
+    @Inject('IFundingRatePredictionService')
+    private readonly predictionService?: IFundingRatePredictionService,
   ) {
     // Use leverage from StrategyConfig
     // Leverage improves net returns: 2x leverage = 2x funding returns, but fees stay same %
@@ -4286,10 +4290,10 @@ export class FundingArbitrageStrategy {
       shortExchange,
     );
 
-    // Default values for position management (not configurable via StrategyConfig yet)
-    const closeThreshold = -0.0005; // Close if spread drops below -0.05%
-    const minHoldHours = 4; // Minimum 4 hours before considering close
-    const churnCostMultiplier = 2.0; // Require 2x the churn cost to justify switching
+    // Default values for position management (synchronized with checkSpreadFlips in scheduler)
+    const closeThreshold = 0.0000; // Close as soon as spread is negative (0.00%)
+    const minHoldHours = 1; // Reduced minimum hold time to 1 hour to allow faster exit from flips
+    const churnCostMultiplier = 1.5; // Slightly lower threshold for replacement switching (was 2.0)
 
     // Calculate churn cost for this position pair (fees to close + open)
     const longFeeRate = this.strategyConfig.getExchangeFeeRate(longExchange);
@@ -4361,7 +4365,49 @@ export class FundingArbitrageStrategy {
       };
     }
 
-    // Case 5: Spread is at or below close threshold - close position
+    // Case 5: Spread is at or below close threshold - check prediction before closing
+    // If prediction is strongly positive, we might stay to avoid churn
+    if (this.predictionService) {
+      try {
+        const spreadPrediction = await this.predictionService.getSpreadPrediction(
+          symbol,
+          longExchange,
+          shortExchange,
+        );
+
+        const predictedSpread = spreadPrediction.predictedSpread;
+        const confidence = spreadPrediction.confidence;
+
+        // Benefit of staying = predicted spread * confidence
+        const hourlyBenefit = predictedSpread * confidence;
+        
+        // Cost of staying = current spread (negative)
+        const currentLoss = Math.abs(currentSpread);
+
+        // If future benefit > current loss + churn cost, it's mathematically better to stay
+        // We look at a 4-hour window for the "bounce back" to be conservative
+        const windowHours = 4;
+        const totalFutureBenefit = hourlyBenefit * windowHours;
+        const totalCostOfStayingAndChurning = (currentLoss * windowHours) + churnCost;
+
+        if (predictedSpread > 0 && totalFutureBenefit > totalCostOfStayingAndChurning) {
+          this.logger.log(
+            `🔒 KEEPING negative position ${symbol} due to recovery prediction: ` +
+            `Predicted spread ${(predictedSpread * 100).toFixed(4)}% (conf ${(confidence * 100).toFixed(0)}%) ` +
+            `Benefit $${totalFutureBenefit.toFixed(4)} > Cost+Churn $${totalCostOfStayingAndChurning.toFixed(4)}`
+          );
+          return {
+            shouldKeep: true,
+            reason: `${symbol} spread (${(currentSpread * 100).toFixed(4)}%) is negative but predicted to recover: ` +
+                    `${(predictedSpread * 100).toFixed(4)}% (confidence: ${(confidence * 100).toFixed(0)}%)`,
+          };
+        }
+      } catch (error: any) {
+        this.logger.debug(`Prediction failed for ${symbol} keep check: ${error.message}`);
+      }
+    }
+
+    // Default: Spread is at or below close threshold - close position
     return {
       shouldKeep: false,
       reason: `${symbol} spread (${(currentSpread * 100).toFixed(4)}%) <= close threshold (${(closeThreshold * 100).toFixed(4)}%) - closing`,

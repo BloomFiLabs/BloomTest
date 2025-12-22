@@ -102,7 +102,10 @@ export class LighterFundingDataProvider
 
           // Populate cache with all funding rates
           for (const rate of response.data.funding_rates) {
-            this.fundingRatesCache.set(rate.market_id, rate.rate);
+            // Lighter API returns daily funding rates (24h), convert to hourly for consistency
+            // Most other exchanges (Hyperliquid, etc.) provide hourly rates
+            const hourlyRate = rate.rate / 24;
+            this.fundingRatesCache.set(rate.market_id, hourlyRate);
           }
 
           this.lastCacheUpdate = Date.now();

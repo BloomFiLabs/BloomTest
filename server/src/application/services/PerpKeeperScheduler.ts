@@ -116,6 +116,9 @@ export class PerpKeeperScheduler implements OnModuleInit {
     @Optional() private readonly marketStateService?: MarketStateService,
     @Optional() private readonly orderBookCollector?: OrderBookCollector,
     @Optional() private readonly balanceManager?: BalanceManager,
+    @Optional()
+    @Inject('IFundingRatePredictionService')
+    private readonly predictionService?: any, // IFundingRatePredictionService
   ) {
     // Initialize orchestrator with exchange adapters
     const adapters = this.keeperService.getExchangeAdapters();
@@ -2544,34 +2547,84 @@ export class PerpKeeperScheduler implements OnModuleInit {
 
           // SPREAD FLIP DETECTION:
           // If spread is negative, we're losing money on funding
-          // Use a small threshold to avoid closing on tiny fluctuations
-          const SPREAD_FLIP_THRESHOLD = -0.0001; // -0.01% threshold (slightly negative)
-          const SPREAD_WARNING_THRESHOLD = 0.0001; // +0.01% warning threshold
-
+          // We want to "nope out" if the loss exceeds the churn cost or if it's unlikely to flip back
+          const SPREAD_FLIP_THRESHOLD = 0.0000; // 0.00% threshold
+          
           if (currentSpread < SPREAD_FLIP_THRESHOLD) {
-            // SPREAD HAS FLIPPED - Close both positions!
-            this.logger.error(
-              `🚨 SPREAD FLIP DETECTED for ${symbol}! ` +
-              `Current spread: ${spreadPercent.toFixed(4)}% ` +
-              `(LONG on ${longPosition.exchangeType} @ ${(longExchangeRate.currentRate * 100).toFixed(4)}%, ` +
-              `SHORT on ${shortPosition.exchangeType} @ ${(shortExchangeRate.currentRate * 100).toFixed(4)}%) ` +
-              `- CLOSING BOTH POSITIONS`
-            );
+            // SPREAD HAS FLIPPED - Check prediction before closing
+            let shouldExit = true;
+            let predictionReason = 'No prediction available';
 
-            // Record to diagnostics
-            if (this.diagnosticsService) {
-              this.diagnosticsService.recordError({
-                type: 'SPREAD_FLIP_EXIT',
-                exchange: longPosition.exchangeType,
-                message: `Spread flipped for ${symbol}: ${spreadPercent.toFixed(4)}%. Closing positions.`,
-                timestamp: new Date(),
-              });
+            if (this.predictionService) {
+              try {
+                const spreadPrediction = await this.predictionService.getSpreadPrediction(
+                  symbol,
+                  longPosition.exchangeType,
+                  shortPosition.exchangeType
+                );
+
+                const predictedSpread = spreadPrediction.predictedSpread;
+                const confidence = spreadPrediction.confidence;
+                
+                // Calculate churn cost (fees + slippage to close and potentially re-open)
+                const longFee = this.strategyConfig.getExchangeFeeRate(longPosition.exchangeType);
+                const shortFee = this.strategyConfig.getExchangeFeeRate(shortPosition.exchangeType);
+                const churnCost = (longFee + shortFee) * 2; // Close both + re-open both
+                
+                // If prediction is strongly positive, we might stay
+                // Benefit of staying = predicted spread * confidence over next horizon
+                const hourlyBenefit = predictedSpread * confidence;
+                
+                // Loss of staying = current spread (negative)
+                const currentLoss = Math.abs(currentSpread);
+                
+                // We look at a 4-hour window for the "bounce back" to be conservative
+                // This prevents "noping out" on minor fluctuations if a recovery is predicted
+                const windowHours = 4;
+                const totalFutureBenefit = hourlyBenefit * windowHours;
+                const totalCostOfStayingAndChurning = (currentLoss * windowHours) + churnCost;
+                
+                if (predictedSpread > 0 && totalFutureBenefit > totalCostOfStayingAndChurning) {
+                  shouldExit = false;
+                  predictionReason = `Predicted to recover: ${(predictedSpread * 100).toFixed(4)}% spread ` +
+                    `(confidence: ${(confidence * 100).toFixed(0)}%) → Benefit $${totalFutureBenefit.toFixed(4)} > Cost+Churn $${totalCostOfStayingAndChurning.toFixed(4)}`;
+                } else {
+                  predictionReason = `Prediction confirms negative trend or insufficient recovery: ` +
+                    `${(predictedSpread * 100).toFixed(4)}% spread (confidence: ${(confidence * 100).toFixed(0)}%)`;
+                }
+              } catch (error: any) {
+                this.logger.debug(`Prediction failed for ${symbol} spread flip check: ${error.message}`);
+              }
             }
 
-            // Close both positions using hedged close
-            await this.closeSpreadFlipPosition(symbol, longPosition, shortPosition);
+            if (shouldExit) {
+              this.logger.error(
+                `🚨 SPREAD FLIP DETECTED for ${symbol}! ` +
+                `Current spread: ${spreadPercent.toFixed(4)}% ` +
+                `(LONG on ${longPosition.exchangeType} @ ${(longExchangeRate.currentRate * 100).toFixed(4)}%, ` +
+                `SHORT on ${shortPosition.exchangeType} @ ${(shortExchangeRate.currentRate * 100).toFixed(4)}%) ` +
+                `- [${predictionReason}] - CLOSING BOTH POSITIONS`
+              );
 
-          } else if (currentSpread < SPREAD_WARNING_THRESHOLD) {
+              // Record to diagnostics
+              if (this.diagnosticsService) {
+                this.diagnosticsService.recordError({
+                  type: 'SPREAD_FLIP_EXIT',
+                  exchange: longPosition.exchangeType,
+                  message: `Spread flipped for ${symbol}: ${spreadPercent.toFixed(4)}%. ${predictionReason}. Closing positions.`,
+                  timestamp: new Date(),
+                });
+              }
+
+              // Close both positions using hedged close
+              await this.closeSpreadFlipPosition(symbol, longPosition, shortPosition);
+            } else {
+              this.logger.log(
+                `🔒 HOLDING flipped position ${symbol} due to prediction: ${predictionReason}`
+              );
+            }
+
+          } else {
             // Spread is very thin - warn but don't close yet
             this.logger.warn(
               `⚠️ THIN SPREAD WARNING for ${symbol}: ${spreadPercent.toFixed(4)}% ` +
