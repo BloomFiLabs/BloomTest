@@ -347,10 +347,11 @@ export class PerpKeeperScheduler implements OnModuleInit {
       await this.reconcilePositions();
 
       // Update performance metrics immediately on startup so APY is available
-      // This populates fundingSnapshots for estimated APY calculation
+      // This populates fundingSnapshots for estimated APY AND syncs real funding payments
       try {
-        await this.updatePerformanceMetrics();
-        this.logger.log('📊 Initial performance metrics loaded');
+        await this.syncFundingPayments(); // Fetch actual funding payments for Realized APY
+        await this.updatePerformanceMetrics(); // Update position metrics for Estimated APY
+        this.logger.log('📊 Initial performance metrics loaded (estimated + realized APY)');
       } catch (error: any) {
         this.logger.warn(`Failed to load initial metrics: ${error.message}`);
       }
@@ -1280,11 +1281,14 @@ export class PerpKeeperScheduler implements OnModuleInit {
   /**
    * Update performance metrics periodically (every 2 minutes)
    * This ensures APY calculations are always up-to-date, even between hourly executions.
-   * Critical for diagnostics endpoint to show accurate estimated APY.
+   * Critical for diagnostics endpoint to show accurate estimated AND realized APY.
    */
   @Interval(120000) // Every 2 minutes (120000 ms)
   async updatePerformanceMetricsPeriodically(): Promise<void> {
     try {
+      // Sync actual funding payments from exchanges (for Realized APY)
+      await this.syncFundingPayments();
+      // Update position metrics with current funding rates (for Estimated APY)
       await this.updatePerformanceMetrics();
     } catch (error: any) {
       // Silently fail - this is just for diagnostics
