@@ -207,31 +207,38 @@ export class PerpKeeperController {
     }
 
     // Update APY data from performance logger
+    // Use EQUITY (total account value) not balance (free collateral) for accurate Portfolio APY
     try {
-      let totalCapital = 0;
+      let totalEquity = 0;
       for (const exchangeType of [
         ExchangeType.ASTER,
         ExchangeType.LIGHTER,
         ExchangeType.HYPERLIQUID,
       ]) {
         try {
-          const balance = await this.keeperService.getBalance(exchangeType);
-          totalCapital += balance;
+          // Use getEquity() for total account value (includes positions + margin)
+          // This gives accurate Portfolio APY based on all capital deployed
+          const equity = await this.keeperService.getEquity(exchangeType);
+          totalEquity += equity;
         } catch {
           // Skip
         }
       }
 
       const perfMetrics =
-        this.performanceLogger.getPerformanceMetrics(totalCapital);
+        this.performanceLogger.getPerformanceMetrics(totalEquity);
       const byExchange: Record<string, number> = {};
+      
+      // Cap per-exchange APY at reasonable maximum to prevent misleading numbers
+      const MAX_DISPLAY_APY = 1000; // 1000% cap for display
+      
       for (const [exchange, metrics] of perfMetrics.exchangeMetrics) {
         // Calculate per-exchange APY approximation based on funding captured
         if (metrics.totalPositionValue > 0) {
           const dailyReturn =
             metrics.netFundingCaptured / (perfMetrics.runtimeDays || 1);
-          byExchange[exchange] =
-            (dailyReturn / metrics.totalPositionValue) * 365 * 100;
+          const rawAPY = (dailyReturn / metrics.totalPositionValue) * 365 * 100;
+          byExchange[exchange] = Math.min(rawAPY, MAX_DISPLAY_APY);
         }
       }
 
