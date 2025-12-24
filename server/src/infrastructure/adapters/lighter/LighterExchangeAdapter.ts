@@ -1546,95 +1546,137 @@ export class LighterExchangeAdapter
   }
 
   /**
-   * Modify an existing order
+   * Modify an existing order with automatic nonce error handling
    */
   async modifyOrder(
     orderId: string,
     request: PerpOrderRequest,
+    maxRetries: number = 3,
   ): Promise<PerpOrderResponse> {
-    try {
-      await this.ensureInitialized();
+    await this.ensureInitialized();
 
-      const marketIndex = await this.getMarketIndex(request.symbol);
-      const market = await this.getMarketHelper(marketIndex);
+    const marketIndex = await this.getMarketIndex(request.symbol);
+    const market = await this.getMarketHelper(marketIndex);
 
-      // CRITICAL FIX: Lighter's modifyOrder requires numeric orderIndex
-      // If we have a transaction hash (orderId), we must find the corresponding orderIndex first
-      let orderIndex = parseInt(orderId, 10);
+    // CRITICAL FIX: Lighter's modifyOrder requires numeric orderIndex
+    // If we have a transaction hash (orderId), we must find the corresponding orderIndex first
+    let orderIndex = parseInt(orderId, 10);
+    
+    const isTransactionHash = orderId.length > 20 && /^[0-9a-f]+$/i.test(orderId);
+    if (isTransactionHash || isNaN(orderIndex) || orderIndex === 0) {
+      this.logger.debug(`Searching for orderIndex for ${request.symbol} ${request.side} (tx: ${orderId.substring(0, 8)}...)`);
       
-      const isTransactionHash = orderId.length > 20 && /^[0-9a-f]+$/i.test(orderId);
-      if (isTransactionHash || isNaN(orderIndex) || orderIndex === 0) {
-        this.logger.debug(`Searching for orderIndex for ${request.symbol} ${request.side} (tx: ${orderId.substring(0, 8)}...)`);
-        
-        // Find order index from active orders
-        const activeOrders = await this.getOpenOrders();
-        const matchingOrder = activeOrders.find(o => 
-          o.symbol === request.symbol && 
-          o.side.toLowerCase() === request.side.toLowerCase()
+      // Find order index from active orders
+      const activeOrders = await this.getOpenOrders();
+      const matchingOrder = activeOrders.find(o => 
+        o.symbol === request.symbol && 
+        o.side.toLowerCase() === request.side.toLowerCase()
+      );
+
+      if (!matchingOrder) {
+        throw new ExchangeError(
+          `Could not find active order index for ${request.symbol} ${request.side}`,
+          ExchangeType.LIGHTER,
+        );
+      }
+
+      orderIndex = Math.floor(parseFloat(matchingOrder.orderId));
+      this.logger.debug(`Found orderIndex ${orderIndex} for ${request.symbol}`);
+    }
+
+    // Format parameters using market helper units
+    const amount = market.amountToUnits(request.size);
+    const price = market.priceToUnits(request.price || 0);
+    const triggerPrice = BigInt(0); // No trigger price for non-conditional orders
+
+    // Retry loop with nonce error handling
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        this.logger.debug(
+          `🔄 Modifying order ${orderIndex} on Lighter: ${request.symbol} @ ${request.price} (attempt ${attempt + 1}/${maxRetries})`,
         );
 
-        if (!matchingOrder) {
-          throw new Error(`Could not find active order index for ${request.symbol} ${request.side}`);
+        // Use positional arguments matching modify_order.ts example
+        // Pass RateLimitPriority.HIGH to callApi for maker repositioning
+        const result = await this.callApi(this.WEIGHT_TX, () => (this.signerClient as any).modifyOrder(
+          marketIndex,
+          orderIndex,
+          amount,
+          price,
+          triggerPrice,
+        ), RateLimitPriority.HIGH) as [any, string, string | null];
+        
+        const [tx, txHash, error] = result;
+
+        if (error) {
+          throw new Error(error);
         }
 
-        orderIndex = Math.floor(parseFloat(matchingOrder.orderId));
-        this.logger.debug(`Found orderIndex ${orderIndex} for ${request.symbol}`);
+        // Reset consecutive nonce errors on success
+        this.consecutiveNonceErrors = 0;
+
+        this.logger.log(`✅ Order ${orderIndex} modified successfully: ${txHash}`);
+
+        // Wait for transaction (non-blocking timeout)
+        try {
+          await this.signerClient!.waitForTransaction(txHash, 30000, 2000);
+        } catch (waitError: any) {
+          this.logger.debug(`Update wait timeout: ${waitError.message}`);
+        }
+
+        return new PerpOrderResponse(
+          orderIndex.toString(),
+          OrderStatus.SUBMITTED,
+          request.symbol,
+          request.side,
+          request.clientOrderId,
+          undefined,
+          undefined,
+          undefined,
+          new Date(),
+        );
+      } catch (error: any) {
+        const errorMsg = error.message || String(error);
+        
+        // Check if this is a nonce error
+        const isNonceError =
+          errorMsg.toLowerCase().includes('invalid nonce') ||
+          errorMsg.toLowerCase().includes('nonce');
+
+        if (isNonceError && attempt < maxRetries - 1) {
+          this.consecutiveNonceErrors++;
+          
+          this.logger.warn(
+            `⚠️ Lighter nonce error #${this.consecutiveNonceErrors} modifying order for ${request.symbol}: ${errorMsg}. ` +
+            `Re-syncing nonce and retrying (attempt ${attempt + 1}/${maxRetries})...`,
+          );
+
+          // Fully recreate the SignerClient to get a fresh nonce from the server
+          await this.resetSignerClient();
+
+          // Progressive backoff for nonce errors
+          const nonceBackoff = Math.min(1000 * Math.pow(2, attempt), 5000);
+          this.logger.debug(`Waiting ${nonceBackoff}ms before retry after nonce error`);
+          await new Promise((resolve) => setTimeout(resolve, nonceBackoff));
+          continue;
+        }
+
+        // Not a nonce error or last attempt - throw
+        this.logger.error(`Failed to modify order ${orderId}: ${errorMsg}`);
+        throw new ExchangeError(
+          `Failed to modify order: ${errorMsg}`,
+          ExchangeType.LIGHTER,
+          undefined,
+          error,
+        );
       }
-
-      this.logger.debug(
-        `🔄 Modifying order ${orderIndex} on Lighter: ${request.symbol} @ ${request.price}`,
-      );
-
-      // Format parameters using market helper units
-      const amount = market.amountToUnits(request.size);
-      const price = market.priceToUnits(request.price || 0);
-      const triggerPrice = BigInt(0); // No trigger price for non-conditional orders
-
-      // Use positional arguments matching modify_order.ts example
-      // Pass RateLimitPriority.HIGH to callApi for maker repositioning
-      const result = await this.callApi(this.WEIGHT_TX, () => (this.signerClient as any).modifyOrder(
-        marketIndex,
-        orderIndex,
-        amount,
-        price,
-        triggerPrice,
-      ), RateLimitPriority.HIGH) as [any, string, string | null];
-      
-      const [tx, txHash, error] = result;
-
-      if (error) {
-        throw new Error(error);
-      }
-
-      this.logger.log(`✅ Order ${orderIndex} modified successfully: ${txHash}`);
-
-      // Wait for transaction
-      try {
-        await this.signerClient!.waitForTransaction(txHash, 30000, 2000);
-      } catch (waitError: any) {
-        this.logger.debug(`Update wait timeout: ${waitError.message}`);
-      }
-
-      return new PerpOrderResponse(
-        orderIndex.toString(),
-        OrderStatus.SUBMITTED,
-        request.symbol,
-        request.side,
-        request.clientOrderId,
-        undefined,
-        undefined,
-        undefined,
-        new Date(),
-      );
-    } catch (error: any) {
-      this.logger.error(`Failed to modify order ${orderId}: ${error.message}`);
-      throw new ExchangeError(
-        `Failed to modify order: ${error.message}`,
-        ExchangeType.LIGHTER,
-        undefined,
-        error,
-      );
     }
+
+    // Should not reach here, but just in case
+    throw new ExchangeError(
+      `Failed to modify order after ${maxRetries} attempts`,
+      ExchangeType.LIGHTER,
+    );
   }
 
   async cancelOrder(orderId: string, symbol?: string): Promise<boolean> {

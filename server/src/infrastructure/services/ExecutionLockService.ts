@@ -64,8 +64,8 @@ export class ExecutionLockService {
   private readonly orderHistory: ActiveOrder[] = [];
   private readonly MAX_ORDER_HISTORY = 100;
 
-  // Timeout for stale locks (5 minutes)
-  private readonly LOCK_TIMEOUT_MS = 5 * 60 * 1000;
+  // Timeout for stale locks (2 minutes - reduced from 5 to prevent long blocking)
+  private readonly LOCK_TIMEOUT_MS = 2 * 60 * 1000;
 
   // Timeout for stale orders (10 minutes)
   private readonly ORDER_TIMEOUT_MS = 10 * 60 * 1000;
@@ -514,6 +514,31 @@ export class ExecutionLockService {
     }
 
     return active;
+  }
+
+  /**
+   * Alias for getAllActiveOrders for compatibility
+   */
+  getActiveOrders(): ActiveOrder[] {
+    return this.getAllActiveOrders();
+  }
+
+  /**
+   * Get orders older than a specified age in milliseconds
+   * Used for stale order cleanup
+   */
+  getOrdersOlderThan(ageMs: number): ActiveOrder[] {
+    const now = Date.now();
+    const staleOrders: ActiveOrder[] = [];
+
+    for (const order of this.activeOrders.values()) {
+      const orderAge = now - order.placedAt.getTime();
+      if (orderAge >= ageMs) {
+        staleOrders.push({ ...order });
+      }
+    }
+
+    return staleOrders;
   }
 
   /**
