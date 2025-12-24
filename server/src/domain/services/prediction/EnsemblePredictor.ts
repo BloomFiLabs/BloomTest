@@ -383,4 +383,38 @@ export class EnsemblePredictor {
   clearErrorCache(): void {
     this.errorStates.clear();
   }
+
+  /**
+   * Get expected reversion time in hours for a symbol/exchange pair
+   * Delegates to the MeanReversionPredictor's cached OU parameters
+   * 
+   * @param symbol Normalized symbol
+   * @param exchange Exchange type as string
+   * @param reversionPercent Target reversion percent (default 0.5 = half-life)
+   * @returns Expected hours to reversion, or null if no data available
+   */
+  getExpectedReversionHours(
+    symbol: string,
+    exchange: string,
+    reversionPercent: number = 0.5,
+  ): number | null {
+    return this.meanReversionPredictor.getTimeToReversionHours(
+      symbol,
+      exchange,
+      reversionPercent,
+    );
+  }
+
+  /**
+   * Get the long-term mean (theta) from OU parameters for a symbol/exchange
+   * Used to calculate expected spread reversion targets
+   * 
+   * @param symbol Normalized symbol
+   * @param exchange Exchange type as string
+   * @returns Long-term mean rate, or null if no data available
+   */
+  getLongTermMean(symbol: string, exchange: string): number | null {
+    const params = this.meanReversionPredictor.getCachedParameters(symbol, exchange);
+    return params?.theta ?? null;
+  }
 }

@@ -187,6 +187,26 @@ export interface EnsembleWeightConfig {
 }
 
 /**
+ * Result of spread prediction between two exchanges
+ */
+export interface SpreadPredictionResult {
+  /** Predicted funding rate spread (long - short) */
+  predictedSpread: number;
+  /** Combined confidence (geometric mean of individual confidences) */
+  confidence: number;
+  /** Prediction for long exchange */
+  longPrediction: EnsemblePredictionResult;
+  /** Prediction for short exchange */
+  shortPrediction: EnsemblePredictionResult;
+  /** Expected hours until spread reverts to mean (half-life based) */
+  expectedReversionHours: number | null;
+  /** Current spread for comparison */
+  currentSpread: number;
+  /** Long-term mean spread the spread is expected to revert to */
+  meanSpread: number;
+}
+
+/**
  * Interface for the main prediction service
  */
 export interface IFundingRatePredictionService {
@@ -206,18 +226,13 @@ export interface IFundingRatePredictionService {
    * @param symbol Normalized symbol
    * @param longExchange Exchange for long position
    * @param shortExchange Exchange for short position
-   * @returns Predicted spread and confidence
+   * @returns Predicted spread, confidence, and expected reversion time
    */
   getSpreadPrediction(
     symbol: string,
     longExchange: ExchangeType,
     shortExchange: ExchangeType,
-  ): Promise<{
-    predictedSpread: number;
-    confidence: number;
-    longPrediction: EnsemblePredictionResult;
-    shortPrediction: EnsemblePredictionResult;
-  }>;
+  ): Promise<SpreadPredictionResult>;
 
   /**
    * Get current market regime for a symbol/exchange

@@ -341,6 +341,67 @@ export class MeanReversionPredictor implements IFundingRatePredictor {
   }
 
   /**
+   * Calculate the half-life of mean reversion in hours
+   * 
+   * Half-life is the time it takes for the rate to revert halfway to the mean.
+   * Formula: t_1/2 = ln(2) / κ
+   * 
+   * @param symbol Normalized symbol
+   * @param exchange Exchange type
+   * @returns Half-life in hours, or null if no cached parameters exist
+   */
+  getHalfLifeHours(symbol: string, exchange: string): number | null {
+    const params = this.getCachedParameters(symbol, exchange);
+    if (!params) {
+      return null;
+    }
+    return this.calculateHalfLife(params.kappa);
+  }
+
+  /**
+   * Calculate half-life from kappa (mean reversion speed)
+   * Formula: t_1/2 = ln(2) / κ
+   * 
+   * @param kappa Mean reversion speed parameter
+   * @returns Half-life in hours
+   */
+  private calculateHalfLife(kappa: number): number {
+    if (kappa <= 0 || !isFinite(kappa)) {
+      // Default to 24 hours if kappa is invalid
+      return 24;
+    }
+    const halfLife = Math.log(2) / kappa;
+    // Clamp to reasonable bounds: 1 hour to 7 days
+    return Math.max(1, Math.min(168, halfLife));
+  }
+
+  /**
+   * Get expected time to 90% reversion in hours
+   * This is more conservative than half-life for profit-taking decisions
+   * 
+   * Formula: t_90 = ln(10) / κ ≈ 2.3 / κ
+   * 
+   * @param symbol Normalized symbol
+   * @param exchange Exchange type
+   * @returns Time to 90% reversion in hours, or null if no parameters
+   */
+  getTimeToReversionHours(symbol: string, exchange: string, reversionPercent: number = 0.5): number | null {
+    const params = this.getCachedParameters(symbol, exchange);
+    if (!params || params.kappa <= 0) {
+      return null;
+    }
+    
+    // Time to X% reversion: t = -ln(1 - X) / κ
+    // e.g., 50% reversion: t = ln(2) / κ (half-life)
+    // e.g., 90% reversion: t = ln(10) / κ
+    const factor = -Math.log(1 - reversionPercent);
+    const timeToReversion = factor / params.kappa;
+    
+    // Clamp to reasonable bounds: 1 hour to 14 days
+    return Math.max(1, Math.min(336, timeToReversion));
+  }
+
+  /**
    * Get cache key
    */
   private getKey(symbol: string, exchange: unknown): string {

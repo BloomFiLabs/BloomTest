@@ -6,6 +6,7 @@ import {
   PredictionContext,
   HistoricalRatePoint,
   HistoricalOIPoint,
+  SpreadPredictionResult,
 } from '../../ports/IFundingRatePredictor';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { EnsemblePredictor } from './EnsemblePredictor';
@@ -114,17 +115,15 @@ export class FundingRatePredictionService
   /**
    * Get prediction for spread between two exchanges
    * Used for arbitrage opportunity evaluation
+   * 
+   * Returns predicted spread, confidence, and expected reversion time
+   * based on Ornstein-Uhlenbeck mean reversion model
    */
   async getSpreadPrediction(
     symbol: string,
     longExchange: ExchangeType,
     shortExchange: ExchangeType,
-  ): Promise<{
-    predictedSpread: number;
-    confidence: number;
-    longPrediction: EnsemblePredictionResult;
-    shortPrediction: EnsemblePredictionResult;
-  }> {
+  ): Promise<SpreadPredictionResult> {
     // Get individual predictions in parallel
     const [longPrediction, shortPrediction] = await Promise.all([
       this.getPrediction(symbol, longExchange),
@@ -142,9 +141,47 @@ export class FundingRatePredictionService
       longPrediction.confidence * shortPrediction.confidence,
     );
 
+    // Get current spread from current rates (not predicted)
+    const rates = await this.aggregator.getFundingRates(symbol);
+    const longRate = rates.find(r => r.exchange === longExchange)?.currentRate ?? 0;
+    const shortRate = rates.find(r => r.exchange === shortExchange)?.currentRate ?? 0;
+    const currentSpread = longRate - shortRate;
+
+    // Calculate expected reversion time
+    // Use the more conservative (longer) half-life of the two exchanges
+    const longHalfLife = this.ensemblePredictor.getExpectedReversionHours(
+      symbol,
+      String(longExchange),
+      0.5, // Half-life
+    );
+    const shortHalfLife = this.ensemblePredictor.getExpectedReversionHours(
+      symbol,
+      String(shortExchange),
+      0.5,
+    );
+
+    // Use the max of the two half-lives (more conservative estimate)
+    // If both are null, we don't have enough data
+    let expectedReversionHours: number | null = null;
+    if (longHalfLife !== null && shortHalfLife !== null) {
+      expectedReversionHours = Math.max(longHalfLife, shortHalfLife);
+    } else if (longHalfLife !== null) {
+      expectedReversionHours = longHalfLife;
+    } else if (shortHalfLife !== null) {
+      expectedReversionHours = shortHalfLife;
+    }
+
+    // Calculate long-term mean spread
+    const longMean = this.ensemblePredictor.getLongTermMean(symbol, String(longExchange));
+    const shortMean = this.ensemblePredictor.getLongTermMean(symbol, String(shortExchange));
+    const meanSpread = (longMean ?? 0) - (shortMean ?? 0);
+
     this.logger.debug(
       `${symbol} spread ${longExchange}->${shortExchange}: ` +
-        `${(predictedSpread * 100).toFixed(4)}% (confidence: ${(confidence * 100).toFixed(1)}%)`,
+        `predicted=${(predictedSpread * 100).toFixed(4)}%, ` +
+        `current=${(currentSpread * 100).toFixed(4)}%, ` +
+        `reversion=${expectedReversionHours?.toFixed(1) ?? 'N/A'}h, ` +
+        `confidence=${(confidence * 100).toFixed(1)}%`,
     );
 
     return {
@@ -152,6 +189,9 @@ export class FundingRatePredictionService
       confidence,
       longPrediction,
       shortPrediction,
+      expectedReversionHours,
+      currentSpread,
+      meanSpread,
     };
   }
 

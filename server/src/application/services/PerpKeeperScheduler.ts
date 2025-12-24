@@ -1973,6 +1973,109 @@ export class PerpKeeperScheduler implements OnModuleInit {
   }
 
   /**
+   * Verify and sync tracked orders with exchange state
+   * 
+   * This handles cases where:
+   * 1. WebSocket fill detection failed
+   * 2. Order was cancelled on exchange but not detected locally
+   * 3. Network issues caused state divergence
+   * 
+   * For each tracked order older than STALE_ORDER_AGE_MINUTES, we:
+   * 1. Check the order status on the exchange
+   * 2. If filled/cancelled, clear from tracking
+   * 3. If still open but very old, log warning for investigation
+   * 
+   * Runs every 5 minutes to catch any missed fills.
+   */
+  @Interval(300000) // Every 5 minutes
+  async verifyTrackedOrders(): Promise<void> {
+    if (!this.executionLockService) return;
+    if (this.isRunning) return; // Don't interfere with active execution
+
+    const STALE_ORDER_AGE_MINUTES = parseFloat(
+      process.env.STALE_ORDER_AGE_MINUTES || '5'
+    );
+    const staleAgeMs = STALE_ORDER_AGE_MINUTES * 60 * 1000;
+
+    try {
+      const staleOrders = this.executionLockService.getOrdersOlderThan(staleAgeMs);
+      
+      if (staleOrders.length === 0) {
+        return; // No stale orders to verify
+      }
+
+      this.logger.log(
+        `🔍 Verifying ${staleOrders.length} tracked orders older than ${STALE_ORDER_AGE_MINUTES} minutes...`
+      );
+
+      for (const order of staleOrders) {
+        try {
+          const adapter = this.keeperService.getExchangeAdapters().get(order.exchange as ExchangeType);
+          if (!adapter) {
+            this.logger.warn(`No adapter found for ${order.exchange}, clearing tracked order ${order.orderId}`);
+            this.executionLockService.forceClearOrder(order.exchange, order.symbol, order.side);
+            continue;
+          }
+
+          // Check order status on exchange
+          const status = await adapter.getOrderStatus(order.orderId, order.symbol);
+
+          if (!status) {
+            // Order not found on exchange - likely filled or expired
+            this.logger.warn(
+              `🗑️ Order ${order.orderId} not found on ${order.exchange}, clearing from tracking`
+            );
+            this.executionLockService.forceClearOrder(order.exchange, order.symbol, order.side);
+            continue;
+          }
+
+          const orderStatus = status.status;
+          if (
+            orderStatus === OrderStatus.FILLED ||
+            orderStatus === OrderStatus.CANCELLED ||
+            orderStatus === OrderStatus.EXPIRED ||
+            orderStatus === OrderStatus.REJECTED
+          ) {
+            this.logger.log(
+              `🧹 Tracked order ${order.orderId} is ${orderStatus} on ${order.exchange}, clearing from tracking`
+            );
+            this.executionLockService.forceClearOrder(order.exchange, order.symbol, order.side);
+          } else if (orderStatus === OrderStatus.SUBMITTED || orderStatus === OrderStatus.PENDING) {
+            const ageMinutes = (Date.now() - order.placedAt.getTime()) / 60000;
+            if (ageMinutes > 30) {
+              // Order is still open after 30 minutes - something is wrong
+              this.logger.error(
+                `⚠️ Order ${order.orderId} still SUBMITTED after ${ageMinutes.toFixed(0)} minutes - ` +
+                `consider manual investigation: ${order.exchange} ${order.symbol} ${order.side}`
+              );
+            }
+          }
+        } catch (error: any) {
+          // If we can't verify, assume the order is stale and clear it
+          // This is safer than leaving stale orders that block new executions
+          if (
+            error.message?.includes('not found') ||
+            error.message?.includes('Order not found') ||
+            error.message?.includes('already canceled') ||
+            error.message?.includes('already cancelled')
+          ) {
+            this.logger.warn(
+              `🗑️ Order ${order.orderId} verification failed (${error.message}), clearing from tracking`
+            );
+            this.executionLockService.forceClearOrder(order.exchange, order.symbol, order.side);
+          } else {
+            this.logger.debug(
+              `Failed to verify tracked order ${order.orderId}: ${error.message}`
+            );
+          }
+        }
+      }
+    } catch (error: any) {
+      this.logger.error(`Error during tracked order verification: ${error.message}`);
+    }
+  }
+
+  /**
    * Check wallet USDC balance and deposit to exchanges if available
    * This proactively deposits wallet funds to exchanges that need capital
    */
@@ -2449,6 +2552,20 @@ export class PerpKeeperScheduler implements OnModuleInit {
         const avgSize = (longSize + shortSize) / 2;
         const imbalancePercent = avgSize > 0 ? (sizeDiff / avgSize) * 100 : 0;
 
+        // Record drift in diagnostics regardless of threshold
+        // This tracks drift trends over time
+        if (imbalancePercent > 3 && this.diagnosticsService) {
+          const markPrice = longPos.markPrice || shortPos.markPrice || 0;
+          this.diagnosticsService.recordPositionDrift(
+            symbol,
+            longPos.exchangeType,
+            shortPos.exchangeType,
+            longSize,
+            shortSize,
+            markPrice,
+          );
+        }
+
         if (imbalancePercent > 5) {
           this.logger.warn(
             `⚠️ Position size imbalance detected for ${symbol}: ` +
@@ -2498,6 +2615,8 @@ export class PerpKeeperScheduler implements OnModuleInit {
                 `✅ Placed reduce order to fix imbalance: ${response.orderId} ` +
                 `(${closeSide} ${excessSize.toFixed(4)} ${largerPos.symbol} @ ${markPrice})`
               );
+              // Mark drift as resolved in diagnostics
+              this.diagnosticsService?.resolvePositionDrift(symbol, 'reduced');
             } else {
               this.logger.warn(
                 `⚠️ Failed to place reduce order: ${response.error}`
@@ -2516,21 +2635,26 @@ export class PerpKeeperScheduler implements OnModuleInit {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PROFIT TAKING - Exit when price PnL exceeds expected funding returns
+  // PROFIT TAKING - Reversion-based partial profit taking
   // ═══════════════════════════════════════════════════════════════════════════
 
   /**
-   * Check if price movement has generated more profit than expected from funding.
+   * Check for profit-taking opportunities using reversion-based partial scaling
    * 
-   * POLICY: If unrealized price PnL exceeds X days worth of expected funding returns,
-   * take profit by closing the position. This locks in windfall gains from price moves.
+   * When price moves significantly in our favor (basis drift), we take profit
+   * proportional to how close we are to expected funding rate reversion.
+   * Uses the OU mean reversion model to estimate time until spread reverts.
    * 
-   * Example: 
-   * - Expected funding: 0.1%/day = ~36.5% APY
-   * - If price moves 3% in our favor, that's ~30 days of funding
-   * - Better to lock that in and re-enter at better prices
+   * Logic:
+   * 1. Calculate expected funding income until reversion: currentSpread * reversionHours * positionValue
+   * 2. Compare to current unrealized profit
+   * 3. Close portion = min(100%, profit / expectedFundingIncome)
    * 
-   * Configurable threshold: PROFIT_TAKE_FUNDING_DAYS_EQUIVALENT (default: 7 days)
+   * Example:
+   * - Spread expected to revert in 48 hours
+   * - Current spread = 0.01%/hour = 0.48% total expected income
+   * - If unrealized profit = 1%, that's 2x expected income → close 100%
+   * - If unrealized profit = 0.24%, that's 0.5x expected income → close 50%
    * 
    * Runs every 30 seconds for quick profit capture.
    */
@@ -2544,14 +2668,20 @@ export class PerpKeeperScheduler implements OnModuleInit {
       const positions = this.marketStateService?.getAllPositions() || [];
       if (positions.length < 2) return;
 
-      // Configurable: How many days of funding return justifies taking profit
-      const PROFIT_TAKE_FUNDING_DAYS = parseFloat(
-        process.env.PROFIT_TAKE_FUNDING_DAYS || '7'
-      );
-      
       // Minimum profit threshold (absolute) to avoid small position churn
       const MIN_PROFIT_USD = parseFloat(
         process.env.PROFIT_TAKE_MIN_USD || '10'
+      );
+
+      // Minimum close percentage threshold (don't close less than 25%)
+      const MIN_CLOSE_PERCENT = parseFloat(
+        process.env.PROFIT_TAKE_MIN_CLOSE_PERCENT || '0.25'
+      );
+
+      // Maximum hours until reversion to trigger profit-taking
+      // If reversion is expected beyond this, don't take profit (spread is stable)
+      const MAX_REVERSION_HOURS = parseFloat(
+        process.env.PROFIT_TAKE_MAX_REVERSION_HOURS || '168'
       );
 
       // Group positions by normalized symbol
@@ -2575,13 +2705,11 @@ export class PerpKeeperScheduler implements OnModuleInit {
         if (!longPos || !shortPos) continue;
 
         // Calculate combined unrealized PnL from PRICE movement
-        // For a delta-neutral pair, price PnL should mostly cancel out,
-        // but basis drift can create opportunities
         const longPricePnl = longPos.unrealizedPnl;
         const shortPricePnl = shortPos.unrealizedPnl;
         const combinedPnl = longPricePnl + shortPricePnl;
 
-        // Skip if combined PnL is negative (no profit to take)
+        // Skip if combined PnL is negative or too small
         if (combinedPnl <= MIN_PROFIT_USD) continue;
 
         // Calculate position value for percentage calculation
@@ -2594,53 +2722,106 @@ export class PerpKeeperScheduler implements OnModuleInit {
         // Calculate profit as percentage of position
         const profitPercent = (combinedPnl / avgPositionValue) * 100;
 
-        // Estimate daily funding return (use current spread as proxy)
-        // Typical funding spread: 0.01% to 0.1% per 8-hour period = 0.03% to 0.3%/day
-        const estimatedDailyFundingPercent = 0.05; // Conservative 0.05%/day estimate
-        
-        // Calculate equivalent funding days
-        const equivalentFundingDays = profitPercent / estimatedDailyFundingPercent;
+        // Get spread prediction with expected reversion time
+        let expectedReversionHours: number | null = null;
+        let currentSpreadHourly = 0;
 
-        // Check if profit exceeds threshold
-        if (equivalentFundingDays >= PROFIT_TAKE_FUNDING_DAYS) {
-          this.logger.warn(
-            `💰 PROFIT TAKING OPPORTUNITY for ${symbol}:\n` +
-            `   Combined Price PnL: $${combinedPnl.toFixed(2)} (${profitPercent.toFixed(2)}%)\n` +
-            `   Equivalent to ${equivalentFundingDays.toFixed(1)} days of funding\n` +
-            `   Threshold: ${PROFIT_TAKE_FUNDING_DAYS} days\n` +
-            `   LONG PnL: $${longPricePnl.toFixed(2)} on ${longPos.exchangeType}\n` +
-            `   SHORT PnL: $${shortPricePnl.toFixed(2)} on ${shortPos.exchangeType}`
+        if (this.predictionService) {
+          try {
+            const spreadPrediction = await this.predictionService.getSpreadPrediction(
+              symbol,
+              longPos.exchangeType,
+              shortPos.exchangeType,
+            );
+            expectedReversionHours = spreadPrediction.expectedReversionHours;
+            // Current spread is hourly rate (e.g., 0.0001 = 0.01%/hour)
+            currentSpreadHourly = Math.abs(spreadPrediction.currentSpread);
+          } catch (predErr: any) {
+            this.logger.debug(
+              `Failed to get spread prediction for ${symbol}: ${predErr.message}`
+            );
+          }
+        }
+
+        // Use fallback if no reversion data
+        if (expectedReversionHours === null) {
+          // Fallback: use conservative fixed reversion time (7 days = 168 hours)
+          expectedReversionHours = 168;
+        }
+
+        // Skip if reversion is expected too far in the future
+        if (expectedReversionHours > MAX_REVERSION_HOURS) {
+          this.logger.debug(
+            `${symbol}: Skipping profit-take, reversion expected in ${expectedReversionHours.toFixed(0)}h (> ${MAX_REVERSION_HOURS}h max)`
+          );
+          continue;
+        }
+
+        // Calculate expected remaining funding income until reversion
+        // expectedFundingPercent = currentSpreadHourly * reversionHours * 100 (to get %)
+        // Fallback to 0.0001 (0.01%/hour) if no spread data
+        const effectiveSpreadHourly = currentSpreadHourly > 0 ? currentSpreadHourly : 0.0001;
+        const expectedFundingPercent = effectiveSpreadHourly * expectedReversionHours * 100;
+
+        // Calculate close percentage: how much of our profit exceeds expected funding
+        // If profit = 2x expected funding → close 100%
+        // If profit = 0.5x expected funding → close 50%
+        let closePercent = expectedFundingPercent > 0 
+          ? Math.min(1.0, profitPercent / expectedFundingPercent)
+          : 1.0; // If no expected funding, close everything
+
+        // Don't take action if close percent is below minimum threshold
+        if (closePercent < MIN_CLOSE_PERCENT) {
+          this.logger.debug(
+            `${symbol}: Profit ${profitPercent.toFixed(2)}% vs expected funding ${expectedFundingPercent.toFixed(2)}% ` +
+            `→ close ${(closePercent * 100).toFixed(0)}% < ${(MIN_CLOSE_PERCENT * 100).toFixed(0)}% min threshold, skipping`
+          );
+          continue;
+        }
+
+        this.logger.warn(
+          `💰 REVERSION-BASED PROFIT TAKING for ${symbol}:\n` +
+          `   Combined PnL: $${combinedPnl.toFixed(2)} (${profitPercent.toFixed(2)}%)\n` +
+          `   Expected reversion in: ${expectedReversionHours.toFixed(1)} hours\n` +
+          `   Expected funding until reversion: ${expectedFundingPercent.toFixed(3)}%\n` +
+          `   Close percentage: ${(closePercent * 100).toFixed(0)}%\n` +
+          `   LONG PnL: $${longPricePnl.toFixed(2)} on ${longPos.exchangeType}\n` +
+          `   SHORT PnL: $${shortPricePnl.toFixed(2)} on ${shortPos.exchangeType}`
+        );
+
+        // Execute hedged partial close
+        try {
+          await this.orchestrator.executeHedgedPartialClose(
+            longPos,
+            shortPos,
+            closePercent,
+            `Profit Taking: $${(combinedPnl * closePercent).toFixed(2)} (${(closePercent * 100).toFixed(0)}% of position, ` +
+            `reversion in ${expectedReversionHours.toFixed(0)}h)`
           );
 
-          // Execute hedged close to take profit
-          try {
-            await this.orchestrator.executeHedgedPartialClose(
-              longPos,
-              shortPos,
-              1.0, // 100% - close entire position
-              `Profit Taking: $${combinedPnl.toFixed(2)} (${equivalentFundingDays.toFixed(0)} days of funding)`
-            );
-
-            // Record cooldown to prevent immediate re-entry at same price
+          // Record cooldown only if we closed a significant portion (> 50%)
+          if (closePercent >= 0.5) {
             this.profitTakeCooldowns.set(symbol, {
               exitTime: new Date(),
               exitPriceLong: longPos.markPrice || 0,
               exitPriceShort: shortPos.markPrice || 0,
-              profitPercent,
+              profitPercent: profitPercent * closePercent,
               longExchange: longPos.exchangeType,
               shortExchange: shortPos.exchangeType,
             });
-
-            this.logger.log(
-              `✅ Profit taken for ${symbol}: $${combinedPnl.toFixed(2)} ` +
-              `(${profitPercent.toFixed(2)}% = ${equivalentFundingDays.toFixed(0)} days funding equivalent)\n` +
-              `   🔒 Cooldown active until price reverts ${(profitPercent * 0.5).toFixed(2)}% or 1 hour passes`
-            );
-          } catch (closeError: any) {
-            this.logger.error(
-              `❌ Failed to take profit for ${symbol}: ${closeError.message}`
-            );
           }
+
+          this.logger.log(
+            `✅ Profit taken for ${symbol}: $${(combinedPnl * closePercent).toFixed(2)} ` +
+            `(${(closePercent * 100).toFixed(0)}% of position)\n` +
+            `   Expected reversion: ${expectedReversionHours.toFixed(1)}h | ` +
+            `Remaining position: ${((1 - closePercent) * 100).toFixed(0)}%` +
+            (closePercent >= 0.5 ? `\n   🔒 Cooldown active` : '')
+          );
+        } catch (closeError: any) {
+          this.logger.error(
+            `❌ Failed to take profit for ${symbol}: ${closeError.message}`
+          );
         }
       }
     } catch (error: any) {
