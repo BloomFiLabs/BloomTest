@@ -259,6 +259,8 @@ export class PerpKeeperController {
         pricePnl: perfMetrics.pricePnlAPY,
         realizedPnl: perfMetrics.totalRealizedPnl,
         netFunding: perfMetrics.netFundingCaptured,
+        expectedEarningsNextPeriod: perfMetrics.expectedEarningsNextPeriod,
+        historicalEarnings: perfMetrics.historicalEarnings,
         byExchange,
       });
     } catch (error) {

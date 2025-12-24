@@ -299,6 +299,12 @@ export interface DiagnosticsResponse {
     pricePnl?: number;
     realizedPnl?: number; // NEW: Actual USD PnL
     netFunding?: number; // NEW: Actual USD Funding captured
+    expectedEarningsNextPeriod?: number; // NEW: Predicted earnings for next 1h
+    historicalEarnings?: Array<{
+      timestamp: Date;
+      expected: number;
+      actual: number;
+    }>;
     byExchange: Record<string, number>;
   };
   orders: {
@@ -659,6 +665,12 @@ export class DiagnosticsService {
     pricePnl?: number;
     realizedPnl?: number;
     netFunding?: number;
+    expectedEarningsNextPeriod?: number;
+    historicalEarnings?: Array<{
+      timestamp: Date;
+      expected: number;
+      actual: number;
+    }>;
     byExchange: Record<string, number>;
   } = { estimated: 0, realized: 0, byExchange: {} };
   
@@ -1245,6 +1257,12 @@ export class DiagnosticsService {
     pricePnl?: number;
     realizedPnl?: number;
     netFunding?: number;
+    expectedEarningsNextPeriod?: number;
+    historicalEarnings?: Array<{
+      timestamp: Date;
+      expected: number;
+      actual: number;
+    }>;
     byExchange: Record<string, number>;
   }): void {
     this.apyData = data;

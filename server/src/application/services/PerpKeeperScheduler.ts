@@ -1334,9 +1334,19 @@ export class PerpKeeperScheduler implements OnModuleInit {
       this.performanceLogger.recordArbitrageOpportunity(false, true);
     }
 
+    // Capture expected return BEFORE updating actuals
+    const expectedEarnings = result.totalExpectedReturn;
+    const previousNetFunding = this.performanceLogger.getPerformanceMetrics().netFundingCaptured;
+
     // Sync funding payments and update position metrics
     await this.syncFundingPayments();
     await this.updatePerformanceMetrics();
+
+    const currentNetFunding = this.performanceLogger.getPerformanceMetrics().netFundingCaptured;
+    const actualEarnings = currentNetFunding - previousNetFunding;
+
+    // Capture historical snapshot for the graph
+    this.performanceLogger.captureHourlyEarnings(expectedEarnings, actualEarnings);
 
     const duration = Date.now() - startTime;
 

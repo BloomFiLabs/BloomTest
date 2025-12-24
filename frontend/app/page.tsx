@@ -13,6 +13,29 @@ import {
   Coins
 } from 'lucide-react';
 import { cn } from "@/lib/utils";
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler
+} from 'chart.js';
+import { Line } from 'react-chartjs-2';
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler
+);
 
 const DIAGNOSTICS_URL = 'https://keeper-q2n9z.ondigitalocean.app/keeper/diagnostics';
 const RESET_URL = 'https://keeper-q2n9z.ondigitalocean.app/keeper/reset-metrics';
@@ -68,7 +91,7 @@ export default function Dashboard() {
     );
   }
 
-  const apy = data?.apy || { estimated: 0, realized: 0, byExchange: {} };
+  const apy = data?.apy || { estimated: 0, realized: 0, byExchange: {}, expectedEarningsNextPeriod: 0, historicalEarnings: [] };
   const positions = data?.positions || { count: 0, totalValue: 0, unrealizedPnl: 0, byExchange: {} };
   const health = data?.health || { overall: 'UNKNOWN', issues: [] };
   const rewards = data?.rewards || { accruedProfits: 0, totalHarvested: 0 };
@@ -109,7 +132,7 @@ export default function Dashboard() {
         </header>
 
         {/* Top Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <MetricCard 
             title="Realized APY" 
             value={`${apy.realized.toFixed(2)}%`}
@@ -123,12 +146,22 @@ export default function Dashboard() {
             trend={apy.estimated >= 0 ? 'up' : 'down'}
           />
           <MetricCard 
+            title="Next 1h Return" 
+            value={`$${(apy.expectedEarningsNextPeriod || 0).toFixed(4)}`}
+            subValue="Predicted from active positions"
+            trend={apy.expectedEarningsNextPeriod >= 0 ? 'up' : 'down'}
+            icon={<Coins className="w-4 h-4 text-indigo-400" />}
+          />
+          <MetricCard 
             title="Net Funding" 
             value={`$${(apy.netFunding || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             subValue="Total funding captured (USD)"
             trend={apy.netFunding >= 0 ? 'up' : 'down'}
             icon={<Coins className="w-4 h-4 text-emerald-400" />}
           />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <MetricCard 
             title="Realized PnL" 
             value={`$${(apy.realizedPnl || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
@@ -151,8 +184,19 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
-          {/* Active Positions */}
           <div className="lg:col-span-2 space-y-6">
+            {/* Historical Earnings Graph */}
+            <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-6 shadow-sm">
+              <h2 className="text-lg font-semibold mb-6 flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-indigo-500" />
+                Funding Earnings (Expected vs Actual)
+              </h2>
+              <div className="h-[300px] w-full">
+                <EarningsChart data={apy.historicalEarnings} />
+              </div>
+            </div>
+
+            {/* Active Positions */}
             <div className="bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
               <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/80">
                 <h2 className="font-semibold flex items-center gap-2">
@@ -312,24 +356,121 @@ export default function Dashboard() {
 }
 
 function MetricCard({ title, value, subValue, trend, icon }: { title: string, value: string, subValue: string, trend?: 'up' | 'down', icon?: React.ReactNode }) {
-  return (
-    <div className="bg-slate-900/50 border border-slate-800 p-5 rounded-xl shadow-sm hover:border-slate-700 transition-all group">
-      <div className="flex justify-between items-start mb-2">
-        <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider group-hover:text-slate-300 transition-colors">{title}</h3>
-        {icon || (trend && (
-          trend === 'up' ? 
-          <TrendingUp className="w-4 h-4 text-green-400" /> : 
-          <TrendingDown className="w-4 h-4 text-red-400" />
-        ))}
+// ... same component ...
+}
+
+function EarningsChart({ data }: { data: any[] }) {
+  if (!data || data.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-slate-600 italic">
+        <TrendingUp className="w-12 h-12 mb-2 opacity-10" />
+        <p>Awaiting sufficient historical data...</p>
       </div>
-      <div className={cn(
-        "text-3xl font-bold font-mono tracking-tight",
-        trend === 'up' ? "text-green-400" : trend === 'down' ? "text-red-400" : "text-white"
-      )}>
-        {value}
-      </div>
-      <p className="text-[10px] mt-1.5 text-slate-500 font-medium">{subValue}</p>
-    </div>
-  );
+    );
+  }
+
+  const chartData = {
+    labels: data.map(d => {
+      const date = new Date(d.timestamp);
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }),
+    datasets: [
+      {
+        label: 'Actual Earnings',
+        data: data.map(d => d.actual),
+        borderColor: '#10b981', // emerald-500
+        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+        borderWidth: 2,
+        tension: 0.4,
+        fill: true,
+        pointRadius: 3,
+        pointHoverRadius: 5,
+      },
+      {
+        label: 'Expected Earnings',
+        data: data.map(d => d.expected),
+        borderColor: '#6366f1', // indigo-500
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        borderDash: [5, 5],
+        tension: 0.4,
+        fill: false,
+        pointRadius: 0,
+        pointHoverRadius: 5,
+      }
+    ],
+  };
+
+  const options = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'top' as const,
+        align: 'end' as const,
+        labels: {
+          color: '#94a3b8', // slate-400
+          boxWidth: 12,
+          font: {
+            size: 11,
+            weight: 'bold' as any,
+          },
+          padding: 20,
+        },
+      },
+      tooltip: {
+        backgroundColor: '#0f172a', // slate-900
+        titleColor: '#f8fafc',
+        bodyColor: '#cbd5e1',
+        borderColor: '#1e293b',
+        borderWidth: 1,
+        padding: 12,
+        callbacks: {
+          label: function(context: any) {
+            let label = context.dataset.label || '';
+            if (label) {
+              label += ': ';
+            }
+            if (context.parsed.y !== null) {
+              label += new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 4 }).format(context.parsed.y);
+            }
+            return label;
+          }
+        }
+      },
+    },
+    scales: {
+      x: {
+        grid: {
+          display: false,
+        },
+        ticks: {
+          color: '#64748b', // slate-500
+          font: {
+            size: 10,
+          },
+          maxRotation: 0,
+          autoSkip: true,
+          maxTicksLimit: 8,
+        },
+      },
+      y: {
+        grid: {
+          color: '#1e293b', // slate-800
+        },
+        ticks: {
+          color: '#64748b',
+          font: {
+            size: 10,
+          },
+          callback: function(value: any) {
+            return '$' + value.toFixed(2);
+          }
+        },
+      },
+    },
+  };
+
+  return <Line data={chartData} options={options} />;
 }
 

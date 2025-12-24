@@ -50,8 +50,16 @@ export interface StrategyPerformanceMetrics {
   realizedAPY: number; // Based on actual funding captured
   fundingAPY: number; // Realized APY from funding payments only
   pricePnlAPY: number; // Realized APY from price movement (basis drift)
+  expectedEarningsNextPeriod: number; // Predicted earnings for the next 1h period (USD)
   estimatedDailyReturn: number; // Estimated daily return based on current rates
   realizedDailyReturn: number; // Actual daily return from funding captured
+
+  // Historical earnings tracking
+  historicalEarnings: Array<{
+    timestamp: Date;
+    expected: number;
+    actual: number;
+  }>;
 
   // Exchange-specific metrics
   exchangeMetrics: Map<ExchangeType, ExchangePerformanceMetrics>;
@@ -73,7 +81,7 @@ export interface IPerpKeeperPerformanceLogger {
   /**
    * Record a funding payment (positive = received, negative = paid)
    */
-  recordFundingPayment(exchange: ExchangeType, amount: number): void;
+  recordFundingPayment(exchange: ExchangeType, amount: number, timestamp?: Date): void;
 
   /**
    * Record trading costs (fees, slippage, etc.) for break-even calculation
@@ -141,4 +149,9 @@ export interface IPerpKeeperPerformanceLogger {
    * Sync historical funding payments from exchange APIs
    */
   syncHistoricalFundingPayments(): Promise<void>;
+
+  /**
+   * Capture an hourly snapshot of expected vs actual earnings
+   */
+  captureHourlyEarnings(expected: number, actual: number): void;
 }

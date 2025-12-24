@@ -124,6 +124,14 @@ export class PerpKeeperPerformanceLogger
   private maxDrawdown: number = 0;
   private peakValue: number = 0;
 
+  // Earnings history
+  private historicalEarnings: Array<{
+    timestamp: Date;
+    expected: number;
+    actual: number;
+  }> = [];
+  private currentExpectedEarnings: number = 0;
+
   // Trading statistics
   private totalOrdersPlaced: number = 0;
   private totalOrdersFilled: number = 0;
@@ -182,24 +190,57 @@ export class PerpKeeperPerformanceLogger
     }
 
     try {
-      // Reset funding totals to avoid double-counting
-      for (const metrics of this.exchangeMetrics.values()) {
-        metrics.totalFundingCaptured = 0;
-        metrics.totalFundingPaid = 0;
-        metrics.netFundingCaptured = 0;
-      }
-      this.realizedFundingPayments = [];
-
-      // Fetch all historical funding payments (last 30 days)
+      // 1. Fetch all historical funding payments FIRST (don't reset yet)
       const payments = await this.realFundingService.fetchAllFundingPayments(30);
+      
+      // 2. Prepare new metric values in local variables to prevent UI flickering
+      const newExchangeFunding = new Map<ExchangeType, { captured: number, paid: number }>();
+      for (const exchangeType of this.exchangeMetrics.keys()) {
+        newExchangeFunding.set(exchangeType, { captured: 0, paid: 0 });
+      }
 
-      // Record each payment in the performance logger
+      const newRealizedPayments: Array<{
+        amount: number;
+        timestamp: Date;
+        exchange: ExchangeType;
+      }> = [];
+
+      // 3. Process payments into local variables
       for (const payment of payments) {
         // ONLY RECORD IF IT HAPPENED AFTER THE LAST RESET!
         if (this.lastResetTime && payment.timestamp < this.lastResetTime) {
           continue;
         }
-        this.recordFundingPayment(payment.exchange, payment.amount);
+
+        // Add to local list for APY calculation
+        newRealizedPayments.push({
+          amount: payment.amount,
+          timestamp: payment.timestamp, // Use actual payment timestamp!
+          exchange: payment.exchange,
+        });
+
+        // Add to local exchange totals
+        const exchangeData = newExchangeFunding.get(payment.exchange);
+        if (exchangeData) {
+          if (payment.amount > 0) {
+            exchangeData.captured += payment.amount;
+          } else {
+            exchangeData.paid += Math.abs(payment.amount);
+          }
+        }
+      }
+
+      // 4. Update state ATOMICALLY (synchronously) to prevent 0-value flickering
+      this.realizedFundingPayments = newRealizedPayments;
+      
+      for (const [exchange, data] of newExchangeFunding.entries()) {
+        const metrics = this.exchangeMetrics.get(exchange);
+        if (metrics) {
+          metrics.totalFundingCaptured = data.captured;
+          metrics.totalFundingPaid = data.paid;
+          metrics.netFundingCaptured = data.captured - data.paid;
+          metrics.lastUpdateTime = new Date();
+        }
       }
 
       // Also sync trading costs
@@ -327,7 +368,7 @@ export class PerpKeeperPerformanceLogger
   /**
    * Record a funding payment (positive = received, negative = paid)
    */
-  recordFundingPayment(exchange: ExchangeType, amount: number): void {
+  recordFundingPayment(exchange: ExchangeType, amount: number, timestamp?: Date): void {
     const metrics = this.exchangeMetrics.get(exchange);
     if (!metrics) return;
 
@@ -344,7 +385,7 @@ export class PerpKeeperPerformanceLogger
     // Track for realized APY calculation
     this.realizedFundingPayments.push({
       amount,
-      timestamp: new Date(),
+      timestamp: timestamp || new Date(),
       exchange,
     });
   }
@@ -819,6 +860,20 @@ export class PerpKeeperPerformanceLogger
 
     const realizedAPY = this.calculateRealizedAPY(capitalBase);
     
+    // Calculate expected earnings for next 1h period based on CURRENT funding rates and positions
+    let expectedEarningsNextPeriod = 0;
+    for (const snapshot of this.fundingSnapshots) {
+      const hourlyRate = snapshot.fundingRate; // snapshot funding rates are usually per-period (8h or 1h)
+      // Hyperliquid/Lighter are hourly. Let's assume 1h for this specific metric.
+      // If it's an 8h rate, we divide by 8.
+      const isHourly = Math.abs(hourlyRate) < 0.005; // Heuristic
+      const rateToUse = isHourly ? hourlyRate : hourlyRate / 8;
+      
+      // Calculate return for this position (SHORT side flip handled in updatePositionMetrics)
+      const positionReturn = snapshot.positionValue * rateToUse;
+      expectedEarningsNextPeriod += positionReturn;
+    }
+
     // Calculate split APYs (Funding vs Price PnL)
     let fundingAPY = 0;
     let pricePnlAPY = 0;
@@ -886,8 +941,10 @@ export class PerpKeeperPerformanceLogger
       realizedAPY,
       fundingAPY,
       pricePnlAPY,
+      expectedEarningsNextPeriod,
       estimatedDailyReturn,
       realizedDailyReturn,
+      historicalEarnings: [...this.historicalEarnings],
       exchangeMetrics: new Map(this.exchangeMetrics),
       capitalDeployed: capitalDeployed || totalPositionValue,
       capitalUtilization,
@@ -895,6 +952,32 @@ export class PerpKeeperPerformanceLogger
       maxDrawdown: this.maxDrawdown,
       sharpeRatio: 0, // TODO: Calculate if we have enough data
     };
+  }
+
+  /**
+   * Capture an hourly snapshot of expected vs actual earnings
+   */
+  captureHourlyEarnings(expected: number, actual: number): void {
+    const now = new Date();
+    // Normalize to the start of the current hour
+    const timestamp = new Date(now);
+    timestamp.setMinutes(0, 0, 0);
+
+    // Add to history
+    this.historicalEarnings.push({
+      timestamp,
+      expected,
+      actual,
+    });
+
+    // Keep only last 48 hours of data for the graph
+    if (this.historicalEarnings.length > 48) {
+      this.historicalEarnings.shift();
+    }
+
+    this.logger.debug(
+      `📊 Hourly earnings snapshot captured: Expected=$${expected.toFixed(4)}, Actual=$${actual.toFixed(4)}`,
+    );
   }
 
   /**
@@ -949,6 +1032,8 @@ export class PerpKeeperPerformanceLogger
         pricePnl: 0,
         realizedPnl: 0,
         netFunding: 0,
+        expectedEarningsNextPeriod: 0,
+        historicalEarnings: [],
         byExchange: {},
       });
     }
