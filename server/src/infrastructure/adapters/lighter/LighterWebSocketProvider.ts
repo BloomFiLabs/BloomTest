@@ -4,6 +4,7 @@ import {
   OnModuleInit,
   OnModuleDestroy,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import WebSocket from 'ws';
 
 interface MarketStatsMessage {
@@ -40,6 +41,43 @@ interface OrderBookMessage {
   };
 }
 
+/**
+ * Fill event from Lighter order updates
+ */
+export interface LighterFillEvent {
+  orderId: string;
+  marketIndex: number;
+  side: 'bid' | 'ask'; // bid = Long, ask = Short
+  price: string;
+  size: string;
+  filledSize: string;
+  status: 'filled' | 'partially_filled' | 'canceled' | 'open';
+  timestamp: number;
+}
+
+/**
+ * Order update event from Lighter
+ */
+export interface LighterOrderUpdate {
+  orderId: string;
+  marketIndex: number;
+  side: 'bid' | 'ask';
+  status: 'filled' | 'partially_filled' | 'canceled' | 'open';
+  size: string;
+  filledSize: string;
+  price: string;
+}
+
+/**
+ * Callback for fill events
+ */
+export type LighterFillCallback = (fill: LighterFillEvent) => void;
+
+/**
+ * Callback for order update events
+ */
+export type LighterOrderUpdateCallback = (update: LighterOrderUpdate) => void;
+
 interface WsMessage {
   channel?: string;
   type?: string;
@@ -50,10 +88,12 @@ interface WsMessage {
 }
 
 /**
- * LighterWebSocketProvider - WebSocket-based market data provider for Lighter Protocol
+ * LighterWebSocketProvider - WebSocket-based market data and user event provider
  *
- * Subscribes to market_stats channels for real-time open interest updates
- * This eliminates rate limit issues and provides accurate OI data
+ * Subscribes to:
+ * - market_stats: Real-time open interest and price updates
+ * - order_book: Order book snapshots
+ * - user_orders: Order status updates and fills (requires account address)
  *
  * Docs: https://apidocs.lighter.xyz/docs/websocket-reference#market-stats
  */
@@ -85,6 +125,33 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
 
   // Track if we've received initial data for each market
   private hasInitialData: Set<number> = new Set();
+
+  // Fill and order update callbacks
+  private readonly fillCallbacks: LighterFillCallback[] = [];
+  private readonly orderUpdateCallbacks: LighterOrderUpdateCallback[] = [];
+
+  // User account address for order subscriptions
+  private accountAddress: string | null = null;
+  private isUserSubscribed = false;
+
+  constructor(private readonly configService?: ConfigService) {
+    // Try to get account address for user subscriptions
+    if (configService) {
+      const privateKey = configService.get<string>('PRIVATE_KEY') ||
+        configService.get<string>('LIGHTER_PRIVATE_KEY');
+      if (privateKey) {
+        try {
+          const { Wallet } = require('ethers');
+          const normalizedKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
+          const wallet = new Wallet(normalizedKey);
+          this.accountAddress = wallet.address;
+          this.logger.log(`User order subscriptions enabled for: ${wallet.address.slice(0, 10)}...`);
+        } catch (e: any) {
+          this.logger.warn(`Could not derive account address: ${e.message}`);
+        }
+      }
+    }
+  }
 
   async onModuleInit() {
     await this.connect();
@@ -276,6 +343,12 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
           asks: message.data.asks || []
         });
       }
+      return;
+    }
+
+    // Handle user order updates
+    if (message.channel?.startsWith('user_orders/') && message.data) {
+      this.handleUserOrderUpdate(message.data);
       return;
     }
 
@@ -507,6 +580,12 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
     if (this.subscribedOrderbooks.size > 0) {
       this.subscribedOrderbooks.clear();
     }
+
+    // Resubscribe to user orders if we were subscribed
+    if (this.isUserSubscribed && this.accountAddress) {
+      this.isUserSubscribed = false; // Reset to allow resubscription
+      this.subscribeToUserOrders();
+    }
   }
 
   /**
@@ -548,5 +627,156 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
    */
   hasMarketData(marketIndex: number): boolean {
     return this.marketStatsCache.has(marketIndex);
+  }
+
+  /**
+   * Register a callback for fill events
+   * @param callback Function to call when a fill is received
+   */
+  onFill(callback: LighterFillCallback): void {
+    this.fillCallbacks.push(callback);
+    
+    // Auto-subscribe to user orders if we have an account address
+    if (!this.isUserSubscribed && this.accountAddress) {
+      this.subscribeToUserOrders();
+    }
+  }
+
+  /**
+   * Register a callback for order update events
+   * @param callback Function to call when an order is updated
+   */
+  onOrderUpdate(callback: LighterOrderUpdateCallback): void {
+    this.orderUpdateCallbacks.push(callback);
+    
+    // Auto-subscribe to user orders if we have an account address
+    if (!this.isUserSubscribed && this.accountAddress) {
+      this.subscribeToUserOrders();
+    }
+  }
+
+  /**
+   * Subscribe to user order updates
+   * Requires account address to be set
+   */
+  subscribeToUserOrders(): void {
+    if (!this.accountAddress) {
+      this.logger.warn('Cannot subscribe to user orders: no account address configured');
+      return;
+    }
+
+    if (this.isUserSubscribed) {
+      return;
+    }
+
+    if (this.isConnected && this.ws) {
+      // Subscribe to user orders channel
+      const subscription = {
+        type: 'subscribe',
+        channel: `user_orders/${this.accountAddress}`,
+      };
+
+      this.ws.send(JSON.stringify(subscription));
+      this.isUserSubscribed = true;
+      this.logger.log(`Subscribed to user orders for ${this.accountAddress.slice(0, 10)}...`);
+    }
+  }
+
+  /**
+   * Handle user order update message
+   */
+  private handleUserOrderUpdate(data: any): void {
+    if (!data) return;
+
+    const orderUpdate: LighterOrderUpdate = {
+      orderId: data.order_id?.toString() || data.orderId?.toString() || '',
+      marketIndex: data.market_id || data.marketIndex || 0,
+      side: data.side === 'bid' || data.side === 'B' ? 'bid' : 'ask',
+      status: this.mapOrderStatus(data.status),
+      size: data.size?.toString() || '0',
+      filledSize: data.filled_size?.toString() || data.filledSize?.toString() || '0',
+      price: data.price?.toString() || '0',
+    };
+
+    // Emit order update
+    for (const callback of this.orderUpdateCallbacks) {
+      try {
+        callback(orderUpdate);
+      } catch (error: any) {
+        this.logger.error(`Order update callback error: ${error.message}`);
+      }
+    }
+
+    // If order is filled, also emit a fill event
+    if (orderUpdate.status === 'filled' || orderUpdate.status === 'partially_filled') {
+      const fillEvent: LighterFillEvent = {
+        orderId: orderUpdate.orderId,
+        marketIndex: orderUpdate.marketIndex,
+        side: orderUpdate.side,
+        price: orderUpdate.price,
+        size: orderUpdate.size,
+        filledSize: orderUpdate.filledSize,
+        status: orderUpdate.status,
+        timestamp: Date.now(),
+      };
+
+      this.logger.log(
+        `📥 Lighter fill: market=${fillEvent.marketIndex} ${fillEvent.side === 'bid' ? 'LONG' : 'SHORT'} ` +
+        `${fillEvent.filledSize}/${fillEvent.size} @ ${fillEvent.price} (oid: ${fillEvent.orderId})`
+      );
+
+      for (const callback of this.fillCallbacks) {
+        try {
+          callback(fillEvent);
+        } catch (error: any) {
+          this.logger.error(`Fill callback error: ${error.message}`);
+        }
+      }
+    }
+  }
+
+  /**
+   * Map Lighter order status to normalized status
+   */
+  private mapOrderStatus(status: string): LighterOrderUpdate['status'] {
+    const normalized = status?.toLowerCase();
+    if (normalized === 'filled' || normalized === 'fully_filled') return 'filled';
+    if (normalized === 'partially_filled' || normalized === 'partial') return 'partially_filled';
+    if (normalized === 'canceled' || normalized === 'cancelled') return 'canceled';
+    return 'open';
+  }
+
+  /**
+   * Remove a fill callback
+   */
+  removeFillCallback(callback: LighterFillCallback): void {
+    const index = this.fillCallbacks.indexOf(callback);
+    if (index > -1) {
+      this.fillCallbacks.splice(index, 1);
+    }
+  }
+
+  /**
+   * Remove an order update callback
+   */
+  removeOrderUpdateCallback(callback: LighterOrderUpdateCallback): void {
+    const index = this.orderUpdateCallbacks.indexOf(callback);
+    if (index > -1) {
+      this.orderUpdateCallbacks.splice(index, 1);
+    }
+  }
+
+  /**
+   * Get the account address for user subscriptions
+   */
+  getAccountAddress(): string | null {
+    return this.accountAddress;
+  }
+
+  /**
+   * Check if subscribed to user orders
+   */
+  isSubscribedToUserOrders(): boolean {
+    return this.isUserSubscribed;
   }
 }

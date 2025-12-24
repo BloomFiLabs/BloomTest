@@ -4,6 +4,7 @@ import {
   OnModuleInit,
   OnModuleDestroy,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import WebSocket from 'ws';
 
 interface WsActiveAssetCtx {
@@ -31,16 +32,59 @@ interface WsL2Book {
   time: number;
 }
 
+/**
+ * Fill event from Hyperliquid userFills WebSocket subscription
+ */
+export interface HyperliquidFillEvent {
+  coin: string;
+  oid: string;
+  side: 'B' | 'A'; // B = Buy/Long, A = Ask/Short
+  px: string;
+  sz: string;
+  time: number;
+  hash: string;
+  closedPnl?: string;
+  fee?: string;
+}
+
+/**
+ * Order update event from Hyperliquid userEvents WebSocket subscription
+ */
+export interface HyperliquidOrderUpdate {
+  order: {
+    coin: string;
+    side: 'B' | 'A';
+    oid: number;
+    sz: string;
+    px?: string;
+    origSz?: string;
+    status: 'filled' | 'canceled' | 'open' | 'triggered';
+  };
+}
+
+/**
+ * Callback for fill events
+ */
+export type FillCallback = (fill: HyperliquidFillEvent) => void;
+
+/**
+ * Callback for order update events
+ */
+export type OrderUpdateCallback = (update: HyperliquidOrderUpdate) => void;
+
 interface WsMessage {
   channel?: string;
   data?: any;
 }
 
 /**
- * HyperLiquidWebSocketProvider - WebSocket-based funding rate provider
+ * HyperLiquidWebSocketProvider - WebSocket-based market data and user event provider
  *
- * Subscribes to activeAssetCtx for real-time funding rate updates
- * This eliminates rate limit issues by using streaming data instead of REST polling
+ * Subscribes to:
+ * - activeAssetCtx: Real-time funding rate updates
+ * - l2Book: Order book snapshots
+ * - userFills: Real-time fill notifications (requires authentication)
+ * - userEvents: Order status updates (requires authentication)
  *
  * Docs: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions
  */
@@ -67,6 +111,36 @@ export class HyperLiquidWebSocketProvider
 
   // Track if we've received initial data for each asset
   private hasInitialData: Set<string> = new Set();
+
+  // Fill event callbacks
+  private readonly fillCallbacks: FillCallback[] = [];
+  
+  // Order update callbacks
+  private readonly orderUpdateCallbacks: OrderUpdateCallback[] = [];
+
+  // User authentication for userFills/userEvents subscriptions
+  private walletAddress: string | null = null;
+  private isUserSubscribed = false;
+
+  constructor(private readonly configService?: ConfigService) {
+    // Try to get wallet address for user subscriptions
+    if (configService) {
+      const privateKey = configService.get<string>('PRIVATE_KEY') ||
+        configService.get<string>('HYPERLIQUID_PRIVATE_KEY');
+      if (privateKey) {
+        try {
+          // Import ethers dynamically to get wallet address
+          const { Wallet } = require('ethers');
+          const normalizedKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
+          const wallet = new Wallet(normalizedKey);
+          this.walletAddress = wallet.address;
+          this.logger.log(`User subscriptions enabled for wallet: ${wallet.address.slice(0, 10)}...`);
+        } catch (e: any) {
+          this.logger.warn(`Could not derive wallet address: ${e.message}`);
+        }
+      }
+    }
+  }
 
   async onModuleInit() {
     await this.connect();
@@ -190,6 +264,89 @@ export class HyperLiquidWebSocketProvider
         bids: l2Book.levels[0],
         asks: l2Book.levels[1]
       });
+    } else if (message.channel === 'user' && message.data) {
+      // User events - handle fills and order updates
+      this.handleUserEvent(message.data);
+    } else if (message.channel === 'userFills' && message.data) {
+      // User fills stream
+      this.handleUserFills(message.data);
+    }
+  }
+
+  /**
+   * Handle user event message (order updates, fills)
+   */
+  private handleUserEvent(data: any): void {
+    if (!data) return;
+
+    // User events can contain fills array
+    if (data.fills && Array.isArray(data.fills)) {
+      for (const fill of data.fills) {
+        this.emitFillEvent(fill);
+      }
+    }
+
+    // User events can contain order updates
+    if (data.orders && Array.isArray(data.orders)) {
+      for (const orderUpdate of data.orders) {
+        this.emitOrderUpdate({ order: orderUpdate });
+      }
+    }
+  }
+
+  /**
+   * Handle userFills stream message
+   */
+  private handleUserFills(data: any): void {
+    if (!data) return;
+
+    // Can be a single fill or array of fills
+    const fills = Array.isArray(data) ? data : [data];
+    for (const fill of fills) {
+      this.emitFillEvent(fill);
+    }
+  }
+
+  /**
+   * Emit fill event to all registered callbacks
+   */
+  private emitFillEvent(fill: HyperliquidFillEvent): void {
+    if (this.fillCallbacks.length === 0) return;
+
+    this.logger.log(
+      `📥 Fill received: ${fill.coin} ${fill.side === 'B' ? 'LONG' : 'SHORT'} ` +
+      `${fill.sz} @ ${fill.px} (oid: ${fill.oid})`
+    );
+
+    for (const callback of this.fillCallbacks) {
+      try {
+        callback(fill);
+      } catch (error: any) {
+        this.logger.error(`Fill callback error: ${error.message}`);
+      }
+    }
+  }
+
+  /**
+   * Emit order update to all registered callbacks
+   */
+  private emitOrderUpdate(update: HyperliquidOrderUpdate): void {
+    if (this.orderUpdateCallbacks.length === 0) return;
+
+    const order = update.order;
+    if (order.status === 'filled' || order.status === 'canceled') {
+      this.logger.log(
+        `📋 Order ${order.status}: ${order.coin} ${order.side === 'B' ? 'LONG' : 'SHORT'} ` +
+        `oid=${order.oid}`
+      );
+    }
+
+    for (const callback of this.orderUpdateCallbacks) {
+      try {
+        callback(update);
+      } catch (error: any) {
+        this.logger.error(`Order update callback error: ${error.message}`);
+      }
     }
   }
 
@@ -291,6 +448,12 @@ export class HyperLiquidWebSocketProvider
         this.subscribeToL2Book(coin);
       }
     }
+
+    // Resubscribe to user events if we were subscribed before
+    if (this.isUserSubscribed && this.walletAddress) {
+      this.isUserSubscribed = false; // Reset to allow resubscription
+      this.subscribeToUserEvents();
+    }
   }
 
   /**
@@ -377,5 +540,95 @@ export class HyperLiquidWebSocketProvider
    */
   isWsConnected(): boolean {
     return this.isConnected;
+  }
+
+  /**
+   * Register a callback for fill events
+   * @param callback Function to call when a fill is received
+   */
+  onFill(callback: FillCallback): void {
+    this.fillCallbacks.push(callback);
+    
+    // Auto-subscribe to user events if we have a wallet address
+    if (!this.isUserSubscribed && this.walletAddress) {
+      this.subscribeToUserEvents();
+    }
+  }
+
+  /**
+   * Register a callback for order update events
+   * @param callback Function to call when an order is updated
+   */
+  onOrderUpdate(callback: OrderUpdateCallback): void {
+    this.orderUpdateCallbacks.push(callback);
+    
+    // Auto-subscribe to user events if we have a wallet address
+    if (!this.isUserSubscribed && this.walletAddress) {
+      this.subscribeToUserEvents();
+    }
+  }
+
+  /**
+   * Subscribe to user events (fills and order updates)
+   * Requires wallet address to be set
+   */
+  subscribeToUserEvents(): void {
+    if (!this.walletAddress) {
+      this.logger.warn('Cannot subscribe to user events: no wallet address configured');
+      return;
+    }
+
+    if (this.isUserSubscribed) {
+      return; // Already subscribed
+    }
+
+    if (this.isConnected && this.ws) {
+      // Subscribe to user events channel
+      const subscription = {
+        method: 'subscribe',
+        subscription: {
+          type: 'userEvents',
+          user: this.walletAddress,
+        },
+      };
+
+      this.ws.send(JSON.stringify(subscription));
+      this.isUserSubscribed = true;
+      this.logger.log(`Subscribed to user events for ${this.walletAddress.slice(0, 10)}...`);
+    }
+  }
+
+  /**
+   * Remove a fill callback
+   */
+  removeFillCallback(callback: FillCallback): void {
+    const index = this.fillCallbacks.indexOf(callback);
+    if (index > -1) {
+      this.fillCallbacks.splice(index, 1);
+    }
+  }
+
+  /**
+   * Remove an order update callback
+   */
+  removeOrderUpdateCallback(callback: OrderUpdateCallback): void {
+    const index = this.orderUpdateCallbacks.indexOf(callback);
+    if (index > -1) {
+      this.orderUpdateCallbacks.splice(index, 1);
+    }
+  }
+
+  /**
+   * Get the wallet address for user subscriptions
+   */
+  getWalletAddress(): string | null {
+    return this.walletAddress;
+  }
+
+  /**
+   * Check if subscribed to user events
+   */
+  isSubscribedToUserEvents(): boolean {
+    return this.isUserSubscribed;
   }
 }

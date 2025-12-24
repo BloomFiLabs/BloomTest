@@ -42,6 +42,7 @@ import { DiagnosticsService } from '../services/DiagnosticsService';
 import { MarketQualityFilter } from '../../domain/services/MarketQualityFilter';
 import { CircuitBreakerService } from '../services/CircuitBreakerService';
 import { ExecutionLockService } from '../services/ExecutionLockService';
+import { OrderFillMonitor } from '../services/OrderFillMonitor';
 import { LiquidationMonitorService } from '../../domain/services/LiquidationMonitorService';
 import { MarketStateService } from '../services/MarketStateService';
 import { PositionStateRepository } from '../repositories/PositionStateRepository';
@@ -699,6 +700,9 @@ import { PredictionBacktester } from '../../domain/services/prediction/Predictio
 
     // Execution lock service for symbol-level locking
     ExecutionLockService,
+
+    // Order fill monitor - real-time fill detection via WebSocket
+    OrderFillMonitor,
 
     // Maker efficiency service - ensures we are best maker on book
     MakerEfficiencyService,
