@@ -1394,29 +1394,12 @@ export class PerpKeeperScheduler implements OnModuleInit {
    * This ensures Real APY and Net Funding are up-to-date
    */
   private async syncFundingPayments(): Promise<void> {
-    if (!this.fundingPaymentsService) {
-      return; // Service not available
-    }
-
     try {
-      // Fetch funding payments from all exchanges (cached, won't spam APIs)
-      const payments =
-        await this.fundingPaymentsService.fetchAllFundingPayments(30);
-
-      // Record each payment in the performance logger
-      for (const payment of payments) {
-        this.performanceLogger.recordFundingPayment(
-          payment.exchange,
-          payment.amount,
-        );
-      }
-
-      this.logger.debug(
-        `Synced ${payments.length} funding payments for performance metrics`,
-      );
+      // Delegate to the performance logger's sync method
+      // This is safe because it resets totals before re-calculating from source of truth
+      await this.performanceLogger.syncHistoricalFundingPayments();
     } catch (error: any) {
       this.logger.warn(`Failed to sync funding payments: ${error.message}`);
-      // Don't fail execution if funding sync fails
     }
   }
 

@@ -176,7 +176,7 @@ export class PerpKeeperPerformanceLogger
    * This ensures the performance logger has all historical data on startup
    * Resets funding totals first to avoid double-counting
    */
-  private async syncHistoricalFundingPayments(): Promise<void> {
+  public async syncHistoricalFundingPayments(): Promise<void> {
     if (!this.realFundingService) {
       return; // Service not available
     }

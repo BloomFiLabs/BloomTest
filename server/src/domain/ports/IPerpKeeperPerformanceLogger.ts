@@ -136,4 +136,9 @@ export interface IPerpKeeperPerformanceLogger {
    * Log comprehensive performance metrics
    */
   logPerformanceMetrics(capitalDeployed?: number): void;
+
+  /**
+   * Sync historical funding payments from exchange APIs
+   */
+  syncHistoricalFundingPayments(): Promise<void>;
 }
