@@ -1468,10 +1468,10 @@ export class PerpKeeperScheduler implements OnModuleInit {
 
   /**
    * Check for single-leg positions and try to open missing side
-   * Runs every 5 minutes to handle single-leg positions detected outside of execution cycle
+   * Runs every 60 seconds for FAST detection - single legs are our TOP PRIORITY
    * Policy: After all retries fail, close the single leg and move to next opportunity
    */
-  @Interval(300000) // Every 5 minutes (300000 ms)
+  @Interval(60000) // Every 60 seconds (was 5 min - single legs are TOP PRIORITY!)
   async checkAndRetrySingleLegPositions(): Promise<void> {
     // Skip if main execution is running (prevents race conditions)
     if (this.isRunning) {
@@ -1974,6 +1974,281 @@ export class PerpKeeperScheduler implements OnModuleInit {
       }
     } catch (error: any) {
       this.logger.error(`Error during zombie cleanup: ${error.message}`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // POST-EXECUTION FILL VERIFICATION - Fast corrective action for unbalanced fills
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Verify recent order fills and take corrective action if one leg is unfilled
+   * 
+   * This is our FAST response to asymmetric fills - runs every 20 seconds to catch
+   * orders that have had their grace period but still aren't filled.
+   * 
+   * Grace period logic:
+   * - Orders < 30 seconds old: Leave alone (give maker time to fill)
+   * - Orders 30-90 seconds old: Check status, try aggressive price improvement
+   * - Orders > 90 seconds old: If paired leg filled, MARKET order to match
+   * 
+   * This prevents large position imbalances from building up.
+   */
+  @Interval(20000) // Every 20 seconds - FAST response to fill issues
+  async verifyRecentExecutionFills(): Promise<void> {
+    if (!this.executionLockService) return;
+    if (this.isRunning) return; // Don't interfere with active execution
+
+    // Grace periods (configurable via env)
+    const MIN_AGE_SECONDS = parseFloat(process.env.FILL_CHECK_MIN_AGE_SECONDS || '30');
+    const AGGRESSIVE_AGE_SECONDS = parseFloat(process.env.FILL_CHECK_AGGRESSIVE_AGE_SECONDS || '60');
+    const MARKET_ORDER_AGE_SECONDS = parseFloat(process.env.FILL_CHECK_MARKET_AGE_SECONDS || '90');
+
+    try {
+      const allOrders = this.executionLockService.getAllActiveOrders();
+      if (allOrders.length === 0) return;
+
+      const now = Date.now();
+
+      // Group orders by symbol to find paired legs
+      const ordersBySymbol = new Map<string, typeof allOrders>();
+      for (const order of allOrders) {
+        const normalizedSymbol = this.normalizeSymbol(order.symbol);
+        if (!ordersBySymbol.has(normalizedSymbol)) {
+          ordersBySymbol.set(normalizedSymbol, []);
+        }
+        ordersBySymbol.get(normalizedSymbol)!.push(order);
+      }
+
+      for (const [symbol, orders] of ordersBySymbol) {
+        // Look for asymmetric situations (one FILLED/position exists, one still PENDING)
+        const longOrders = orders.filter(o => o.side === 'LONG');
+        const shortOrders = orders.filter(o => o.side === 'SHORT');
+
+        // If we only have one side in orders, check if the other side has a position
+        // (which would indicate one filled and one didn't)
+        if (longOrders.length === 1 && shortOrders.length === 0) {
+          await this.checkAndFixUnfilledLeg(longOrders[0], 'SHORT', symbol, now, MIN_AGE_SECONDS, AGGRESSIVE_AGE_SECONDS, MARKET_ORDER_AGE_SECONDS);
+        } else if (shortOrders.length === 1 && longOrders.length === 0) {
+          await this.checkAndFixUnfilledLeg(shortOrders[0], 'LONG', symbol, now, MIN_AGE_SECONDS, AGGRESSIVE_AGE_SECONDS, MARKET_ORDER_AGE_SECONDS);
+        } else if (longOrders.length === 1 && shortOrders.length === 1) {
+          // Both orders exist - check if one is filled and one is stuck
+          await this.checkPairedOrderStatus(longOrders[0], shortOrders[0], symbol, now, MIN_AGE_SECONDS, AGGRESSIVE_AGE_SECONDS, MARKET_ORDER_AGE_SECONDS);
+        }
+      }
+    } catch (error: any) {
+      this.logger.debug(`Error in verifyRecentExecutionFills: ${error.message}`);
+    }
+  }
+
+  /**
+   * Check paired orders and take action if one is filled but the other isn't
+   */
+  private async checkPairedOrderStatus(
+    longOrder: any,
+    shortOrder: any,
+    symbol: string,
+    now: number,
+    minAgeSec: number,
+    aggressiveAgeSec: number,
+    marketAgeSec: number,
+  ): Promise<void> {
+    const longAgeMs = now - longOrder.placedAt.getTime();
+    const shortAgeMs = now - shortOrder.placedAt.getTime();
+    const longAgeSec = longAgeMs / 1000;
+    const shortAgeSec = shortAgeMs / 1000;
+
+    // Both orders too young - let them cook
+    if (longAgeSec < minAgeSec && shortAgeSec < minAgeSec) {
+      return;
+    }
+
+    // Check status of both orders on exchange
+    const adapters = this.keeperService.getExchangeAdapters();
+    const longAdapter = adapters.get(longOrder.exchange as ExchangeType);
+    const shortAdapter = adapters.get(shortOrder.exchange as ExchangeType);
+
+    if (!longAdapter || !shortAdapter) return;
+
+    try {
+      const [longStatus, shortStatus] = await Promise.all([
+        longAdapter.getOrderStatus(longOrder.orderId, longOrder.symbol).catch(() => null),
+        shortAdapter.getOrderStatus(shortOrder.orderId, shortOrder.symbol).catch(() => null),
+      ]);
+
+      const longFilled = longStatus?.status === OrderStatus.FILLED || !longStatus;
+      const shortFilled = shortStatus?.status === OrderStatus.FILLED || !shortStatus;
+
+      // Both filled - great, clear them
+      if (longFilled && shortFilled) {
+        this.executionLockService?.forceClearOrder(longOrder.exchange, longOrder.symbol, 'LONG');
+        this.executionLockService?.forceClearOrder(shortOrder.exchange, shortOrder.symbol, 'SHORT');
+        return;
+      }
+
+      // One filled, one not - take action
+      if (longFilled && !shortFilled) {
+        await this.takeCorrectiveAction(shortOrder, shortAdapter, shortAgeSec, aggressiveAgeSec, marketAgeSec, symbol, 'SHORT');
+      } else if (shortFilled && !longFilled) {
+        await this.takeCorrectiveAction(longOrder, longAdapter, longAgeSec, aggressiveAgeSec, marketAgeSec, symbol, 'LONG');
+      }
+    } catch (error: any) {
+      this.logger.debug(`Error checking paired order status for ${symbol}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Check if an unfilled leg should be fixed
+   */
+  private async checkAndFixUnfilledLeg(
+    existingOrder: any,
+    missingSide: 'LONG' | 'SHORT',
+    symbol: string,
+    now: number,
+    minAgeSec: number,
+    aggressiveAgeSec: number,
+    marketAgeSec: number,
+  ): Promise<void> {
+    const orderAgeMs = now - existingOrder.placedAt.getTime();
+    const orderAgeSec = orderAgeMs / 1000;
+
+    // Order too young - let it cook
+    if (orderAgeSec < minAgeSec) {
+      return;
+    }
+
+    // Check if the existing order side has created a position (meaning it filled)
+    const positions = this.marketStateService?.getAllPositions() || [];
+    const existingPosition = positions.find(p => 
+      this.normalizeSymbol(p.symbol) === symbol && 
+      p.exchangeType === existingOrder.exchange
+    );
+
+    if (existingPosition && Math.abs(existingPosition.size) > 0.0001) {
+      // Position exists on existing order's exchange, but we have no order for other side
+      // This means one leg filled and the other might have failed to place or got lost
+      this.logger.warn(
+        `⚠️ Detected asymmetric fill for ${symbol}: ` +
+        `${existingOrder.side} filled on ${existingOrder.exchange}, but missing ${missingSide} order/position. ` +
+        `Age: ${orderAgeSec.toFixed(0)}s`
+      );
+
+      // Log to diagnostics
+      this.diagnosticsService?.recordSingleLegFailure({
+        id: `async-fill-${symbol}-${Date.now()}`,
+        symbol,
+        timestamp: new Date(),
+        failedLeg: missingSide.toLowerCase() as 'long' | 'short',
+        failedExchange: existingOrder.exchange === ExchangeType.HYPERLIQUID 
+          ? ExchangeType.LIGHTER 
+          : ExchangeType.HYPERLIQUID,
+        successfulExchange: existingOrder.exchange,
+        failureReason: 'timeout',
+        failureMessage: `${missingSide} order missing after ${orderAgeSec.toFixed(0)}s`,
+        timeBetweenLegsMs: orderAgeMs,
+      });
+    }
+  }
+
+  /**
+   * Take corrective action on an unfilled order
+   */
+  private async takeCorrectiveAction(
+    unfilledOrder: any,
+    adapter: IPerpExchangeAdapter,
+    orderAgeSec: number,
+    aggressiveAgeSec: number,
+    marketAgeSec: number,
+    symbol: string,
+    side: 'LONG' | 'SHORT',
+  ): Promise<void> {
+    try {
+      if (orderAgeSec >= marketAgeSec) {
+        // Order is old enough - use MARKET order to force fill
+        this.logger.warn(
+          `🚨 Forcing MARKET order for ${symbol} ${side} after ${orderAgeSec.toFixed(0)}s unfilled. ` +
+          `Cancelling existing order ${unfilledOrder.orderId} and placing market order.`
+        );
+
+        // Cancel existing order
+        try {
+          await adapter.cancelOrder(unfilledOrder.orderId, unfilledOrder.symbol);
+        } catch (cancelErr: any) {
+          this.logger.debug(`Could not cancel order (may already be filled): ${cancelErr.message}`);
+        }
+
+        // Get current mark price and place MARKET order
+        const markPrice = await adapter.getMarkPrice(unfilledOrder.symbol);
+        const marketOrder = new PerpOrderRequest(
+          unfilledOrder.symbol,
+          side === 'LONG' ? OrderSide.LONG : OrderSide.SHORT,
+          OrderType.MARKET,
+          unfilledOrder.size,
+          markPrice,
+          TimeInForce.IOC,
+          false,
+        );
+
+        const response = await adapter.placeOrder(marketOrder);
+        if (response.isSuccess()) {
+          this.logger.log(`✅ MARKET order placed to complete ${symbol} ${side}: ${response.orderId}`);
+          this.executionLockService?.forceClearOrder(unfilledOrder.exchange, unfilledOrder.symbol, side);
+        } else {
+          this.logger.error(`❌ Failed to place corrective MARKET order: ${response.error}`);
+        }
+
+      } else if (orderAgeSec >= aggressiveAgeSec) {
+        // Order is moderately old - try aggressive price improvement
+        this.logger.warn(
+          `⚠️ Attempting aggressive price improvement for ${symbol} ${side} after ${orderAgeSec.toFixed(0)}s unfilled`
+        );
+
+        const markPrice = await adapter.getMarkPrice(unfilledOrder.symbol);
+        // Improve price by 0.5% for faster fill
+        const improvedPrice = side === 'LONG' 
+          ? markPrice * 1.005  // Pay more to buy
+          : markPrice * 0.995; // Accept less to sell
+
+        // Check if adapter supports modifyOrder
+        if ('modifyOrder' in adapter && typeof adapter.modifyOrder === 'function') {
+          try {
+            await (adapter as any).modifyOrder(unfilledOrder.orderId, new PerpOrderRequest(
+              unfilledOrder.symbol,
+              side === 'LONG' ? OrderSide.LONG : OrderSide.SHORT,
+              OrderType.LIMIT,
+              unfilledOrder.size,
+              improvedPrice,
+              TimeInForce.GTC,
+              false,
+            ));
+            this.logger.log(`📈 Improved price on ${symbol} ${side} order to ${improvedPrice.toFixed(6)}`);
+          } catch (modifyErr: any) {
+            this.logger.debug(`Could not modify order (may be filled): ${modifyErr.message}`);
+          }
+        } else {
+          // Fallback: cancel and replace
+          try {
+            await adapter.cancelOrder(unfilledOrder.orderId, unfilledOrder.symbol);
+            const replaceOrder = new PerpOrderRequest(
+              unfilledOrder.symbol,
+              side === 'LONG' ? OrderSide.LONG : OrderSide.SHORT,
+              OrderType.LIMIT,
+              unfilledOrder.size,
+              improvedPrice,
+              TimeInForce.GTC,
+              false,
+            );
+            const response = await adapter.placeOrder(replaceOrder);
+            if (response.isSuccess()) {
+              this.logger.log(`📈 Replaced order for ${symbol} ${side} at improved price ${improvedPrice.toFixed(6)}`);
+            }
+          } catch (replaceErr: any) {
+            this.logger.debug(`Could not replace order: ${replaceErr.message}`);
+          }
+        }
+      }
+    } catch (error: any) {
+      this.logger.error(`Error taking corrective action for ${symbol} ${side}: ${error.message}`);
     }
   }
 
@@ -2511,7 +2786,28 @@ export class PerpKeeperScheduler implements OnModuleInit {
         return;
       }
 
-      const positions = this.marketStateService?.getAllPositions() || [];
+      // Fetch FRESH positions directly from exchanges - don't rely on stale cache
+      // This is critical for detecting real imbalances
+      const adapters = this.keeperService.getExchangeAdapters();
+      const freshPositions: PerpPosition[] = [];
+      
+      for (const [exchangeType, adapter] of adapters) {
+        try {
+          const exchangePositions = await adapter.getPositions();
+          freshPositions.push(...exchangePositions);
+        } catch (error: any) {
+          this.logger.debug(`Could not fetch positions from ${exchangeType}: ${error.message}`);
+        }
+      }
+      
+      // Also update cache with fresh data
+      if (this.marketStateService) {
+        for (const pos of freshPositions) {
+          this.marketStateService.updatePosition(pos);
+        }
+      }
+
+      const positions = freshPositions;
       if (positions.length < 2) return;
 
       // Group positions by normalized symbol
@@ -2572,8 +2868,11 @@ export class PerpKeeperScheduler implements OnModuleInit {
         }
 
         if (imbalancePercent > 5) {
+          // Classify severity
+          const severity = imbalancePercent > 30 ? '🚨 CRITICAL' : imbalancePercent > 15 ? '⚠️ SEVERE' : '⚠️';
+          
           this.logger.warn(
-            `⚠️ Position size imbalance detected for ${symbol}: ` +
+            `${severity} Position size imbalance for ${symbol}: ` +
             `LONG=${longSize.toFixed(4)} on ${longPos.exchangeType}, ` +
             `SHORT=${shortSize.toFixed(4)} on ${shortPos.exchangeType} ` +
             `(${imbalancePercent.toFixed(1)}% difference)`
@@ -2590,11 +2889,6 @@ export class PerpKeeperScheduler implements OnModuleInit {
             continue;
           }
 
-          this.logger.warn(
-            `🔧 Fixing imbalance: Reducing ${largerPos.side} on ${largerPos.exchangeType} ` +
-            `by ${excessSize.toFixed(4)} to match ${smallerSize.toFixed(4)}`
-          );
-
           // Get adapter and place reduce-only order
           const adapter = this.keeperService.getExchangeAdapter(largerPos.exchangeType);
           if (!adapter) continue;
@@ -2603,13 +2897,26 @@ export class PerpKeeperScheduler implements OnModuleInit {
             const closeSide = largerPos.side === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG;
             const markPrice = await adapter.getMarkPrice(largerPos.symbol);
 
+            // For severe imbalances (>20%), use MARKET order to guarantee fill
+            // For smaller imbalances, use aggressive limit (0.5% worse than mark)
+            const useMktOrder = imbalancePercent > 20;
+            const orderType = useMktOrder ? OrderType.MARKET : OrderType.LIMIT;
+            const limitPrice = closeSide === OrderSide.LONG 
+              ? markPrice * 1.005  // Pay 0.5% more to buy
+              : markPrice * 0.995; // Accept 0.5% less to sell
+
+            this.logger.warn(
+              `🔧 FIXING IMBALANCE: Reducing ${largerPos.side} on ${largerPos.exchangeType} ` +
+              `by ${excessSize.toFixed(4)} (${orderType} order) to match ${smallerSize.toFixed(4)}`
+            );
+
             const reduceOrder = new PerpOrderRequest(
               largerPos.symbol,
               closeSide,
-              OrderType.LIMIT,
+              orderType,
               excessSize,
-              markPrice,
-              TimeInForce.GTC,
+              useMktOrder ? markPrice : limitPrice, // Market orders still need a price for some exchanges
+              useMktOrder ? TimeInForce.IOC : TimeInForce.GTC,
               true, // reduceOnly
             );
 
@@ -2617,19 +2924,22 @@ export class PerpKeeperScheduler implements OnModuleInit {
             
             if (response.isSuccess()) {
               this.logger.log(
-                `✅ Placed reduce order to fix imbalance: ${response.orderId} ` +
-                `(${closeSide} ${excessSize.toFixed(4)} ${largerPos.symbol} @ ${markPrice})`
+                `✅ Placed ${orderType} reduce order to fix ${imbalancePercent.toFixed(0)}% imbalance: ` +
+                `${response.orderId} (${closeSide} ${excessSize.toFixed(4)} ${largerPos.symbol})`
               );
               // Mark drift as resolved in diagnostics
               this.diagnosticsService?.resolvePositionDrift(symbol, 'reduced');
+              
+              // Refresh market state after fixing
+              await this.marketStateService?.refreshAll();
             } else {
-              this.logger.warn(
-                `⚠️ Failed to place reduce order: ${response.error}`
+              this.logger.error(
+                `❌ Failed to fix imbalance with ${orderType} order: ${response.error}`
               );
             }
           } catch (error: any) {
-            this.logger.warn(
-              `⚠️ Error fixing position imbalance for ${symbol}: ${error.message}`
+            this.logger.error(
+              `❌ Error fixing position imbalance for ${symbol}: ${error.message}`
             );
           }
         }
@@ -2637,6 +2947,247 @@ export class PerpKeeperScheduler implements OnModuleInit {
     } catch (error: any) {
       this.logger.debug(`Error in position size balance check: ${error.message}`);
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NUCLEAR OPTION - Close both sides if imbalance persists
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Track persistent imbalances: symbol -> { firstDetectedAt, lastImbalancePercent, attemptCount }
+  private readonly persistentImbalances: Map<string, {
+    firstDetectedAt: Date;
+    lastImbalancePercent: number;
+    attemptCount: number;
+    longExchange: ExchangeType;
+    shortExchange: ExchangeType;
+  }> = new Map();
+
+  /**
+   * NUCLEAR OPTION: If imbalance persists for too long, close BOTH sides
+   * 
+   * This is the last resort when:
+   * 1. Position imbalance > 20% persists for > 3 minutes
+   * 2. Multiple fix attempts have failed
+   * 
+   * Options:
+   * A) Market order to complete the smaller leg (if missing leg scenario)
+   * B) Close BOTH legs to eliminate exposure (if truly stuck)
+   * 
+   * Runs every 60 seconds.
+   */
+  @Interval(60000) // Every 60 seconds
+  async checkPersistentImbalancesNuclearOption(): Promise<void> {
+    if (this.isRunning) return;
+    if (this.executionLockService?.isGlobalLockHeld()) return;
+
+    // Configurable thresholds
+    const NUCLEAR_THRESHOLD_PERCENT = parseFloat(process.env.NUCLEAR_IMBALANCE_PERCENT || '20');
+    const NUCLEAR_TIMEOUT_MINUTES = parseFloat(process.env.NUCLEAR_TIMEOUT_MINUTES || '3');
+    const MAX_ATTEMPTS_BEFORE_CLOSE = parseInt(process.env.NUCLEAR_MAX_ATTEMPTS || '3');
+
+    try {
+      const adapters = this.keeperService.getExchangeAdapters();
+      const freshPositions: PerpPosition[] = [];
+      
+      for (const [exchangeType, adapter] of adapters) {
+        try {
+          const exchangePositions = await adapter.getPositions();
+          freshPositions.push(...exchangePositions);
+        } catch (error: any) {
+          this.logger.debug(`Could not fetch positions from ${exchangeType}: ${error.message}`);
+        }
+      }
+
+      const positions = freshPositions;
+      if (positions.length < 1) {
+        // Clear tracking if no positions
+        this.persistentImbalances.clear();
+        return;
+      }
+
+      // Group positions by normalized symbol
+      const positionsBySymbol = new Map<string, PerpPosition[]>();
+      for (const position of positions) {
+        const normalizedSymbol = this.normalizeSymbol(position.symbol);
+        if (!positionsBySymbol.has(normalizedSymbol)) {
+          positionsBySymbol.set(normalizedSymbol, []);
+        }
+        positionsBySymbol.get(normalizedSymbol)!.push(position);
+      }
+
+      const now = new Date();
+
+      for (const [symbol, symbolPositions] of positionsBySymbol) {
+        const longPositions = symbolPositions.filter(p => p.side === OrderSide.LONG);
+        const shortPositions = symbolPositions.filter(p => p.side === OrderSide.SHORT);
+
+        // CASE 1: Single leg only (most critical)
+        if ((longPositions.length > 0 && shortPositions.length === 0) ||
+            (shortPositions.length > 0 && longPositions.length === 0)) {
+          
+          const singleLegPos = longPositions[0] || shortPositions[0];
+          const tracking = this.persistentImbalances.get(symbol);
+          
+          if (!tracking) {
+            // First detection - start tracking
+            this.persistentImbalances.set(symbol, {
+              firstDetectedAt: now,
+              lastImbalancePercent: 100, // Single leg = 100% imbalance
+              attemptCount: 0,
+              longExchange: singleLegPos.exchangeType,
+              shortExchange: singleLegPos.exchangeType === ExchangeType.HYPERLIQUID 
+                ? ExchangeType.LIGHTER : ExchangeType.HYPERLIQUID,
+            });
+            continue;
+          }
+
+          const persistenceMinutes = (now.getTime() - tracking.firstDetectedAt.getTime()) / 60000;
+          tracking.attemptCount++;
+
+          if (persistenceMinutes >= NUCLEAR_TIMEOUT_MINUTES || tracking.attemptCount >= MAX_ATTEMPTS_BEFORE_CLOSE) {
+            this.logger.error(
+              `🚨☢️ NUCLEAR OPTION: Single leg ${symbol} (${singleLegPos.side}) persisted ${persistenceMinutes.toFixed(1)} min. ` +
+              `Closing to eliminate exposure.`
+            );
+
+            await this.executeNuclearClose(symbol, [singleLegPos], adapters);
+            this.persistentImbalances.delete(symbol);
+          }
+          continue;
+        }
+
+        // CASE 2: Both legs exist but severely imbalanced
+        let longPos: PerpPosition | undefined;
+        let shortPos: PerpPosition | undefined;
+
+        for (const lp of longPositions) {
+          for (const sp of shortPositions) {
+            if (lp.exchangeType !== sp.exchangeType) {
+              longPos = lp;
+              shortPos = sp;
+              break;
+            }
+          }
+          if (longPos && shortPos) break;
+        }
+
+        if (!longPos || !shortPos) continue;
+
+        const longSize = Math.abs(longPos.size);
+        const shortSize = Math.abs(shortPos.size);
+        const sizeDiff = Math.abs(longSize - shortSize);
+        const avgSize = (longSize + shortSize) / 2;
+        const imbalancePercent = avgSize > 0 ? (sizeDiff / avgSize) * 100 : 0;
+
+        if (imbalancePercent < NUCLEAR_THRESHOLD_PERCENT) {
+          // Imbalance resolved - clear tracking
+          this.persistentImbalances.delete(symbol);
+          continue;
+        }
+
+        const tracking = this.persistentImbalances.get(symbol);
+        
+        if (!tracking) {
+          // First detection - start tracking
+          this.persistentImbalances.set(symbol, {
+            firstDetectedAt: now,
+            lastImbalancePercent: imbalancePercent,
+            attemptCount: 0,
+            longExchange: longPos.exchangeType,
+            shortExchange: shortPos.exchangeType,
+          });
+          continue;
+        }
+
+        const persistenceMinutes = (now.getTime() - tracking.firstDetectedAt.getTime()) / 60000;
+        tracking.lastImbalancePercent = imbalancePercent;
+        tracking.attemptCount++;
+
+        if (persistenceMinutes >= NUCLEAR_TIMEOUT_MINUTES && imbalancePercent >= NUCLEAR_THRESHOLD_PERCENT) {
+          this.logger.error(
+            `🚨☢️ NUCLEAR OPTION: ${symbol} imbalance ${imbalancePercent.toFixed(1)}% persisted ${persistenceMinutes.toFixed(1)} min. ` +
+            `Closing BOTH legs to eliminate exposure.`
+          );
+
+          await this.executeNuclearClose(symbol, [longPos, shortPos], adapters);
+          this.persistentImbalances.delete(symbol);
+        } else if (persistenceMinutes >= 1) {
+          this.logger.warn(
+            `⏳ Tracking persistent imbalance for ${symbol}: ${imbalancePercent.toFixed(1)}% for ${persistenceMinutes.toFixed(1)} min ` +
+            `(Nuclear in ${(NUCLEAR_TIMEOUT_MINUTES - persistenceMinutes).toFixed(1)} min)`
+          );
+        }
+      }
+
+      // Clean up tracking for symbols that no longer have positions
+      for (const trackedSymbol of this.persistentImbalances.keys()) {
+        if (!positionsBySymbol.has(trackedSymbol)) {
+          this.persistentImbalances.delete(trackedSymbol);
+        }
+      }
+
+    } catch (error: any) {
+      this.logger.error(`Error in nuclear option check: ${error.message}`);
+    }
+  }
+
+  /**
+   * Execute nuclear close - close all positions for a symbol
+   */
+  private async executeNuclearClose(
+    symbol: string,
+    positions: PerpPosition[],
+    adapters: Map<ExchangeType, IPerpExchangeAdapter>,
+  ): Promise<void> {
+    this.logger.error(`☢️ EXECUTING NUCLEAR CLOSE for ${symbol} - closing ${positions.length} position(s)`);
+
+    for (const position of positions) {
+      const adapter = adapters.get(position.exchangeType);
+      if (!adapter) {
+        this.logger.error(`No adapter for ${position.exchangeType}`);
+        continue;
+      }
+
+      try {
+        const closeSide = position.side === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG;
+        const markPrice = await adapter.getMarkPrice(position.symbol);
+        const closeSize = Math.abs(position.size);
+
+        // Use MARKET order - we NEED this to close NOW
+        const closeOrder = new PerpOrderRequest(
+          position.symbol,
+          closeSide,
+          OrderType.MARKET,
+          closeSize,
+          markPrice,
+          TimeInForce.IOC,
+          true, // reduceOnly
+        );
+
+        this.logger.warn(
+          `☢️ Nuclear MARKET close: ${position.side} ${closeSize.toFixed(4)} ${position.symbol} on ${position.exchangeType}`
+        );
+
+        const response = await adapter.placeOrder(closeOrder);
+
+        if (response.isSuccess()) {
+          this.logger.log(
+            `✅ Nuclear close successful: ${response.orderId} - ${position.side} ${closeSize.toFixed(4)} ${position.symbol}`
+          );
+        } else {
+          this.logger.error(
+            `❌ Nuclear close FAILED for ${position.symbol} on ${position.exchangeType}: ${response.error}`
+          );
+        }
+      } catch (error: any) {
+        this.logger.error(
+          `❌ Nuclear close error for ${position.symbol} on ${position.exchangeType}: ${error.message}`
+        );
+      }
+    }
+
+    // Refresh market state after nuclear close
+    await this.marketStateService?.refreshAll();
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

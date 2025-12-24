@@ -27,10 +27,10 @@ export class MakerEfficiencyService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    this.logger.log('MakerEfficiencyService initialized (7s check interval)');
+    this.logger.log('MakerEfficiencyService initialized - HIGH PRIORITY ORDER REPRICING');
   }
 
-  @Interval(2000) // Run every 2s, but internally throttle per exchange
+  @Interval(1000) // Run every 1s - order repricing is TOP PRIORITY for fill success
   async manageMakerEfficiency() {
     if (this.isRunning) return;
     this.isRunning = true;
@@ -44,17 +44,24 @@ export class MakerEfficiencyService implements OnModuleInit {
         return;
       }
 
+      // Sort by age - OLDEST ORDERS FIRST (they're at most risk of causing imbalances)
+      const sortedOrders = [...waitingOrders].sort((a, b) => 
+        a.placedAt.getTime() - b.placedAt.getTime()
+      );
+
       // Group orders by exchange to handle specific rate limits
       const ordersByExchange = new Map<ExchangeType, ActiveOrder[]>();
-      for (const order of waitingOrders) {
+      for (const order of sortedOrders) {
         const exchange = order.exchange as ExchangeType;
         if (!ordersByExchange.has(exchange)) ordersByExchange.set(exchange, []);
         ordersByExchange.get(exchange)!.push(order);
       }
 
-      for (const [exchange, orders] of ordersByExchange.entries()) {
-        await this.processExchangeEfficiency(exchange, orders);
-      }
+      // Process exchanges in parallel for speed
+      const exchangePromises = Array.from(ordersByExchange.entries()).map(
+        ([exchange, orders]) => this.processExchangeEfficiency(exchange, orders)
+      );
+      await Promise.all(exchangePromises);
     } catch (error: any) {
       this.logger.error(`Error in MakerEfficiencyService: ${error.message}`);
     } finally {
@@ -63,6 +70,7 @@ export class MakerEfficiencyService implements OnModuleInit {
   }
 
   private lastExchangeCheck: Map<ExchangeType, number> = new Map();
+  private lastOrderCheck: Map<string, number> = new Map(); // Track per-order check times
 
   private async processExchangeEfficiency(exchange: ExchangeType, orders: ActiveOrder[]) {
     const now = Date.now();
@@ -71,55 +79,74 @@ export class MakerEfficiencyService implements OnModuleInit {
     // 1. Get current budget health (1.0 = full, 0.0 = empty)
     const { budgetHealth } = this.rateLimiter.getUsage(exchange);
     
-    // 2. Calculate base optimal interval based on exchange rate limits
-    let baseIntervalMs = 7000; // Default
+    // 2. Calculate base optimal interval - MUCH FASTER than before
+    let baseIntervalMs = 3000; // Default 3s
     
     if (exchange === ExchangeType.HYPERLIQUID) {
-      // Hyperliquid: Budget of ~400 updates/min.
-      baseIntervalMs = Math.max((60000 / 400) * orders.length, 1000); 
+      // Hyperliquid: Very permissive rate limits
+      baseIntervalMs = 2000; // 2 seconds
     } else if (exchange === ExchangeType.LIGHTER) {
-      // Lighter Standard: 60 weight/min. updateOrder = 6 weight.
-      // Max 10 updates per minute across ALL orders.
-      // Floor at 6s to allow one update every 6 seconds for a single order.
-      baseIntervalMs = Math.max(6000 * orders.length, 6000);
+      // Lighter: More conservative but still faster
+      baseIntervalMs = 3000; // 3 seconds (was 6s * orders!)
     }
 
-    // 3. Scale interval based on budget health (Global Token Bank)
-    // If health is > 80%, we use baseInterval.
-    // If health is < 20%, we slow down significantly (4x base).
-    // Linear scaling in between.
+    // 3. For OLD orders (>30s), ALWAYS check regardless of health
+    // Old orders are at risk of causing imbalances - TOP PRIORITY
+    const urgentOrders = orders.filter(o => now - o.placedAt.getTime() > 30000);
+    const normalOrders = orders.filter(o => now - o.placedAt.getTime() <= 30000);
+
+    // 4. Process urgent orders IMMEDIATELY (no rate limit delay for orders >30s old)
+    if (urgentOrders.length > 0) {
+      this.logger.warn(
+        `🚨 ${urgentOrders.length} URGENT unfilled order(s) on ${exchange} (>30s old) - repricing NOW`
+      );
+      for (const order of urgentOrders) {
+        await this.checkAndRepositionOrder(order, true); // force=true
+      }
+    }
+
+    // 5. Scale interval based on budget health (but less aggressively)
+    // Health throttling should NOT delay urgent orders (handled above)
     let intervalMs = baseIntervalMs;
-    if (budgetHealth < 0.8) {
-      const healthMultiplier = 1 + (0.8 - budgetHealth) * 4; // Max multiplier of ~4.2 at health 0
+    if (budgetHealth < 0.5) {
+      // Only slow down by max 2x (was 4x)
+      const healthMultiplier = 1 + (0.5 - budgetHealth) * 2;
       intervalMs = baseIntervalMs * healthMultiplier;
     }
 
     if (now - lastCheck < intervalMs) return;
     this.lastExchangeCheck.set(exchange, now);
     
-    // Log low health warning only when we actually check (not every 2s)
     if (budgetHealth < 0.3) {
       this.logger.warn(
         `⚠️ Low budget health for ${exchange} (${(budgetHealth * 100).toFixed(1)}%). ` +
-        `Slowing down maker chasing: ${intervalMs/1000}s interval.`
+        `Normal order repricing slowed: ${intervalMs/1000}s interval.`
       );
     }
 
     this.logger.debug(
-      `Checking efficiency for ${orders.length} orders on ${exchange} ` +
+      `Checking efficiency for ${normalOrders.length} normal orders on ${exchange} ` +
       `(Health: ${(budgetHealth * 100).toFixed(1)}%, Interval: ${intervalMs/1000}s)`
     );
 
-    // Process orders one by one for now
-    for (const order of orders) {
-      await this.checkAndRepositionOrder(order);
+    // Process normal orders (already sorted by age, oldest first)
+    for (const order of normalOrders) {
+      // Per-order throttling - don't recheck same order too fast
+      const orderKey = `${order.exchange}-${order.orderId}`;
+      const lastOrderCheck = this.lastOrderCheck.get(orderKey) || 0;
+      if (now - lastOrderCheck < 2000) continue; // Min 2s between rechecks per order
+      
+      this.lastOrderCheck.set(orderKey, now);
+      await this.checkAndRepositionOrder(order, false);
     }
   }
 
-  private async checkAndRepositionOrder(activeOrder: ActiveOrder) {
+  private async checkAndRepositionOrder(activeOrder: ActiveOrder, force: boolean = false) {
     const exchange = activeOrder.exchange as ExchangeType;
     const symbol = activeOrder.symbol;
     const adapter = this.keeperService.getExchangeAdapter(exchange);
+    const orderAgeMs = Date.now() - activeOrder.placedAt.getTime();
+    const orderAgeSec = orderAgeMs / 1000;
 
     if (!adapter) return;
 
@@ -129,12 +156,10 @@ export class MakerEfficiencyService implements OnModuleInit {
     if (exchange === ExchangeType.HYPERLIQUID) {
       bestBidAsk = this.hlWsProvider.getBestBidAsk(symbol);
     } else if (exchange === ExchangeType.LIGHTER) {
-      // Lighter uses market index, need to convert symbol if necessary
-      // Assuming symbol is usable directly or provider handles it
       try {
         const marketIndex = await (adapter as any).getMarketIndex(symbol);
         bestBidAsk = this.lighterWsProvider.getBestBidAsk(marketIndex);
-      } catch (e) {
+      } catch (e: any) {
         this.logger.debug(`Could not get market index for ${symbol}: ${e.message}`);
       }
     }
@@ -149,24 +174,28 @@ export class MakerEfficiencyService implements OnModuleInit {
     const tickSize = await adapter.getTickSize(symbol);
 
     // 2. Determine target price to be the best maker
+    // For URGENT orders (force=true or >30s old), be MORE AGGRESSIVE
     let targetPrice = currentPrice;
+    const isUrgent = force || orderAgeSec > 30;
+    
+    // Aggressive offset: 2 ticks for urgent, 1 tick for normal
+    const aggressiveOffset = isUrgent ? tickSize * 2 : tickSize;
 
     if (activeOrder.side === 'LONG') {
-      // For BUY orders, we want to be bestBid + tick
-      // If we ARE the bestBid, we check if someone is right behind us
-      // For simplicity: if currentPrice < bestBid, we are being beat.
-      if (currentPrice < bestBid) {
-        targetPrice = bestBid + tickSize;
+      // For BUY orders, we want to be bestBid + tick(s)
+      if (currentPrice < bestBid || (isUrgent && currentPrice <= bestBid)) {
+        targetPrice = bestBid + aggressiveOffset;
       }
     } else {
-      // For SELL orders, we want to be bestAsk - tick
-      if (currentPrice > bestAsk) {
-        targetPrice = bestAsk - tickSize;
+      // For SELL orders, we want to be bestAsk - tick(s)
+      if (currentPrice > bestAsk || (isUrgent && currentPrice >= bestAsk)) {
+        targetPrice = bestAsk - aggressiveOffset;
       }
     }
 
-    // 3. Reposition if target price changed significantly
-    if (Math.abs(targetPrice - currentPrice) > (tickSize / 2)) {
+    // 3. Reposition if target price changed significantly OR if forced
+    const priceNeedsUpdate = Math.abs(targetPrice - currentPrice) > (tickSize / 2);
+    if (priceNeedsUpdate || force) {
       // Ensure we don't cross the spread (don't buy above bestAsk or sell below bestBid)
       if (activeOrder.side === 'LONG' && targetPrice >= bestAsk) {
         targetPrice = bestAsk - tickSize;
@@ -175,9 +204,10 @@ export class MakerEfficiencyService implements OnModuleInit {
         targetPrice = bestBid + tickSize;
       }
 
+      const urgencyLabel = isUrgent ? '🚨 URGENT' : '🎯';
       this.logger.log(
-        `🎯 Repositioning ${activeOrder.side} ${symbol} on ${exchange}: ` +
-        `${currentPrice.toFixed(4)} -> ${targetPrice.toFixed(4)} (Maker Efficiency)`
+        `${urgencyLabel} Repositioning ${activeOrder.side} ${symbol} on ${exchange}: ` +
+        `${currentPrice.toFixed(4)} -> ${targetPrice.toFixed(4)} (Age: ${orderAgeSec.toFixed(0)}s)`
       );
 
       try {
