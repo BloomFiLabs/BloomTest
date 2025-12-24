@@ -94,6 +94,20 @@ export class PerpKeeperScheduler implements OnModuleInit {
   // Pending opportunity search trigger (set when positions are closed)
   private pendingOpportunitySearch: string | null = null;
 
+  // Profit-taking cooldown: prevents re-entry until price reverts
+  // Key: normalized symbol, Value: exit info for cooldown check
+  private readonly profitTakeCooldowns: Map<
+    string,
+    {
+      exitTime: Date;
+      exitPriceLong: number;   // Mark price on long exchange at exit
+      exitPriceShort: number;  // Mark price on short exchange at exit
+      profitPercent: number;   // How much profit we took (to calculate reversion threshold)
+      longExchange: ExchangeType;
+      shortExchange: ExchangeType;
+    }
+  > = new Map();
+
   constructor(
     private readonly orchestrator: PerpKeeperOrchestrator,
     private readonly configService: ConfigService,
@@ -940,6 +954,33 @@ export class PerpKeeperScheduler implements OnModuleInit {
       }
 
       filtered = passed;
+    }
+
+    // Apply profit-taking cooldown filter (prevents re-entry at same price after taking profit)
+    const beforeCooldownCount = filtered.length;
+    filtered = filtered.filter((opp) => {
+      const normalizedSymbol = this.normalizeSymbol(opp.symbol);
+      const cooldownCheck = this.isInProfitTakeCooldown(
+        normalizedSymbol,
+        opp.longMarkPrice || 0,
+        opp.shortMarkPrice || 0,
+      );
+      
+      if (cooldownCheck.inCooldown) {
+        this.logger.debug(
+          `🔒 Skipping ${opp.symbol}: ${cooldownCheck.reason}`
+        );
+        return false;
+      }
+      return true;
+    });
+    
+    const cooldownFilteredCount = beforeCooldownCount - filtered.length;
+    if (cooldownFilteredCount > 0) {
+      this.logger.log(
+        `🔒 Profit-take cooldown filtered ${cooldownFilteredCount} opportunity(ies) - ` +
+        `waiting for price reversion before re-entry`
+      );
     }
 
     return filtered;
@@ -2472,6 +2513,203 @@ export class PerpKeeperScheduler implements OnModuleInit {
     } catch (error: any) {
       this.logger.debug(`Error in position size balance check: ${error.message}`);
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PROFIT TAKING - Exit when price PnL exceeds expected funding returns
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Check if price movement has generated more profit than expected from funding.
+   * 
+   * POLICY: If unrealized price PnL exceeds X days worth of expected funding returns,
+   * take profit by closing the position. This locks in windfall gains from price moves.
+   * 
+   * Example: 
+   * - Expected funding: 0.1%/day = ~36.5% APY
+   * - If price moves 3% in our favor, that's ~30 days of funding
+   * - Better to lock that in and re-enter at better prices
+   * 
+   * Configurable threshold: PROFIT_TAKE_FUNDING_DAYS_EQUIVALENT (default: 7 days)
+   * 
+   * Runs every 30 seconds for quick profit capture.
+   */
+  @Interval(30000) // Every 30 seconds
+  async checkProfitTaking(): Promise<void> {
+    // Skip if main execution is running or global lock held
+    if (this.isRunning) return;
+    if (this.executionLockService?.isGlobalLockHeld()) return;
+
+    try {
+      const positions = this.marketStateService?.getAllPositions() || [];
+      if (positions.length < 2) return;
+
+      // Configurable: How many days of funding return justifies taking profit
+      const PROFIT_TAKE_FUNDING_DAYS = parseFloat(
+        process.env.PROFIT_TAKE_FUNDING_DAYS || '7'
+      );
+      
+      // Minimum profit threshold (absolute) to avoid small position churn
+      const MIN_PROFIT_USD = parseFloat(
+        process.env.PROFIT_TAKE_MIN_USD || '10'
+      );
+
+      // Group positions by normalized symbol
+      const positionsBySymbol = new Map<string, PerpPosition[]>();
+      for (const position of positions) {
+        const normalizedSymbol = this.normalizeSymbol(position.symbol);
+        if (!positionsBySymbol.has(normalizedSymbol)) {
+          positionsBySymbol.set(normalizedSymbol, []);
+        }
+        positionsBySymbol.get(normalizedSymbol)!.push(position);
+      }
+
+      // Check each symbol for profit-taking opportunity
+      for (const [symbol, symbolPositions] of positionsBySymbol) {
+        // Find LONG and SHORT on DIFFERENT exchanges
+        const longPos = symbolPositions.find(p => p.side === OrderSide.LONG);
+        const shortPos = symbolPositions.find(
+          p => p.side === OrderSide.SHORT && p.exchangeType !== longPos?.exchangeType
+        );
+
+        if (!longPos || !shortPos) continue;
+
+        // Calculate combined unrealized PnL from PRICE movement
+        // For a delta-neutral pair, price PnL should mostly cancel out,
+        // but basis drift can create opportunities
+        const longPricePnl = longPos.unrealizedPnl;
+        const shortPricePnl = shortPos.unrealizedPnl;
+        const combinedPnl = longPricePnl + shortPricePnl;
+
+        // Skip if combined PnL is negative (no profit to take)
+        if (combinedPnl <= MIN_PROFIT_USD) continue;
+
+        // Calculate position value for percentage calculation
+        const longValue = Math.abs(longPos.size * (longPos.markPrice || 0));
+        const shortValue = Math.abs(shortPos.size * (shortPos.markPrice || 0));
+        const avgPositionValue = (longValue + shortValue) / 2;
+
+        if (avgPositionValue <= 0) continue;
+
+        // Calculate profit as percentage of position
+        const profitPercent = (combinedPnl / avgPositionValue) * 100;
+
+        // Estimate daily funding return (use current spread as proxy)
+        // Typical funding spread: 0.01% to 0.1% per 8-hour period = 0.03% to 0.3%/day
+        const estimatedDailyFundingPercent = 0.05; // Conservative 0.05%/day estimate
+        
+        // Calculate equivalent funding days
+        const equivalentFundingDays = profitPercent / estimatedDailyFundingPercent;
+
+        // Check if profit exceeds threshold
+        if (equivalentFundingDays >= PROFIT_TAKE_FUNDING_DAYS) {
+          this.logger.warn(
+            `💰 PROFIT TAKING OPPORTUNITY for ${symbol}:\n` +
+            `   Combined Price PnL: $${combinedPnl.toFixed(2)} (${profitPercent.toFixed(2)}%)\n` +
+            `   Equivalent to ${equivalentFundingDays.toFixed(1)} days of funding\n` +
+            `   Threshold: ${PROFIT_TAKE_FUNDING_DAYS} days\n` +
+            `   LONG PnL: $${longPricePnl.toFixed(2)} on ${longPos.exchangeType}\n` +
+            `   SHORT PnL: $${shortPricePnl.toFixed(2)} on ${shortPos.exchangeType}`
+          );
+
+          // Execute hedged close to take profit
+          try {
+            await this.orchestrator.executeHedgedPartialClose(
+              longPos,
+              shortPos,
+              1.0, // 100% - close entire position
+              `Profit Taking: $${combinedPnl.toFixed(2)} (${equivalentFundingDays.toFixed(0)} days of funding)`
+            );
+
+            // Record cooldown to prevent immediate re-entry at same price
+            this.profitTakeCooldowns.set(symbol, {
+              exitTime: new Date(),
+              exitPriceLong: longPos.markPrice || 0,
+              exitPriceShort: shortPos.markPrice || 0,
+              profitPercent,
+              longExchange: longPos.exchangeType,
+              shortExchange: shortPos.exchangeType,
+            });
+
+            this.logger.log(
+              `✅ Profit taken for ${symbol}: $${combinedPnl.toFixed(2)} ` +
+              `(${profitPercent.toFixed(2)}% = ${equivalentFundingDays.toFixed(0)} days funding equivalent)\n` +
+              `   🔒 Cooldown active until price reverts ${(profitPercent * 0.5).toFixed(2)}% or 1 hour passes`
+            );
+          } catch (closeError: any) {
+            this.logger.error(
+              `❌ Failed to take profit for ${symbol}: ${closeError.message}`
+            );
+          }
+        }
+      }
+    } catch (error: any) {
+      this.logger.debug(`Error in profit taking check: ${error.message}`);
+    }
+  }
+
+  /**
+   * Check if a symbol is in profit-taking cooldown
+   * 
+   * Returns true if we should NOT enter this symbol because:
+   * 1. We recently took profit, AND
+   * 2. The price hasn't reverted enough yet (< 50% of profit taken), AND
+   * 3. Less than 1 hour has passed
+   * 
+   * @param symbol Normalized symbol to check
+   * @param currentPriceLong Current mark price on long exchange
+   * @param currentPriceShort Current mark price on short exchange
+   */
+  isInProfitTakeCooldown(
+    symbol: string,
+    currentPriceLong: number,
+    currentPriceShort: number,
+  ): { inCooldown: boolean; reason?: string } {
+    const cooldown = this.profitTakeCooldowns.get(symbol);
+    if (!cooldown) {
+      return { inCooldown: false };
+    }
+
+    const now = new Date();
+    const hoursSinceExit = (now.getTime() - cooldown.exitTime.getTime()) / (1000 * 60 * 60);
+
+    // Cooldown expires after 1 hour regardless of price
+    const COOLDOWN_HOURS = parseFloat(process.env.PROFIT_TAKE_COOLDOWN_HOURS || '1');
+    if (hoursSinceExit >= COOLDOWN_HOURS) {
+      this.profitTakeCooldowns.delete(symbol);
+      this.logger.debug(`Profit-take cooldown expired for ${symbol} (${hoursSinceExit.toFixed(1)}h)`);
+      return { inCooldown: false };
+    }
+
+    // Calculate how much price has reverted
+    // For the cooldown to lift, we want price to revert by at least 50% of the profit we took
+    const reversionThreshold = cooldown.profitPercent * 0.5; // 50% of profit taken
+
+    // Calculate basis change (short price - long price) relative to position value
+    // At exit: we profited because basis moved in our favor
+    // For re-entry: basis should move back (revert) by at least half
+    const exitBasis = cooldown.exitPriceShort - cooldown.exitPriceLong;
+    const currentBasis = currentPriceShort - currentPriceLong;
+    const avgPrice = (currentPriceLong + currentPriceShort) / 2;
+    
+    const basisChangePercent = avgPrice > 0 
+      ? Math.abs((currentBasis - exitBasis) / avgPrice) * 100 
+      : 0;
+
+    if (basisChangePercent >= reversionThreshold) {
+      this.profitTakeCooldowns.delete(symbol);
+      this.logger.log(
+        `✅ Profit-take cooldown lifted for ${symbol}: ` +
+        `Basis reverted ${basisChangePercent.toFixed(2)}% (threshold: ${reversionThreshold.toFixed(2)}%)`
+      );
+      return { inCooldown: false };
+    }
+
+    return {
+      inCooldown: true,
+      reason: `Profit-take cooldown: ${(COOLDOWN_HOURS - hoursSinceExit).toFixed(1)}h remaining, ` +
+              `basis reverted ${basisChangePercent.toFixed(2)}%/${reversionThreshold.toFixed(2)}% needed`,
+    };
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
