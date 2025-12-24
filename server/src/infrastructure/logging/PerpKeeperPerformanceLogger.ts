@@ -108,6 +108,7 @@ export class PerpKeeperPerformanceLogger
 
   // Performance tracking
   private startTime: Date = new Date();
+  private lastResetTime: Date = new Date();
   private exchangeMetrics: Map<ExchangeType, ExchangePerformanceMetrics> =
     new Map();
   private fundingSnapshots: FundingRateSnapshot[] = [];
@@ -188,18 +189,26 @@ export class PerpKeeperPerformanceLogger
       this.realizedFundingPayments = [];
 
       // Fetch all historical funding payments (last 30 days)
-      const payments =
-        await this.realFundingService.fetchAllFundingPayments(30);
+      const payments = await this.realFundingService.fetchAllFundingPayments(30);
 
       // Record each payment in the performance logger
       for (const payment of payments) {
+        // ONLY RECORD IF IT HAPPENED AFTER THE LAST RESET!
+        if (this.lastResetTime && payment.timestamp < this.lastResetTime) {
+          continue;
+        }
         this.recordFundingPayment(payment.exchange, payment.amount);
       }
 
       // Also sync trading costs
       const totalCosts = this.realFundingService.getTotalTradingCosts();
       if (totalCosts > 0) {
-        this.totalTradingCosts = totalCosts;
+        // If reset was recent, ignore older costs
+        if (this.lastResetTime && (new Date().getTime() - this.lastResetTime.getTime() < 60000)) {
+          this.totalTradingCosts = 0;
+        } else {
+          this.totalTradingCosts = totalCosts;
+        }
       }
 
       this.logger.log(
@@ -890,10 +899,14 @@ export class PerpKeeperPerformanceLogger
    * Reset all performance metrics to start "from now"
    */
   resetPerformanceMetrics(): void {
-    this.logger.warn('🔄 Resetting all performance metrics. APY calculation will restart from this moment.');
-    
+    this.logger.warn(
+      '🔄 Resetting all performance metrics. APY calculation will restart from this moment.',
+    );
+
     this.startTime = new Date();
+    this.lastResetTime = new Date(); // Update reset time
     this.realizedFundingPayments = [];
+    this.fundingSnapshots = [];
     this.totalRealizedPnl = 0;
     this.totalTradingCosts = 0;
     this.maxDrawdown = 0;
@@ -904,7 +917,8 @@ export class PerpKeeperPerformanceLogger
     this.totalTradeVolume = 0;
     this.arbitrageOpportunitiesFound = 0;
     this.arbitrageOpportunitiesExecuted = 0;
-    
+    this.realFundingSummary = null; // Clear exchange cache
+
     // Reset per-exchange metrics
     for (const exchangeType of Array.from(this.exchangeMetrics.keys())) {
       this.exchangeMetrics.set(exchangeType, {
@@ -929,6 +943,8 @@ export class PerpKeeperPerformanceLogger
         realized: 0,
         funding: 0,
         pricePnl: 0,
+        realizedPnl: 0,
+        netFunding: 0,
         byExchange: {},
       });
     }

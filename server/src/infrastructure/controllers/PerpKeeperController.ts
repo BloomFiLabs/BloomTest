@@ -201,6 +201,16 @@ export class PerpKeeperController {
         totalValue: positionMetrics.totalPositionValue,
         unrealizedPnl: positionMetrics.totalUnrealizedPnl,
         byExchange: positionsByExchange,
+        activePositions: positionMetrics.positions.map(p => ({
+          symbol: p.symbol,
+          exchange: p.exchangeType,
+          side: p.side,
+          size: p.size,
+          value: p.getPositionValue(),
+          entryPrice: p.entryPrice,
+          markPrice: p.markPrice,
+          unrealizedPnl: p.unrealizedPnl
+        })),
       });
     } catch (error) {
       // Continue with stale position data if we can't fetch fresh
@@ -247,6 +257,8 @@ export class PerpKeeperController {
         realized: perfMetrics.realizedAPY,
         funding: perfMetrics.fundingAPY,
         pricePnl: perfMetrics.pricePnlAPY,
+        realizedPnl: perfMetrics.totalRealizedPnl,
+        netFunding: perfMetrics.netFundingCaptured,
         byExchange,
       });
     } catch (error) {

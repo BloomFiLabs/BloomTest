@@ -109,7 +109,7 @@ export default function Dashboard() {
         </header>
 
         {/* Top Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <MetricCard 
             title="Realized APY" 
             value={`${apy.realized.toFixed(2)}%`}
@@ -121,6 +121,19 @@ export default function Dashboard() {
             value={`${apy.estimated.toFixed(2)}%`}
             subValue="Projected forward"
             trend={apy.estimated >= 0 ? 'up' : 'down'}
+          />
+          <MetricCard 
+            title="Net Funding" 
+            value={`$${(apy.netFunding || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            subValue="Total funding captured (USD)"
+            trend={apy.netFunding >= 0 ? 'up' : 'down'}
+            icon={<Coins className="w-4 h-4 text-emerald-400" />}
+          />
+          <MetricCard 
+            title="Realized PnL" 
+            value={`$${(apy.realizedPnl || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            subValue="Total profit/loss from trades"
+            trend={apy.realizedPnl >= 0 ? 'up' : 'down'}
           />
           <MetricCard 
             title="Current NAV" 
@@ -159,7 +172,27 @@ export default function Dashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800">
-                    {Object.keys(positions.byExchange).length > 0 ? (
+                    {data?.positions?.activePositions && data.positions.activePositions.length > 0 ? (
+                      data.positions.activePositions.map((pos: any, i: number) => (
+                        <tr key={`${pos.exchange}-${pos.symbol}-${i}`} className="hover:bg-slate-800/30 transition-colors">
+                          <td className="px-4 py-4">
+                            <span className="px-2 py-1 rounded-md bg-indigo-500/10 text-indigo-400 font-bold text-[10px] uppercase border border-indigo-500/20">
+                              {pos.exchange}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4 text-slate-300 font-medium">{pos.symbol}</td>
+                          <td className={cn(
+                            "px-4 py-4 font-mono text-xs",
+                            pos.side === 'LONG' ? "text-green-400" : "text-red-400"
+                          )}>
+                            {pos.side} {Math.abs(pos.size).toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                          </td>
+                          <td className="px-4 py-4 text-right font-mono font-bold">
+                            ${pos.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+                      ))
+                    ) : Object.keys(positions.byExchange).length > 0 ? (
                       Object.keys(positions.byExchange).map((exchange) => (
                         <tr key={exchange} className="hover:bg-slate-800/30 transition-colors">
                           <td className="px-4 py-4">
@@ -167,7 +200,7 @@ export default function Dashboard() {
                               {exchange}
                             </span>
                           </td>
-                          <td className="px-4 py-4 text-slate-300 font-medium">Global Hedge</td>
+                          <td className="px-4 py-4 text-slate-300 font-medium">Aggregate</td>
                           <td className="px-4 py-4 text-slate-400">---</td>
                           <td className="px-4 py-4 text-right font-mono font-bold">
                             ${positions.byExchange[exchange].toLocaleString(undefined, { minimumFractionDigits: 2 })}

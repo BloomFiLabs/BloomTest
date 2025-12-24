@@ -297,6 +297,8 @@ export interface DiagnosticsResponse {
     realized: number;
     funding?: number;
     pricePnl?: number;
+    realizedPnl?: number; // NEW: Actual USD PnL
+    netFunding?: number; // NEW: Actual USD Funding captured
     byExchange: Record<string, number>;
   };
   orders: {
@@ -364,6 +366,16 @@ export interface DiagnosticsResponse {
     totalValue: number;
     unrealizedPnl: number;
     byExchange: Record<string, number>;
+    activePositions?: Array<{
+      symbol: string;
+      exchange: string;
+      side: string;
+      size: number;
+      value: number;
+      entryPrice?: number;
+      markPrice?: number;
+      unrealizedPnl?: number;
+    }>;
     breakEvenInfo?: Array<{
       symbol: string;
       exchange: string;
@@ -645,6 +657,8 @@ export class DiagnosticsService {
     realized: number;
     funding?: number;
     pricePnl?: number;
+    realizedPnl?: number;
+    netFunding?: number;
     byExchange: Record<string, number>;
   } = { estimated: 0, realized: 0, byExchange: {} };
   
@@ -654,6 +668,16 @@ export class DiagnosticsService {
     totalValue: number;
     unrealizedPnl: number;
     byExchange: Record<string, number>;
+    activePositions?: Array<{
+      symbol: string;
+      exchange: string;
+      side: string;
+      size: number;
+      value: number;
+      entryPrice?: number;
+      markPrice?: number;
+      unrealizedPnl?: number;
+    }>;
     // Break-even tracking per position
     breakEvenInfo?: Array<{
       symbol: string;
@@ -1219,6 +1243,8 @@ export class DiagnosticsService {
     realized: number;
     funding?: number;
     pricePnl?: number;
+    realizedPnl?: number;
+    netFunding?: number;
     byExchange: Record<string, number>;
   }): void {
     this.apyData = data;
@@ -1265,6 +1291,16 @@ export class DiagnosticsService {
     totalValue: number;
     unrealizedPnl: number;
     byExchange: Record<string, number>;
+    activePositions?: Array<{
+      symbol: string;
+      exchange: string;
+      side: string;
+      size: number;
+      value: number;
+      entryPrice?: number;
+      markPrice?: number;
+      unrealizedPnl?: number;
+    }>;
   }): void {
     const now = new Date();
     
