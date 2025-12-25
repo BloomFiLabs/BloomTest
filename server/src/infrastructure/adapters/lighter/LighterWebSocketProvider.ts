@@ -129,6 +129,10 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
   // Fill and order update callbacks
   private readonly fillCallbacks: LighterFillCallback[] = [];
   private readonly orderUpdateCallbacks: LighterOrderUpdateCallback[] = [];
+  
+  // ==================== NEW: Order book update callbacks ====================
+  // For reactive repricing when someone outbids us
+  private readonly bookUpdateCallbacks: Map<number, Array<(bestBid: number, bestAsk: number, marketIndex: number) => void>> = new Map();
 
   // User account address for order subscriptions
   private accountAddress: string | null = null;
@@ -370,10 +374,26 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
       const marketIndex = parseInt(message.channel.split(/[:/]/)[1]);
       
       if (!isNaN(marketIndex)) {
-        this.orderbookCache.set(marketIndex, {
-          bids: message.data.bids || [],
-          asks: message.data.asks || []
-        });
+        const bids = message.data.bids || [];
+        const asks = message.data.asks || [];
+        
+        this.orderbookCache.set(marketIndex, { bids, asks });
+        
+        // REACTIVE: Trigger callbacks for order book updates
+        const callbacks = this.bookUpdateCallbacks.get(marketIndex);
+        if (callbacks && callbacks.length > 0 && bids.length > 0 && asks.length > 0) {
+          const bestBid = parseFloat(bids[0].price || bids[0].p || '0');
+          const bestAsk = parseFloat(asks[0].price || asks[0].p || '0');
+          if (bestBid > 0 && bestAsk > 0) {
+            for (const callback of callbacks) {
+              try {
+                callback(bestBid, bestAsk, marketIndex);
+              } catch (e: any) {
+                this.logger.error(`Error in book update callback for market ${marketIndex}: ${e.message}`);
+              }
+            }
+          }
+        }
       }
       return;
     }
@@ -463,6 +483,36 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
     return {
       bestBid: parseFloat(book.bids[0].price),
       bestAsk: parseFloat(book.asks[0].price)
+    };
+  }
+
+  /**
+   * Register a callback for order book updates (reactive repricing)
+   * Called immediately when the book changes - use for fast repricing!
+   */
+  onBookUpdate(marketIndex: number, callback: (bestBid: number, bestAsk: number, marketIndex: number) => void): () => void {
+    // Auto-subscribe to the orderbook if not already
+    if (!this.subscribedOrderbooks.has(marketIndex)) {
+      this.subscribeToOrderbook(marketIndex);
+    }
+    
+    // Add callback
+    if (!this.bookUpdateCallbacks.has(marketIndex)) {
+      this.bookUpdateCallbacks.set(marketIndex, []);
+    }
+    this.bookUpdateCallbacks.get(marketIndex)!.push(callback);
+    
+    this.logger.debug(`Registered book update callback for market ${marketIndex}`);
+    
+    // Return unsubscribe function
+    return () => {
+      const callbacks = this.bookUpdateCallbacks.get(marketIndex);
+      if (callbacks) {
+        const index = callbacks.indexOf(callback);
+        if (index > -1) {
+          callbacks.splice(index, 1);
+        }
+      }
     };
   }
 

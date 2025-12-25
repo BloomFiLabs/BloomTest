@@ -115,6 +115,10 @@ export class HyperLiquidWebSocketProvider
   // Fill event callbacks
   private readonly fillCallbacks: FillCallback[] = [];
   
+  // ==================== NEW: Order book update callbacks ====================
+  // For reactive repricing when someone outbids us
+  private readonly bookUpdateCallbacks: Map<string, Array<(bestBid: number, bestAsk: number, coin: string) => void>> = new Map();
+  
   // Order update callbacks
   private readonly orderUpdateCallbacks: OrderUpdateCallback[] = [];
 
@@ -311,6 +315,20 @@ export class HyperLiquidWebSocketProvider
         bids: l2Book.levels[0],
         asks: l2Book.levels[1]
       });
+      
+      // REACTIVE: Trigger callbacks for order book updates
+      const callbacks = this.bookUpdateCallbacks.get(coin);
+      if (callbacks && callbacks.length > 0 && l2Book.levels[0].length > 0 && l2Book.levels[1].length > 0) {
+        const bestBid = parseFloat(l2Book.levels[0][0].px);
+        const bestAsk = parseFloat(l2Book.levels[1][0].px);
+        for (const callback of callbacks) {
+          try {
+            callback(bestBid, bestAsk, coin);
+          } catch (e: any) {
+            this.logger.error(`Error in book update callback for ${coin}: ${e.message}`);
+          }
+        }
+      }
     } else if (message.channel === 'user' && message.data) {
       // User events - handle fills and order updates
       this.handleUserEvent(message.data);
@@ -512,6 +530,38 @@ export class HyperLiquidWebSocketProvider
     return {
       bestBid: parseFloat(book.bids[0].px),
       bestAsk: parseFloat(book.asks[0].px)
+    };
+  }
+
+  /**
+   * Register a callback for order book updates (reactive repricing)
+   * Called immediately when the book changes - use for fast repricing!
+   */
+  onBookUpdate(coin: string, callback: (bestBid: number, bestAsk: number, coin: string) => void): () => void {
+    const normalizedCoin = coin.toUpperCase();
+    
+    // Auto-subscribe to the book if not already
+    if (!this.subscribedL2Books.has(normalizedCoin)) {
+      this.subscribeToL2Book(normalizedCoin);
+    }
+    
+    // Add callback
+    if (!this.bookUpdateCallbacks.has(normalizedCoin)) {
+      this.bookUpdateCallbacks.set(normalizedCoin, []);
+    }
+    this.bookUpdateCallbacks.get(normalizedCoin)!.push(callback);
+    
+    this.logger.debug(`Registered book update callback for ${normalizedCoin}`);
+    
+    // Return unsubscribe function
+    return () => {
+      const callbacks = this.bookUpdateCallbacks.get(normalizedCoin);
+      if (callbacks) {
+        const index = callbacks.indexOf(callback);
+        if (index > -1) {
+          callbacks.splice(index, 1);
+        }
+      }
     };
   }
 

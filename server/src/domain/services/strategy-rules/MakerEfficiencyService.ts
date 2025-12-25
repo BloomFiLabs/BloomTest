@@ -11,12 +11,21 @@ import { RateLimiterService, RateLimitPriority } from '../../../infrastructure/s
 /**
  * MakerEfficiencyService - Ensures our orders are the most price-efficient on the book
  * 
- * Runs every 2 seconds to check open orders and reposition them to beat other makers.
+ * TWO MODES:
+ * 1. REACTIVE (NEW!): WebSocket callbacks trigger immediate reprice when outbid
+ * 2. POLLING: Every 5s backup check for orders that missed reactive updates
  */
 @Injectable()
 export class MakerEfficiencyService implements OnModuleInit {
   private readonly logger = new Logger(MakerEfficiencyService.name);
   private isRunning = false;
+  
+  // Track active order book subscriptions (to avoid duplicate callbacks)
+  private activeBookSubscriptions: Map<string, () => void> = new Map();
+  
+  // Debounce reactive reprices (avoid spamming on volatile books)
+  private lastReactiveReprice: Map<string, number> = new Map();
+  private readonly REACTIVE_DEBOUNCE_MS = 500; // Min 500ms between reactive reprices per order
 
   constructor(
     private readonly keeperService: PerpKeeperService,
@@ -27,7 +36,111 @@ export class MakerEfficiencyService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    this.logger.log('MakerEfficiencyService initialized - rate-limit aware order repricing');
+    this.logger.log('🚀 MakerEfficiencyService initialized - REACTIVE + polling repricing');
+    
+    // Start watching for new orders to set up reactive callbacks
+    this.setupReactiveCallbackWatcher();
+  }
+  
+  /**
+   * Watches for new orders and sets up reactive book callbacks
+   */
+  private setupReactiveCallbackWatcher() {
+    // Check every 2s for new orders that need reactive callbacks
+    setInterval(() => {
+      this.updateReactiveSubscriptions();
+    }, 2000);
+  }
+  
+  /**
+   * Updates reactive subscriptions based on current active orders
+   */
+  private updateReactiveSubscriptions() {
+    const activeOrders = this.executionLockService.getAllActiveOrders();
+    const waitingOrders = activeOrders.filter(o => 
+      o.status === 'WAITING_FILL' && o.isForceFilling !== true
+    );
+    
+    // Get current symbols with orders
+    const currentOrderKeys = new Set(waitingOrders.map(o => `${o.exchange}-${o.symbol}`));
+    
+    // Unsubscribe from symbols no longer needed
+    for (const [key, unsubscribe] of this.activeBookSubscriptions.entries()) {
+      if (!currentOrderKeys.has(key)) {
+        unsubscribe();
+        this.activeBookSubscriptions.delete(key);
+        this.logger.debug(`Unsubscribed from reactive book updates for ${key}`);
+      }
+    }
+    
+    // Subscribe to new symbols
+    for (const order of waitingOrders) {
+      const key = `${order.exchange}-${order.symbol}`;
+      if (this.activeBookSubscriptions.has(key)) continue;
+      
+      const exchange = order.exchange as ExchangeType;
+      
+      if (exchange === ExchangeType.HYPERLIQUID) {
+        const unsubscribe = this.hlWsProvider.onBookUpdate(order.symbol, (bestBid, bestAsk, coin) => {
+          this.handleReactiveBookUpdate(ExchangeType.HYPERLIQUID, coin, bestBid, bestAsk);
+        });
+        this.activeBookSubscriptions.set(key, unsubscribe);
+        this.logger.debug(`📡 Subscribed to reactive HL book updates for ${order.symbol}`);
+      } else if (exchange === ExchangeType.LIGHTER) {
+        // For Lighter, we need the market index
+        const adapter = this.keeperService.getExchangeAdapter(ExchangeType.LIGHTER);
+        if (adapter) {
+          (adapter as any).getMarketIndex(order.symbol).then((marketIndex: number) => {
+            const unsubscribe = this.lighterWsProvider.onBookUpdate(marketIndex, (bestBid, bestAsk, mktIdx) => {
+              this.handleReactiveBookUpdate(ExchangeType.LIGHTER, order.symbol, bestBid, bestAsk);
+            });
+            this.activeBookSubscriptions.set(key, unsubscribe);
+            this.logger.debug(`📡 Subscribed to reactive Lighter book updates for ${order.symbol}`);
+          }).catch(() => {});
+        }
+      }
+    }
+  }
+  
+  /**
+   * Handle a reactive book update - check if any of our orders need repricing
+   */
+  private async handleReactiveBookUpdate(exchange: ExchangeType, symbol: string, bestBid: number, bestAsk: number) {
+    // Find orders for this symbol on this exchange
+    const activeOrders = this.executionLockService.getAllActiveOrders();
+    const relevantOrders = activeOrders.filter(o => 
+      o.exchange === exchange && 
+      o.symbol === symbol && 
+      o.status === 'WAITING_FILL' &&
+      o.isForceFilling !== true
+    );
+    
+    if (relevantOrders.length === 0) return;
+    
+    for (const order of relevantOrders) {
+      const orderKey = `${order.exchange}-${order.orderId}`;
+      const now = Date.now();
+      const lastReprice = this.lastReactiveReprice.get(orderKey) || 0;
+      
+      // Debounce - don't reprice same order too fast
+      if (now - lastReprice < this.REACTIVE_DEBOUNCE_MS) continue;
+      
+      const currentPrice = order.price || 0;
+      const needsReprice = 
+        (order.side === 'LONG' && currentPrice < bestBid) ||
+        (order.side === 'SHORT' && currentPrice > bestAsk);
+      
+      if (needsReprice) {
+        this.lastReactiveReprice.set(orderKey, now);
+        this.logger.log(
+          `⚡ REACTIVE reprice: ${order.side} ${symbol} on ${exchange} - ` +
+          `Our price ${currentPrice.toFixed(4)} is worse than book (bid=${bestBid.toFixed(4)}, ask=${bestAsk.toFixed(4)})`
+        );
+        
+        // Trigger immediate reprice (bypass rate limit checks for reactive - they're already debounced)
+        await this.checkAndRepositionOrder(order, true);
+      }
+    }
   }
 
   @Interval(5000) // Run every 5s (was 1s - too aggressive, causes rate limits)

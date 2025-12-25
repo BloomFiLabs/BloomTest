@@ -165,6 +165,39 @@ const ORDER_ACTIVITY = {
   modifiesPerHour: 30, // Estimated order modifications per hour
 };
 
+// ==================== SLICED EXECUTION CONFIG ====================
+// Based on server/src/domain/services/execution/SlicedExecutionService.ts
+const SLICED_EXECUTION = {
+  enabled: true, // NEW: Sliced execution is now wired in!
+  avgSlicesPerPosition: 5, // Dynamic 2-10, assume 5 average
+  fillCheckIntervalMs: 2000, // Check order status every 2s
+  sliceFillTimeoutMs: 20000, // Wait up to 20s per slice
+  
+  // API calls per slice:
+  // - 2 getMarkPrice (refresh prices before slice)
+  // - 2 placeOrder (long + short)
+  // - ~10 getOrderStatus calls (20s / 2s interval)
+  // - 0-2 cancelOrder (if partial fill)
+  
+  get markPriceCallsPerSlice() { return 2; }, // Both exchanges
+  get placeOrderCallsPerSlice() { return 2; }, // Long + short
+  get statusChecksPerSlice() { 
+    return Math.ceil(this.sliceFillTimeoutMs / this.fillCheckIntervalMs) * 2; 
+  },
+  get cancelCallsPerSlice() { return 0.5; }, // ~50% chance of needing cancel
+  
+  // Total calls per position (before: 2 orders, after: many more!)
+  get callsPerPositionOld() { return 2; },
+  get callsPerPositionNew() {
+    return this.avgSlicesPerPosition * (
+      this.markPriceCallsPerSlice +
+      this.placeOrderCallsPerSlice +
+      this.statusChecksPerSlice +
+      this.cancelCallsPerSlice
+    );
+  }
+};
+
 // ==================== MAKER EFFICIENCY SERVICE CONFIG ====================
 // Based on server/src/domain/services/strategy-rules/MakerEfficiencyService.ts
 
@@ -267,16 +300,97 @@ function simulateRateLimits(
   
   // Add order activity if actively trading
   if (activeTrading) {
-    const ordersInPeriod = Math.floor((ORDER_ACTIVITY.ordersPerHour / 60) * durationMinutes);
+    // ==================== SLICED EXECUTION OVERHEAD ====================
+    // NEW: Sliced execution significantly increases API calls!
+    // Each position now requires multiple slices with status checks
+    
+    const positionsPerHour = ORDER_ACTIVITY.ordersPerHour / 2; // Orders are paired
+    const positionsInPeriod = Math.floor((positionsPerHour / 60) * durationMinutes);
+    
+    if (SLICED_EXECUTION.enabled) {
+      // SLICED EXECUTION: Many more calls per position
+      for (let p = 0; p < positionsInPeriod; p++) {
+        const baseTimestamp = (p / positionsInPeriod) * durationMs;
+        
+        for (let slice = 0; slice < SLICED_EXECUTION.avgSlicesPerPosition; slice++) {
+          const sliceTimestamp = baseTimestamp + (slice * SLICED_EXECUTION.sliceFillTimeoutMs);
+          
+          // 1. Mark price refresh (2 calls per slice - both exchanges)
+          hlCalls.push({ 
+            task: 'SlicedExecution', 
+            operation: 'getMarkPrice', 
+            weight: WEIGHTS.HYPERLIQUID.INFO_LIGHT, 
+            timestamp: sliceTimestamp 
+          });
+          lighterCalls.push({ 
+            task: 'SlicedExecution', 
+            operation: 'getMarkPrice', 
+            weight: WEIGHTS.LIGHTER.INFO, 
+            timestamp: sliceTimestamp 
+          });
+          
+          // 2. Place orders (2 calls per slice)
+          hlCalls.push({ 
+            task: 'SlicedExecution', 
+            operation: 'placeOrder', 
+            weight: WEIGHTS.HYPERLIQUID.EXCHANGE, 
+            timestamp: sliceTimestamp 
+          });
+          lighterCalls.push({ 
+            task: 'SlicedExecution', 
+            operation: 'placeOrder', 
+            weight: WEIGHTS.LIGHTER.SEND_TX, 
+            timestamp: sliceTimestamp 
+          });
+          
+          // 3. Order status checks while waiting for fill
+          const statusChecks = Math.ceil(SLICED_EXECUTION.sliceFillTimeoutMs / SLICED_EXECUTION.fillCheckIntervalMs);
+          for (let check = 0; check < statusChecks; check++) {
+            const checkTimestamp = sliceTimestamp + (check * SLICED_EXECUTION.fillCheckIntervalMs);
+            hlCalls.push({ 
+              task: 'SlicedExecution', 
+              operation: 'getOrderStatus', 
+              weight: WEIGHTS.HYPERLIQUID.INFO_LIGHT, 
+              timestamp: checkTimestamp 
+            });
+            lighterCalls.push({ 
+              task: 'SlicedExecution', 
+              operation: 'getOrderStatus', 
+              weight: WEIGHTS.LIGHTER.INFO, 
+              timestamp: checkTimestamp 
+            });
+          }
+          
+          // 4. Occasional cancel calls (partial fills)
+          if (Math.random() < 0.3) { // 30% chance of needing cancel
+            hlCalls.push({ 
+              task: 'SlicedExecution', 
+              operation: 'cancelOrder', 
+              weight: WEIGHTS.HYPERLIQUID.EXCHANGE, 
+              timestamp: sliceTimestamp + SLICED_EXECUTION.sliceFillTimeoutMs 
+            });
+            lighterCalls.push({ 
+              task: 'SlicedExecution', 
+              operation: 'cancelOrder', 
+              weight: WEIGHTS.LIGHTER.CANCEL, // 0 weight for Lighter!
+              timestamp: sliceTimestamp + SLICED_EXECUTION.sliceFillTimeoutMs 
+            });
+          }
+        }
+      }
+    } else {
+      // OLD: Simple order placement (2 calls per position)
+      const ordersInPeriod = positionsInPeriod * 2;
+      for (let i = 0; i < ordersInPeriod; i++) {
+        const timestamp = (i / ordersInPeriod) * durationMs;
+        hlCalls.push({ task: 'orderPlacement', operation: 'placeOrder', weight: WEIGHTS.HYPERLIQUID.EXCHANGE, timestamp });
+        lighterCalls.push({ task: 'orderPlacement', operation: 'placeOrder', weight: WEIGHTS.LIGHTER.SEND_TX, timestamp });
+      }
+    }
+    
+    // Regular order modifications (repricing existing orders - not affected by slicing)
     const cancelsInPeriod = Math.floor((ORDER_ACTIVITY.cancelsPerHour / 60) * durationMinutes);
     const modifiesInPeriod = Math.floor((ORDER_ACTIVITY.modifiesPerHour / 60) * durationMinutes);
-    
-    // Spread orders evenly across the time period
-    for (let i = 0; i < ordersInPeriod; i++) {
-      const timestamp = (i / ordersInPeriod) * durationMs;
-      hlCalls.push({ task: 'orderPlacement', operation: 'placeOrder', weight: WEIGHTS.HYPERLIQUID.EXCHANGE, timestamp });
-      lighterCalls.push({ task: 'orderPlacement', operation: 'placeOrder', weight: WEIGHTS.LIGHTER.SEND_TX, timestamp });
-    }
     
     for (let i = 0; i < cancelsInPeriod; i++) {
       const timestamp = (i / cancelsInPeriod) * durationMs;
@@ -449,6 +563,27 @@ function runSimulation() {
   MAKER_EFFICIENCY.avgWaitingOrdersPerExchange = 2;
   MAKER_EFFICIENCY.repriceRate = 0.3;
   
+  // Test 6: Compare SLICED vs ALL-AT-ONCE execution
+  console.log('\n📊 SCENARIO 6: SLICED EXECUTION vs ALL-AT-ONCE Comparison');
+  console.log('-'.repeat(60));
+  
+  // 6a: With sliced execution (current default)
+  SLICED_EXECUTION.enabled = true;
+  const withSliced = simulateRateLimits(60, true, true, true);
+  console.log('\n🍕 WITH SLICED EXECUTION (5 slices average):');
+  printResult(withSliced.hyperliquid);
+  printResult(withSliced.lighter);
+  
+  // 6b: Without sliced execution (old behavior)
+  SLICED_EXECUTION.enabled = false;
+  const withoutSliced = simulateRateLimits(60, true, true, true);
+  console.log('\n⚡ WITHOUT SLICED EXECUTION (all-at-once):');
+  printResult(withoutSliced.hyperliquid);
+  printResult(withoutSliced.lighter);
+  
+  // Reset sliced to enabled (new default)
+  SLICED_EXECUTION.enabled = true;
+  
   // Summary
   console.log('\n' + '='.repeat(80));
   console.log('SUMMARY & RECOMMENDATIONS');
@@ -495,8 +630,49 @@ function runSimulation() {
   console.log('   Hyperliquid: clearinghouseState (positions), openOrders');
   console.log('   Lighter:     account_all_positions, account_all_orders');
   
+  // Sliced execution analysis
+  console.log('\n' + '='.repeat(80));
+  console.log('🍕 SLICED EXECUTION IMPACT ANALYSIS');
+  console.log('='.repeat(80));
+  
+  console.log(`\n📊 API CALLS PER POSITION:`);
+  console.log(`   Old (all-at-once): 2 order placements`);
+  console.log(`   New (sliced, ${SLICED_EXECUTION.avgSlicesPerPosition} slices):`);
+  console.log(`     - ${SLICED_EXECUTION.avgSlicesPerPosition * 2} markPrice calls`);
+  console.log(`     - ${SLICED_EXECUTION.avgSlicesPerPosition * 2} placeOrder calls`);
+  console.log(`     - ~${SLICED_EXECUTION.avgSlicesPerPosition * 10 * 2} getOrderStatus calls (waiting for fills)`);
+  console.log(`     - ~${Math.floor(SLICED_EXECUTION.avgSlicesPerPosition * 0.3 * 2)} cancelOrder calls (partial fills)`);
+  const totalNewCalls = SLICED_EXECUTION.avgSlicesPerPosition * (2 + 2 + 20 + 0.6);
+  console.log(`   TOTAL: ~${Math.round(totalNewCalls)} calls vs 2 calls = ${Math.round(totalNewCalls / 2)}x increase`);
+  
+  console.log(`\n⚠️ SLICED EXECUTION TRADEOFFS:`);
+  console.log(`   PROS:`);
+  console.log(`     ✅ Limits single-leg exposure to 1 slice size`);
+  console.log(`     ✅ Early abort if one side consistently fails`);
+  console.log(`     ✅ Reconciliation between slices`);
+  console.log(`     ✅ MARKET rollbacks guarantee close`);
+  console.log(`   CONS:`);
+  console.log(`     ⚠️ ${Math.round(totalNewCalls / 2)}x more API calls per position`);
+  console.log(`     ⚠️ Higher rate limit pressure during trading`);
+  console.log(`     ⚠️ May need to reduce scheduled task frequency`);
+  
+  const hlSlicedUtil = withSliced.hyperliquid.utilizationPercent;
+  const lighterSlicedUtil = withSliced.lighter.utilizationPercent;
+  console.log(`\n📈 RATE LIMIT IMPACT (with WS caching):`);
+  console.log(`   Hyperliquid: ${withSliced.hyperliquid.weightPerMinute}/min (${hlSlicedUtil}% utilization)`);
+  console.log(`   Lighter:     ${withSliced.lighter.weightPerMinute}/min (${lighterSlicedUtil}% utilization)`);
+  
+  if (hlSlicedUtil > 70 || lighterSlicedUtil > 70) {
+    console.log(`\n🚨 RECOMMENDATION: Consider reducing:`);
+    console.log(`   - SLICED_EXECUTION.avgSlicesPerPosition from 5 to 3`);
+    console.log(`   - ORDER_ACTIVITY.ordersPerHour if above 20`);
+    console.log(`   - Or increase fillCheckIntervalMs from 2s to 3s`);
+  } else {
+    console.log(`\n✅ Rate limits look OK with sliced execution enabled`);
+  }
+  
   // Return results for programmatic use
-  return { withoutWS, lighterWS, bothWS, heavyTrading };
+  return { withoutWS, lighterWS, bothWS, heavyTrading, withSliced, withoutSliced };
 }
 
 function printResult(result: SimulationResult) {
