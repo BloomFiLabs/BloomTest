@@ -29,7 +29,7 @@ import {
 import { HyperLiquidDataProvider } from './HyperLiquidDataProvider';
 import { DiagnosticsService } from '../../services/DiagnosticsService';
 import { MarketQualityFilter } from '../../../domain/services/MarketQualityFilter';
-import { RateLimiterService } from '../../services/RateLimiterService';
+import { RateLimiterService, RateLimitPriority } from '../../services/RateLimiterService';
 
 import { HyperLiquidWebSocketProvider } from './HyperLiquidWebSocketProvider';
 
@@ -55,14 +55,15 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
   private readonly BALANCE_CACHE_TTL_IDLE = 10000; // 10 seconds cache when not actively trading
   private isActiveTradingMode = false; // Set to true during order placement
 
-  // Rate limit weights
-  private readonly WEIGHT_EXCHANGE = 1;
-  private readonly WEIGHT_INFO_HEAVY = 20;
-  private readonly WEIGHT_INFO_LIGHT = 2;
+  // Rate limit weights (from Hyperliquid docs)
+  // https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/rate-limits-and-user-limits
+  private readonly WEIGHT_EXCHANGE = 1; // Exchange API: 1 + floor(batch_length / 40)
+  private readonly WEIGHT_INFO_HEAVY = 20; // Most info requests
+  private readonly WEIGHT_INFO_LIGHT = 2; // l2Book, allMids, clearinghouseState, orderStatus
 
-  private async callInfo<T>(weight: number, fn: () => Promise<T>): Promise<T> {
+  private async callInfo<T>(weight: number, fn: () => Promise<T>, operation: string = 'info'): Promise<T> {
     try {
-      await this.rateLimiter.acquire(ExchangeType.HYPERLIQUID, weight);
+      await this.rateLimiter.acquire(ExchangeType.HYPERLIQUID, weight, RateLimitPriority.NORMAL, operation);
       return await fn();
     } catch (error: any) {
       if (error.response?.status === 429 || error.message?.includes('429')) {
@@ -72,9 +73,9 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
     }
   }
 
-  private async callExchange<T>(weight: number, fn: () => Promise<T>): Promise<T> {
+  private async callExchange<T>(weight: number, fn: () => Promise<T>, operation: string = 'exchange'): Promise<T> {
     try {
-      await this.rateLimiter.acquire(ExchangeType.HYPERLIQUID, weight);
+      await this.rateLimiter.acquire(ExchangeType.HYPERLIQUID, weight, RateLimitPriority.NORMAL, operation);
       return await fn();
     } catch (error: any) {
       if (error.response?.status === 429 || error.message?.includes('429')) {

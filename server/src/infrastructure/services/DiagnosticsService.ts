@@ -426,6 +426,24 @@ export interface DiagnosticsResponse {
       queued: number;
       }
     >;
+    analytics?: {
+      totalHits1h: number;
+      totalRequests1h: number;
+      overallHitRate: string;
+      byExchange: Record<string, {
+        requests: number;
+        hits: number;
+        hitRate: string;
+        avgQueueMs: number;
+        topOperations: Array<{ operation: string; hits: number }>;
+      }>;
+      recentHits: Array<{
+        time: string;
+        exchange: string;
+        operation: string;
+        queuedMs: number;
+      }>;
+    };
   };
   positionState?: {
     persisted: number;
@@ -2204,7 +2222,19 @@ export class DiagnosticsService {
       };
     }
 
-    return { byExchange };
+    // Get rate limit analytics
+    const rateLimitSummary = this.rateLimiter.getRateLimitSummary();
+
+    return { 
+      byExchange,
+      analytics: {
+        totalHits1h: rateLimitSummary.totalHits1h,
+        totalRequests1h: rateLimitSummary.totalRequests1h,
+        overallHitRate: `${(rateLimitSummary.overallHitRate * 100).toFixed(2)}%`,
+        byExchange: rateLimitSummary.byExchange,
+        recentHits: rateLimitSummary.recentHits,
+      },
+    };
   }
 
   /**

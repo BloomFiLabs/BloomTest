@@ -57,20 +57,98 @@ export interface RateLimiterUsage {
 }
 
 /**
+ * Rate limit hit event for tracking
+ */
+export interface RateLimitHitEvent {
+  exchange: ExchangeType;
+  timestamp: Date;
+  operation: string;
+  weight: number;
+  queuedMs: number; // How long we had to wait
+  currentSecondWeight: number;
+  currentMinuteWeight: number;
+  limitSecond: number;
+  limitMinute: number;
+}
+
+/**
+ * Rate limit analytics
+ */
+export interface RateLimitAnalytics {
+  exchange: ExchangeType;
+  last1h: {
+    totalRequests: number;
+    rateLimitHits: number;
+    hitRate: number; // 0.0 to 1.0
+    avgQueueTimeMs: number;
+    maxQueueTimeMs: number;
+    totalQueueTimeMs: number;
+    byOperation: Record<string, { requests: number; hits: number; avgQueueMs: number }>;
+  };
+  last24h: {
+    totalRequests: number;
+    rateLimitHits: number;
+    hitRate: number;
+    avgQueueTimeMs: number;
+    maxQueueTimeMs: number;
+    peakUsagePercent: number;
+  };
+  currentState: {
+    secondUsagePercent: number;
+    minuteUsagePercent: number;
+    queueLength: number;
+    estimatedWaitMs: number;
+  };
+}
+
+/**
+ * Request weight definitions based on exchange documentation
+ * 
+ * HYPERLIQUID (from docs):
+ * - Exchange API: 1 + floor(batch_length / 40)
+ * - Info requests (l2Book, allMids, clearinghouseState, orderStatus): weight 2
+ * - Other info requests: weight 20
+ * - userRole: weight 60
+ * - IP limit: 1200 weight/minute
+ * 
+ * LIGHTER (from docs):
+ * - Premium accounts: 24,000 weight per 60 seconds (rolling)
+ * - Standard accounts: Lower limits
+ * - Volume Quota: +1 tx per $10 traded (separate from rate limit)
+ * - Cancels don't consume quota
+ * - Free SendTx every 15 seconds
+ */
+export const REQUEST_WEIGHTS = {
+  // Hyperliquid weights
+  HL_EXCHANGE_ACTION: 1, // Base weight for exchange actions
+  HL_INFO_LIGHT: 2, // l2Book, allMids, clearinghouseState, orderStatus
+  HL_INFO_HEAVY: 20, // Most other info requests
+  HL_INFO_USER_ROLE: 60, // userRole endpoint
+  
+  // Lighter weights (estimated based on docs)
+  LIGHTER_SEND_TX: 1, // SendTx weight
+  LIGHTER_INFO: 1, // Info requests
+  LIGHTER_CANCEL: 0, // Cancels don't consume quota
+};
+
+/**
  * Default rate limits for each exchange
- * Based on documented API limits and observed behavior
- * Limits are expressed in WEIGHT units per window
+ * Based on official API documentation:
+ * - Hyperliquid: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/rate-limits-and-user-limits
+ * - Lighter: https://apidocs.lighter.xyz/docs/volume-quota-program
  */
 const DEFAULT_LIMITS: RateLimitConfig[] = [
   {
     exchange: ExchangeType.LIGHTER,
-    maxRequestsPerSecond: 12, // 2 tx/s (weight 6 each)
-    maxRequestsPerMinute: 60, // Standard Account limit
+    // Premium: 24,000 weight/60s, but we use conservative 80% to avoid hitting limits
+    maxRequestsPerSecond: 320, // ~19,200/min = 320/s
+    maxRequestsPerMinute: 19200, // 80% of 24,000 premium limit
   },
   {
     exchange: ExchangeType.HYPERLIQUID,
-    maxRequestsPerSecond: 100, // Shared REST weight
-    maxRequestsPerMinute: 1200, // Shared REST weight
+    // IP limit: 1200 weight/minute, use 80% to be safe
+    maxRequestsPerSecond: 16, // ~960/min = 16/s
+    maxRequestsPerMinute: 960, // 80% of 1200 limit
   },
   {
     exchange: ExchangeType.ASTER,
@@ -81,6 +159,11 @@ const DEFAULT_LIMITS: RateLimitConfig[] = [
     exchange: ExchangeType.EXTENDED,
     maxRequestsPerSecond: 50,
     maxRequestsPerMinute: 1200,
+  },
+  {
+    exchange: ExchangeType.MOCK,
+    maxRequestsPerSecond: 1000, // Unlimited for testing
+    maxRequestsPerMinute: 60000,
   },
 ];
 
@@ -98,6 +181,24 @@ export class RateLimiterService {
   private readonly logger = new Logger(RateLimiterService.name);
   private readonly limits: Map<ExchangeType, RateLimitConfig> = new Map();
   private readonly buckets: Map<ExchangeType, RateBucket> = new Map();
+  
+  // Rate limit hit tracking
+  private readonly hitEvents: RateLimitHitEvent[] = [];
+  private readonly MAX_HIT_EVENTS = 1000; // Keep last 1000 events
+  
+  // Request tracking for analytics
+  private readonly requestLog: Array<{
+    exchange: ExchangeType;
+    timestamp: Date;
+    operation: string;
+    weight: number;
+    queuedMs: number;
+    wasLimited: boolean;
+  }> = [];
+  private readonly MAX_REQUEST_LOG = 10000;
+  
+  // Peak usage tracking
+  private readonly peakUsage: Map<ExchangeType, { percent: number; timestamp: Date }> = new Map();
 
   constructor(private readonly configService: ConfigService) {
     // Initialize with default limits
@@ -154,12 +255,14 @@ export class RateLimiterService {
    * @param exchange - The exchange to acquire a slot for
    * @param weight - The weight of this request (default: 1)
    * @param priority - The priority of this request (default: NORMAL)
+   * @param operation - Description of the operation (for analytics)
    * @returns Promise that resolves when a slot is available
    */
   async acquire(
     exchange: ExchangeType,
     weight: number = 1,
     priority: RateLimitPriority = RateLimitPriority.NORMAL,
+    operation: string = 'unknown',
   ): Promise<void> {
     const bucket = this.buckets.get(exchange);
     const config = this.limits.get(exchange);
@@ -195,22 +298,37 @@ export class RateLimiterService {
     const withinSecondLimit = (currentSecondWeight + weight) <= config.maxRequestsPerSecond;
     const withinMinuteLimit = (currentMinuteWeight + weight) <= config.maxRequestsPerMinute;
 
+    // Track peak usage
+    this.trackPeakUsage(exchange, currentMinuteWeight, config.maxRequestsPerMinute);
+
     // If we have capacity AND no one is waiting, proceed immediately
     if (withinSecondLimit && withinMinuteLimit && bucket.waitQueue.length === 0) {
       // We have capacity - record and proceed
       bucket.secondWindow.push({ timestamp: now, weight });
       bucket.minuteWindow.push({ timestamp: now, weight });
+      
+      // Track this request (not rate limited)
+      this.trackRequest(exchange, operation, weight, 0, false, currentSecondWeight, currentMinuteWeight, config);
       return;
     }
 
     // We're at the limit or others are waiting - need to wait
     const waitTime = this.calculateWaitTime(bucket, config, now, weight, priority);
 
+    // This is a RATE LIMIT HIT - track it!
+    this.trackRateLimitHit(exchange, operation, weight, waitTime, currentSecondWeight, currentMinuteWeight, config);
+
     if (priority >= RateLimitPriority.HIGH) {
       this.logger.debug(
         `Priority acquisition (${RateLimitPriority[priority]}) for ${exchange}, waiting ${waitTime}ms ` +
           `(${currentSecondWeight + weight}/${config.maxRequestsPerSecond}/s, ` +
           `${currentMinuteWeight + weight}/${config.maxRequestsPerMinute}/min, queue: ${bucket.waitQueue.length})`,
+      );
+    } else {
+      this.logger.debug(
+        `⏳ RATE LIMITED: ${exchange} ${operation} - waiting ${waitTime}ms ` +
+          `(${currentSecondWeight + weight}/${config.maxRequestsPerSecond}/s, ` +
+          `${currentMinuteWeight + weight}/${config.maxRequestsPerMinute}/min)`
       );
     }
 
@@ -244,6 +362,9 @@ export class RateLimiterService {
         const actualNow = Date.now();
         bucket.secondWindow.push({ timestamp: actualNow, weight });
         bucket.minuteWindow.push({ timestamp: actualNow, weight });
+        
+        // Track this request (was rate limited)
+        this.trackRequest(exchange, operation, weight, waitTime, true, currentSecondWeight, currentMinuteWeight, config);
 
         resolve();
       }, waitTime);
@@ -466,5 +587,252 @@ export class RateLimiterService {
 
     bucket.secondWindow = bucket.secondWindow.filter((e) => e.timestamp > oneSecondAgo);
     bucket.minuteWindow = bucket.minuteWindow.filter((e) => e.timestamp > oneMinuteAgo);
+  }
+
+  // ==================== RATE LIMIT ANALYTICS ====================
+
+  /**
+   * Track a rate limit hit event
+   */
+  private trackRateLimitHit(
+    exchange: ExchangeType,
+    operation: string,
+    weight: number,
+    queuedMs: number,
+    currentSecondWeight: number,
+    currentMinuteWeight: number,
+    config: RateLimitConfig,
+  ): void {
+    const event: RateLimitHitEvent = {
+      exchange,
+      timestamp: new Date(),
+      operation,
+      weight,
+      queuedMs,
+      currentSecondWeight,
+      currentMinuteWeight,
+      limitSecond: config.maxRequestsPerSecond,
+      limitMinute: config.maxRequestsPerMinute,
+    };
+    
+    this.hitEvents.push(event);
+    if (this.hitEvents.length > this.MAX_HIT_EVENTS) {
+      this.hitEvents.shift();
+    }
+  }
+
+  /**
+   * Track a request (for overall analytics)
+   */
+  private trackRequest(
+    exchange: ExchangeType,
+    operation: string,
+    weight: number,
+    queuedMs: number,
+    wasLimited: boolean,
+    currentSecondWeight: number,
+    currentMinuteWeight: number,
+    config: RateLimitConfig,
+  ): void {
+    this.requestLog.push({
+      exchange,
+      timestamp: new Date(),
+      operation,
+      weight,
+      queuedMs,
+      wasLimited,
+    });
+    
+    if (this.requestLog.length > this.MAX_REQUEST_LOG) {
+      this.requestLog.shift();
+    }
+  }
+
+  /**
+   * Track peak usage for an exchange
+   */
+  private trackPeakUsage(exchange: ExchangeType, currentWeight: number, maxWeight: number): void {
+    const usagePercent = (currentWeight / maxWeight) * 100;
+    const existing = this.peakUsage.get(exchange);
+    
+    if (!existing || usagePercent > existing.percent) {
+      this.peakUsage.set(exchange, { percent: usagePercent, timestamp: new Date() });
+    }
+  }
+
+  /**
+   * Get rate limit analytics for an exchange
+   */
+  getAnalytics(exchange: ExchangeType): RateLimitAnalytics {
+    const now = Date.now();
+    const oneHourAgo = now - 60 * 60 * 1000;
+    const oneDayAgo = now - 24 * 60 * 60 * 1000;
+    
+    // Filter events for this exchange
+    const hits1h = this.hitEvents.filter(e => 
+      e.exchange === exchange && e.timestamp.getTime() > oneHourAgo
+    );
+    const hits24h = this.hitEvents.filter(e => 
+      e.exchange === exchange && e.timestamp.getTime() > oneDayAgo
+    );
+    
+    const requests1h = this.requestLog.filter(r =>
+      r.exchange === exchange && r.timestamp.getTime() > oneHourAgo
+    );
+    const requests24h = this.requestLog.filter(r =>
+      r.exchange === exchange && r.timestamp.getTime() > oneDayAgo
+    );
+    
+    // Calculate 1h analytics by operation
+    const byOperation: Record<string, { requests: number; hits: number; avgQueueMs: number }> = {};
+    for (const req of requests1h) {
+      if (!byOperation[req.operation]) {
+        byOperation[req.operation] = { requests: 0, hits: 0, avgQueueMs: 0 };
+      }
+      byOperation[req.operation].requests++;
+      if (req.wasLimited) {
+        byOperation[req.operation].hits++;
+        byOperation[req.operation].avgQueueMs = 
+          (byOperation[req.operation].avgQueueMs * (byOperation[req.operation].hits - 1) + req.queuedMs) / 
+          byOperation[req.operation].hits;
+      }
+    }
+    
+    // Get current state
+    const usage = this.getUsage(exchange);
+    const config = this.limits.get(exchange);
+    const peak = this.peakUsage.get(exchange);
+    
+    return {
+      exchange,
+      last1h: {
+        totalRequests: requests1h.length,
+        rateLimitHits: hits1h.length,
+        hitRate: requests1h.length > 0 ? hits1h.length / requests1h.length : 0,
+        avgQueueTimeMs: hits1h.length > 0 
+          ? hits1h.reduce((sum, h) => sum + h.queuedMs, 0) / hits1h.length 
+          : 0,
+        maxQueueTimeMs: hits1h.length > 0 
+          ? Math.max(...hits1h.map(h => h.queuedMs)) 
+          : 0,
+        totalQueueTimeMs: hits1h.reduce((sum, h) => sum + h.queuedMs, 0),
+        byOperation,
+      },
+      last24h: {
+        totalRequests: requests24h.length,
+        rateLimitHits: hits24h.length,
+        hitRate: requests24h.length > 0 ? hits24h.length / requests24h.length : 0,
+        avgQueueTimeMs: hits24h.length > 0 
+          ? hits24h.reduce((sum, h) => sum + h.queuedMs, 0) / hits24h.length 
+          : 0,
+        maxQueueTimeMs: hits24h.length > 0 
+          ? Math.max(...hits24h.map(h => h.queuedMs)) 
+          : 0,
+        peakUsagePercent: peak?.percent || 0,
+      },
+      currentState: {
+        secondUsagePercent: config ? (usage.currentWeightPerSecond / config.maxRequestsPerSecond) * 100 : 0,
+        minuteUsagePercent: config ? (usage.currentWeightPerMinute / config.maxRequestsPerMinute) * 100 : 0,
+        queueLength: usage.queuedRequests,
+        estimatedWaitMs: usage.queuedRequests > 0 ? usage.queuedRequests * 100 : 0,
+      },
+    };
+  }
+
+  /**
+   * Get analytics for all exchanges
+   */
+  getAllAnalytics(): Map<ExchangeType, RateLimitAnalytics> {
+    const analytics = new Map<ExchangeType, RateLimitAnalytics>();
+    
+    for (const exchange of this.limits.keys()) {
+      analytics.set(exchange, this.getAnalytics(exchange));
+    }
+    
+    return analytics;
+  }
+
+  /**
+   * Get a summary of rate limit hits for logging/diagnostics
+   */
+  getRateLimitSummary(): {
+    totalHits1h: number;
+    totalRequests1h: number;
+    overallHitRate: number;
+    byExchange: Record<string, { 
+      requests: number; 
+      hits: number; 
+      hitRate: string; 
+      avgQueueMs: number;
+      topOperations: Array<{ operation: string; hits: number }>;
+    }>;
+    recentHits: Array<{ 
+      time: string; 
+      exchange: string; 
+      operation: string; 
+      queuedMs: number; 
+    }>;
+  } {
+    const now = Date.now();
+    const oneHourAgo = now - 60 * 60 * 1000;
+    
+    const hits1h = this.hitEvents.filter(e => e.timestamp.getTime() > oneHourAgo);
+    const requests1h = this.requestLog.filter(r => r.timestamp.getTime() > oneHourAgo);
+    
+    const byExchange: Record<string, { 
+      requests: number; 
+      hits: number; 
+      hitRate: string; 
+      avgQueueMs: number;
+      topOperations: Array<{ operation: string; hits: number }>;
+    }> = {};
+    
+    for (const exchange of this.limits.keys()) {
+      const analytics = this.getAnalytics(exchange);
+      
+      // Get top operations by hit count
+      const opHits = Object.entries(analytics.last1h.byOperation)
+        .filter(([_, data]) => data.hits > 0)
+        .map(([op, data]) => ({ operation: op, hits: data.hits }))
+        .sort((a, b) => b.hits - a.hits)
+        .slice(0, 5);
+      
+      byExchange[exchange] = {
+        requests: analytics.last1h.totalRequests,
+        hits: analytics.last1h.rateLimitHits,
+        hitRate: `${(analytics.last1h.hitRate * 100).toFixed(1)}%`,
+        avgQueueMs: Math.round(analytics.last1h.avgQueueTimeMs),
+        topOperations: opHits,
+      };
+    }
+    
+    // Get most recent hits
+    const recentHits = hits1h
+      .slice(-10)
+      .reverse()
+      .map(h => ({
+        time: `${Math.round((now - h.timestamp.getTime()) / 1000)}s ago`,
+        exchange: h.exchange,
+        operation: h.operation,
+        queuedMs: h.queuedMs,
+      }));
+    
+    return {
+      totalHits1h: hits1h.length,
+      totalRequests1h: requests1h.length,
+      overallHitRate: requests1h.length > 0 ? hits1h.length / requests1h.length : 0,
+      byExchange,
+      recentHits,
+    };
+  }
+
+  /**
+   * Clear analytics data (for testing)
+   */
+  clearAnalytics(): void {
+    this.hitEvents.length = 0;
+    this.requestLog.length = 0;
+    this.peakUsage.clear();
+    this.logger.log('Rate limit analytics cleared');
   }
 }

@@ -70,13 +70,22 @@ export class LighterExchangeAdapter
   private consecutiveNonceErrors = 0;
   private lastSuccessfulOrderTime: Date | null = null;
 
-  // Rate limit weights
-  private readonly WEIGHT_TX = 6;
-  private readonly WEIGHT_INFO = 1; // Standard REST GET is usually weight 1 or low
+  // Rate limit weights (from Lighter docs)
+  // https://apidocs.lighter.xyz/docs/volume-quota-program
+  // Premium: 24,000 weight per 60 seconds (rolling)
+  // Cancels don't consume quota
+  private readonly WEIGHT_TX = 1; // SendTx weight
+  private readonly WEIGHT_INFO = 1; // Info requests
+  private readonly WEIGHT_CANCEL = 0; // Cancels don't consume quota
 
-  private async callApi<T>(weight: number, fn: () => Promise<T>, priority: RateLimitPriority = RateLimitPriority.NORMAL): Promise<T> {
+  private async callApi<T>(
+    weight: number, 
+    fn: () => Promise<T>, 
+    priority: RateLimitPriority = RateLimitPriority.NORMAL,
+    operation: string = 'api',
+  ): Promise<T> {
     try {
-      await this.rateLimiter.acquire(ExchangeType.LIGHTER, weight, priority);
+      await this.rateLimiter.acquire(ExchangeType.LIGHTER, weight, priority, operation);
       return await fn();
     } catch (error: any) {
       if (error.response?.status === 429 || error.message?.includes('429') || error.message?.includes('Too Many Requests')) {
