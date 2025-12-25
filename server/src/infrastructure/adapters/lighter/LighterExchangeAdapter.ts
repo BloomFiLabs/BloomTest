@@ -244,6 +244,12 @@ export class LighterExchangeAdapter
       // Create ApiClient and OrderApi
       const apiClient = new ApiClient({ host: this.config.baseUrl });
       this.orderApi = new OrderApi(apiClient);
+      
+      // NEW: Set account index on WebSocket provider for position/order subscriptions
+      // This enables WebSocket-based position updates, eliminating REST polling!
+      if (this.wsProvider && this.config.accountIndex) {
+        this.wsProvider.setAccountIndex(this.config.accountIndex);
+      }
     }
   }
 
@@ -1528,19 +1534,55 @@ export class LighterExchangeAdapter
     try {
       await this.ensureInitialized();
 
+      // ========== NEW: Try WebSocket cache first to avoid REST call ==========
+      // This dramatically reduces rate limit usage!
+      if (this.wsProvider) {
+        const cachedPositions = this.wsProvider.getCachedPositions();
+        if (cachedPositions && cachedPositions.size > 0) {
+          this.logger.debug(`Using WebSocket cached positions (${cachedPositions.size} markets)`);
+          
+          const positions: PerpPosition[] = [];
+          for (const [marketId, pos] of cachedPositions) {
+            if (Math.abs(pos.size) < 0.0001) continue; // Skip zero positions
+            
+            // Map to PerpPosition
+            const side = pos.sign > 0 ? OrderSide.LONG : OrderSide.SHORT;
+            const markPrice = this.wsProvider.getMarkPrice(marketId) || pos.avgEntryPrice;
+            
+            positions.push(new PerpPosition(
+              ExchangeType.LIGHTER,
+              pos.symbol,
+              side,
+              Math.abs(pos.size),
+              pos.avgEntryPrice,
+              markPrice,
+              pos.unrealizedPnl,
+              1, // leverage - not provided by WS, use default
+            ));
+          }
+          
+          if (positions.length > 0) {
+            this.logger.debug(`WebSocket returned ${positions.length} active positions`);
+            return positions;
+          }
+        }
+      }
+      // ========== End WebSocket cache check ==========
+
+      // Fallback to REST API
       // Use Lighter Explorer API to get positions
       // Endpoint: https://explorer.elliot.ai/api/accounts/{accountIndex}/positions
       const accountIndex = this.config.accountIndex!;
       const explorerUrl = `https://explorer.elliot.ai/api/accounts/${accountIndex}/positions`;
 
       this.logger.debug(
-        `Fetching positions from Lighter Explorer API for account ${accountIndex}...`,
+        `Fetching positions from Lighter REST API for account ${accountIndex}...`,
       );
 
       const response = await this.callApi(this.WEIGHT_INFO, () => axios.get(explorerUrl, {
         timeout: 10000,
         headers: { accept: 'application/json' },
-      }));
+      }), RateLimitPriority.NORMAL, 'getPositions');
 
       if (!response.data) {
         this.logger.warn('Lighter Explorer API returned empty positions data');

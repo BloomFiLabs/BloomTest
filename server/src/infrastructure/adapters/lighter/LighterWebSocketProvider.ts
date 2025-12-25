@@ -132,7 +132,39 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
 
   // User account address for order subscriptions
   private accountAddress: string | null = null;
+  private accountIndex: number | null = null; // Lighter account index for subscriptions
   private isUserSubscribed = false;
+  
+  // NEW: Position and order caches from WebSocket
+  // These eliminate the need for REST polling!
+  private positionCache: Map<number, {
+    marketId: number;
+    symbol: string;
+    size: number;
+    sign: number; // 1 = long, -1 = short
+    avgEntryPrice: number;
+    unrealizedPnl: number;
+    realizedPnl: number;
+    liquidationPrice: number;
+    marginMode: number;
+    allocatedMargin: number;
+    lastUpdated: Date;
+  }> = new Map();
+  
+  private orderCache: Map<string, {
+    orderId: string;
+    marketIndex: number;
+    side: 'buy' | 'sell';
+    price: number;
+    size: number;
+    filledSize: number;
+    status: string;
+    reduceOnly: boolean;
+    lastUpdated: Date;
+  }> = new Map();
+  
+  private isPositionsSubscribed = false;
+  private isOrdersSubscribed = false;
 
   constructor(private readonly configService?: ConfigService) {
     // Try to get account address for user subscriptions
@@ -349,6 +381,22 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
     // Handle user order updates
     if (message.channel?.startsWith('user_orders/') && message.data) {
       this.handleUserOrderUpdate(message.data);
+      return;
+    }
+
+    // Handle account_all_positions updates (from WebSocket docs)
+    // Channel: account_all_positions:{ACCOUNT_ID}
+    if (message.type === 'update/account_all_positions' || 
+        message.channel?.startsWith('account_all_positions:')) {
+      this.handlePositionsUpdate(message);
+      return;
+    }
+
+    // Handle account_all_orders updates (from WebSocket docs)
+    // Channel: account_all_orders:{ACCOUNT_ID}
+    if (message.type === 'update/account_all_orders' || 
+        message.channel?.startsWith('account_all_orders:')) {
+      this.handleOrdersUpdate(message);
       return;
     }
 
@@ -778,5 +826,233 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
    */
   isSubscribedToUserOrders(): boolean {
     return this.isUserSubscribed;
+  }
+
+  // ==================== NEW: Position & Order WebSocket Subscriptions ====================
+  // These eliminate REST polling for getPositions() and getOpenOrders()
+  // Based on: https://apidocs.lighter.xyz/docs/websocket-reference
+
+  /**
+   * Set the account index for position/order subscriptions
+   * This is required because Lighter uses account index, not L1 address
+   */
+  setAccountIndex(index: number): void {
+    this.accountIndex = index;
+    this.logger.log(`Account index set to ${index} for WebSocket subscriptions`);
+    
+    // Auto-subscribe if connected
+    if (this.isConnected && this.ws) {
+      this.subscribeToPositions();
+      this.subscribeToOrders();
+    }
+  }
+
+  /**
+   * Subscribe to account_all_positions channel
+   * Provides real-time position updates, eliminating need for REST polling
+   */
+  subscribeToPositions(): void {
+    if (!this.accountIndex) {
+      this.logger.debug('Cannot subscribe to positions: no account index set');
+      return;
+    }
+
+    if (this.isPositionsSubscribed) {
+      return;
+    }
+
+    if (this.isConnected && this.ws) {
+      const subscription = {
+        type: 'subscribe',
+        channel: `account_all_positions/${this.accountIndex}`,
+      };
+
+      this.ws.send(JSON.stringify(subscription));
+      this.isPositionsSubscribed = true;
+      this.logger.log(`📡 Subscribed to Lighter positions for account ${this.accountIndex}`);
+    }
+  }
+
+  /**
+   * Subscribe to account_all_orders channel
+   * Provides real-time order updates, eliminating need for REST polling
+   */
+  subscribeToOrders(): void {
+    if (!this.accountIndex) {
+      this.logger.debug('Cannot subscribe to orders: no account index set');
+      return;
+    }
+
+    if (this.isOrdersSubscribed) {
+      return;
+    }
+
+    if (this.isConnected && this.ws) {
+      const subscription = {
+        type: 'subscribe',
+        channel: `account_all_orders/${this.accountIndex}`,
+      };
+
+      this.ws.send(JSON.stringify(subscription));
+      this.isOrdersSubscribed = true;
+      this.logger.log(`📡 Subscribed to Lighter orders for account ${this.accountIndex}`);
+    }
+  }
+
+  /**
+   * Handle position updates from account_all_positions channel
+   */
+  private handlePositionsUpdate(message: any): void {
+    const positions = message.positions || {};
+    
+    for (const [marketIdStr, posData] of Object.entries(positions)) {
+      const marketId = parseInt(marketIdStr);
+      const pos = posData as any;
+      
+      if (!pos) continue;
+      
+      const size = parseFloat(pos.position || '0');
+      const sign = pos.sign || (size >= 0 ? 1 : -1);
+      
+      this.positionCache.set(marketId, {
+        marketId,
+        symbol: pos.symbol || `Market-${marketId}`,
+        size: Math.abs(size),
+        sign,
+        avgEntryPrice: parseFloat(pos.avg_entry_price || '0'),
+        unrealizedPnl: parseFloat(pos.unrealized_pnl || '0'),
+        realizedPnl: parseFloat(pos.realized_pnl || '0'),
+        liquidationPrice: parseFloat(pos.liquidation_price || '0'),
+        marginMode: pos.margin_mode || 0,
+        allocatedMargin: parseFloat(pos.allocated_margin || '0'),
+        lastUpdated: new Date(),
+      });
+    }
+    
+    this.logger.debug(`📊 Updated ${Object.keys(positions).length} positions from WebSocket`);
+  }
+
+  /**
+   * Handle order updates from account_all_orders channel
+   */
+  private handleOrdersUpdate(message: any): void {
+    const orders = message.orders || {};
+    
+    // Clear existing orders and repopulate
+    this.orderCache.clear();
+    
+    for (const [marketIdStr, marketOrders] of Object.entries(orders)) {
+      const orderList = marketOrders as any[];
+      if (!Array.isArray(orderList)) continue;
+      
+      for (const order of orderList) {
+        const orderId = order.order_id?.toString() || order.order_index?.toString();
+        if (!orderId) continue;
+        
+        this.orderCache.set(orderId, {
+          orderId,
+          marketIndex: parseInt(marketIdStr),
+          side: order.is_ask ? 'sell' : 'buy',
+          price: parseFloat(order.price || '0'),
+          size: parseFloat(order.initial_base_amount || '0'),
+          filledSize: parseFloat(order.filled_base_amount || '0'),
+          status: order.status || 'open',
+          reduceOnly: order.reduce_only || false,
+          lastUpdated: new Date(),
+        });
+      }
+    }
+    
+    this.logger.debug(`📋 Updated ${this.orderCache.size} orders from WebSocket`);
+  }
+
+  /**
+   * Get all cached positions (from WebSocket)
+   * Returns null if not subscribed or no data yet
+   */
+  getCachedPositions(): Map<number, {
+    marketId: number;
+    symbol: string;
+    size: number;
+    sign: number;
+    avgEntryPrice: number;
+    unrealizedPnl: number;
+    realizedPnl: number;
+    liquidationPrice: number;
+    marginMode: number;
+    allocatedMargin: number;
+    lastUpdated: Date;
+  }> | null {
+    if (!this.isPositionsSubscribed || this.positionCache.size === 0) {
+      return null;
+    }
+    return this.positionCache;
+  }
+
+  /**
+   * Get all cached open orders (from WebSocket)
+   * Returns null if not subscribed or no data yet
+   */
+  getCachedOrders(): Map<string, {
+    orderId: string;
+    marketIndex: number;
+    side: 'buy' | 'sell';
+    price: number;
+    size: number;
+    filledSize: number;
+    status: string;
+    reduceOnly: boolean;
+    lastUpdated: Date;
+  }> | null {
+    if (!this.isOrdersSubscribed || this.orderCache.size === 0) {
+      return null;
+    }
+    return this.orderCache;
+  }
+
+  /**
+   * Check if we have fresh position data from WebSocket
+   */
+  hasPositionData(): boolean {
+    if (!this.isPositionsSubscribed) return false;
+    
+    // Check if any position was updated in the last 30 seconds
+    const now = Date.now();
+    for (const pos of this.positionCache.values()) {
+      if (now - pos.lastUpdated.getTime() < 30000) {
+        return true;
+      }
+    }
+    return this.positionCache.size > 0;
+  }
+
+  /**
+   * Check if we have fresh order data from WebSocket
+   */
+  hasOrderData(): boolean {
+    if (!this.isOrdersSubscribed) return false;
+    
+    // Check if any order was updated in the last 30 seconds
+    const now = Date.now();
+    for (const order of this.orderCache.values()) {
+      if (now - order.lastUpdated.getTime() < 30000) {
+        return true;
+      }
+    }
+    return this.orderCache.size > 0 || this.isOrdersSubscribed;
+  }
+
+  /**
+   * Check if subscribed to positions
+   */
+  isSubscribedToPositions(): boolean {
+    return this.isPositionsSubscribed;
+  }
+
+  /**
+   * Check if subscribed to orders
+   */
+  isSubscribedToAllOrders(): boolean {
+    return this.isOrdersSubscribed;
   }
 }
