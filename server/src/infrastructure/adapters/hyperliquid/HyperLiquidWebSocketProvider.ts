@@ -121,6 +121,53 @@ export class HyperLiquidWebSocketProvider
   // User authentication for userFills/userEvents subscriptions
   private walletAddress: string | null = null;
   private isUserSubscribed = false;
+  
+  // ==================== NEW: Position & Order WebSocket Subscriptions ====================
+  // Based on: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions
+  // - clearinghouseState: Real-time position and margin updates
+  // - openOrders: Real-time open order updates
+  
+  // Cache for clearinghouse state (positions)
+  private clearinghouseCache: {
+    assetPositions: Array<{
+      coin: string;
+      position: {
+        coin: string;
+        szi: string;
+        leverage: { type: string; value: number };
+        entryPx: string;
+        positionValue: string;
+        unrealizedPnl: string;
+        returnOnEquity: string;
+        liquidationPx: string | null;
+        marginUsed: string;
+      };
+    }>;
+    marginSummary: {
+      accountValue: number;
+      totalNtlPos: number;
+      totalRawUsd: number;
+      totalMarginUsed: number;
+    };
+    withdrawable: number;
+    lastUpdated: Date;
+  } | null = null;
+  
+  // Cache for open orders
+  private openOrdersCache: Array<{
+    coin: string;
+    side: string;
+    limitPx: string;
+    sz: string;
+    oid: number;
+    timestamp: number;
+    origSz: string;
+    cloid?: string;
+  }> = [];
+  private openOrdersLastUpdated: Date | null = null;
+  
+  private isClearinghouseSubscribed = false;
+  private isOpenOrdersSubscribed = false;
 
   constructor(private readonly configService?: ConfigService) {
     // Try to get wallet address for user subscriptions
@@ -270,6 +317,78 @@ export class HyperLiquidWebSocketProvider
     } else if (message.channel === 'userFills' && message.data) {
       // User fills stream
       this.handleUserFills(message.data);
+    } else if (message.channel === 'clearinghouseState' && message.data) {
+      // Real-time position and margin updates
+      this.handleClearinghouseState(message.data);
+    } else if (message.channel === 'openOrders' && message.data) {
+      // Real-time open order updates
+      this.handleOpenOrders(message.data);
+    }
+  }
+
+  /**
+   * Handle clearinghouseState updates (positions and margin)
+   * From: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions
+   */
+  private handleClearinghouseState(data: any): void {
+    try {
+      this.clearinghouseCache = {
+        assetPositions: (data.assetPositions || []).map((ap: any) => ({
+          coin: ap.position?.coin || '',
+          position: {
+            coin: ap.position?.coin || '',
+            szi: ap.position?.szi || '0',
+            leverage: ap.position?.leverage || { type: 'cross', value: 1 },
+            entryPx: ap.position?.entryPx || '0',
+            positionValue: ap.position?.positionValue || '0',
+            unrealizedPnl: ap.position?.unrealizedPnl || '0',
+            returnOnEquity: ap.position?.returnOnEquity || '0',
+            liquidationPx: ap.position?.liquidationPx || null,
+            marginUsed: ap.position?.marginUsed || '0',
+          },
+        })),
+        marginSummary: {
+          accountValue: data.marginSummary?.accountValue || 0,
+          totalNtlPos: data.marginSummary?.totalNtlPos || 0,
+          totalRawUsd: data.marginSummary?.totalRawUsd || 0,
+          totalMarginUsed: data.marginSummary?.totalMarginUsed || 0,
+        },
+        withdrawable: data.withdrawable || 0,
+        lastUpdated: new Date(),
+      };
+      
+      const posCount = this.clearinghouseCache.assetPositions.filter(
+        p => Math.abs(parseFloat(p.position.szi)) > 0
+      ).length;
+      
+      this.logger.debug(`📊 Updated clearinghouseState: ${posCount} positions, $${this.clearinghouseCache.marginSummary.accountValue.toFixed(2)} account value`);
+    } catch (error: any) {
+      this.logger.error(`Failed to parse clearinghouseState: ${error.message}`);
+    }
+  }
+
+  /**
+   * Handle openOrders updates
+   * From: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions
+   */
+  private handleOpenOrders(data: any): void {
+    try {
+      const orders = data.orders || data || [];
+      this.openOrdersCache = orders.map((order: any) => ({
+        coin: order.coin || '',
+        side: order.side || '',
+        limitPx: order.limitPx || '0',
+        sz: order.sz || '0',
+        oid: order.oid || 0,
+        timestamp: order.timestamp || Date.now(),
+        origSz: order.origSz || order.sz || '0',
+        cloid: order.cloid,
+      }));
+      this.openOrdersLastUpdated = new Date();
+      
+      this.logger.debug(`📋 Updated openOrders: ${this.openOrdersCache.length} orders`);
+    } catch (error: any) {
+      this.logger.error(`Failed to parse openOrders: ${error.message}`);
     }
   }
 
@@ -454,6 +573,18 @@ export class HyperLiquidWebSocketProvider
       this.isUserSubscribed = false; // Reset to allow resubscription
       this.subscribeToUserEvents();
     }
+    
+    // Resubscribe to clearinghouseState if we were subscribed before
+    if (this.isClearinghouseSubscribed && this.walletAddress) {
+      this.isClearinghouseSubscribed = false; // Reset to allow resubscription
+      this.subscribeToClearinghouseState();
+    }
+    
+    // Resubscribe to openOrders if we were subscribed before
+    if (this.isOpenOrdersSubscribed && this.walletAddress) {
+      this.isOpenOrdersSubscribed = false; // Reset to allow resubscription
+      this.subscribeToOpenOrders();
+    }
   }
 
   /**
@@ -630,5 +761,209 @@ export class HyperLiquidWebSocketProvider
    */
   isSubscribedToUserEvents(): boolean {
     return this.isUserSubscribed;
+  }
+
+  // ==================== NEW: Position & Order Subscriptions ====================
+  // Based on: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions
+
+  /**
+   * Subscribe to clearinghouseState for real-time position updates
+   * This eliminates the need for REST polling of getPositions()
+   */
+  subscribeToClearinghouseState(): void {
+    if (!this.walletAddress) {
+      this.logger.warn('Cannot subscribe to clearinghouseState: no wallet address configured');
+      return;
+    }
+
+    if (this.isClearinghouseSubscribed) {
+      return;
+    }
+
+    if (this.isConnected && this.ws) {
+      const subscription = {
+        method: 'subscribe',
+        subscription: {
+          type: 'clearinghouseState',
+          user: this.walletAddress,
+        },
+      };
+
+      this.ws.send(JSON.stringify(subscription));
+      this.isClearinghouseSubscribed = true;
+      this.logger.log(`📡 Subscribed to Hyperliquid clearinghouseState for ${this.walletAddress.slice(0, 10)}...`);
+    }
+  }
+
+  /**
+   * Subscribe to openOrders for real-time order updates
+   * This eliminates the need for REST polling of getOpenOrders()
+   */
+  subscribeToOpenOrders(): void {
+    if (!this.walletAddress) {
+      this.logger.warn('Cannot subscribe to openOrders: no wallet address configured');
+      return;
+    }
+
+    if (this.isOpenOrdersSubscribed) {
+      return;
+    }
+
+    if (this.isConnected && this.ws) {
+      const subscription = {
+        method: 'subscribe',
+        subscription: {
+          type: 'openOrders',
+          user: this.walletAddress,
+        },
+      };
+
+      this.ws.send(JSON.stringify(subscription));
+      this.isOpenOrdersSubscribed = true;
+      this.logger.log(`📡 Subscribed to Hyperliquid openOrders for ${this.walletAddress.slice(0, 10)}...`);
+    }
+  }
+
+  /**
+   * Subscribe to all position-related channels
+   * Call this after connection is established
+   */
+  subscribeToPositionUpdates(): void {
+    this.subscribeToClearinghouseState();
+    this.subscribeToOpenOrders();
+  }
+
+  /**
+   * Get cached positions from clearinghouseState
+   * Returns null if not subscribed or no data yet
+   */
+  getCachedPositions(): Array<{
+    coin: string;
+    size: number;
+    side: 'LONG' | 'SHORT';
+    entryPrice: number;
+    markPrice: number;
+    unrealizedPnl: number;
+    leverage: number;
+    liquidationPrice: number | null;
+    marginUsed: number;
+  }> | null {
+    if (!this.isClearinghouseSubscribed || !this.clearinghouseCache) {
+      return null;
+    }
+
+    // Filter to actual positions (non-zero size)
+    return this.clearinghouseCache.assetPositions
+      .filter(ap => Math.abs(parseFloat(ap.position.szi)) > 0.0001)
+      .map(ap => {
+        const size = parseFloat(ap.position.szi);
+        const entryPrice = parseFloat(ap.position.entryPx);
+        const markPrice = this.getMarkPrice(ap.coin) || entryPrice;
+        
+        return {
+          coin: ap.coin,
+          size: Math.abs(size),
+          side: (size > 0 ? 'LONG' : 'SHORT') as 'LONG' | 'SHORT',
+          entryPrice,
+          markPrice,
+          unrealizedPnl: parseFloat(ap.position.unrealizedPnl),
+          leverage: ap.position.leverage?.value || 1,
+          liquidationPrice: ap.position.liquidationPx ? parseFloat(ap.position.liquidationPx) : null,
+          marginUsed: parseFloat(ap.position.marginUsed),
+        };
+      });
+  }
+
+  /**
+   * Get cached open orders from openOrders subscription
+   * Returns null if not subscribed or no data yet
+   */
+  getCachedOpenOrders(): Array<{
+    coin: string;
+    side: 'buy' | 'sell';
+    price: number;
+    size: number;
+    origSize: number;
+    orderId: number;
+    timestamp: number;
+    clientOrderId?: string;
+  }> | null {
+    if (!this.isOpenOrdersSubscribed || !this.openOrdersLastUpdated) {
+      return null;
+    }
+
+    return this.openOrdersCache.map(order => ({
+      coin: order.coin,
+      side: order.side.toLowerCase() as 'buy' | 'sell',
+      price: parseFloat(order.limitPx),
+      size: parseFloat(order.sz),
+      origSize: parseFloat(order.origSz),
+      orderId: order.oid,
+      timestamp: order.timestamp,
+      clientOrderId: order.cloid,
+    }));
+  }
+
+  /**
+   * Get account summary from clearinghouseState
+   */
+  getCachedAccountSummary(): {
+    accountValue: number;
+    totalNotionalPosition: number;
+    totalMarginUsed: number;
+    withdrawable: number;
+    lastUpdated: Date;
+  } | null {
+    if (!this.clearinghouseCache) {
+      return null;
+    }
+
+    return {
+      accountValue: this.clearinghouseCache.marginSummary.accountValue,
+      totalNotionalPosition: this.clearinghouseCache.marginSummary.totalNtlPos,
+      totalMarginUsed: this.clearinghouseCache.marginSummary.totalMarginUsed,
+      withdrawable: this.clearinghouseCache.withdrawable,
+      lastUpdated: this.clearinghouseCache.lastUpdated,
+    };
+  }
+
+  /**
+   * Check if we have fresh position data from WebSocket
+   */
+  hasPositionData(): boolean {
+    if (!this.isClearinghouseSubscribed || !this.clearinghouseCache) {
+      return false;
+    }
+    
+    // Check if data is fresh (within last 30 seconds)
+    const now = Date.now();
+    return now - this.clearinghouseCache.lastUpdated.getTime() < 30000;
+  }
+
+  /**
+   * Check if we have fresh order data from WebSocket
+   */
+  hasOrderData(): boolean {
+    if (!this.isOpenOrdersSubscribed || !this.openOrdersLastUpdated) {
+      return false;
+    }
+    
+    // Check if data is fresh (within last 30 seconds)
+    const now = Date.now();
+    return now - this.openOrdersLastUpdated.getTime() < 30000;
+  }
+
+  /**
+   * Check if subscribed to clearinghouseState
+   */
+  isSubscribedToClearinghouse(): boolean {
+    return this.isClearinghouseSubscribed;
+  }
+
+  /**
+   * Check if subscribed to openOrders
+   */
+  isSubscribedToOpenOrders(): boolean {
+    return this.isOpenOrdersSubscribed;
   }
 }

@@ -140,6 +140,16 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
     // Don't initialize symbol converter in constructor - initialize lazily when needed
     // This prevents rate limiting during startup
 
+    // Subscribe to WebSocket position updates if available
+    // This eliminates REST polling for getPositions()!
+    if (this.wsProvider) {
+      // Use setTimeout to allow WebSocket to connect first
+      setTimeout(() => {
+        this.wsProvider?.subscribeToPositionUpdates();
+        this.logger.log('📡 Subscribed to Hyperliquid WebSocket position updates');
+      }, 2000);
+    }
+
     // Removed adapter initialization log - only execution logs shown
   }
 
@@ -565,10 +575,37 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
   }
 
   async getPositions(): Promise<PerpPosition[]> {
+    // ========== NEW: Try WebSocket cache first to avoid REST call ==========
+    // This dramatically reduces rate limit usage!
+    if (this.wsProvider && this.wsProvider.hasPositionData()) {
+      const cachedPositions = this.wsProvider.getCachedPositions();
+      if (cachedPositions && cachedPositions.length >= 0) {
+        this.logger.debug(`Using WebSocket cached positions (${cachedPositions.length} positions)`);
+        
+        const positions: PerpPosition[] = [];
+        for (const pos of cachedPositions) {
+          positions.push(new PerpPosition(
+            ExchangeType.HYPERLIQUID,
+            pos.coin,
+            pos.side === 'LONG' ? OrderSide.LONG : OrderSide.SHORT,
+            pos.size,
+            pos.entryPrice,
+            pos.markPrice,
+            pos.unrealizedPnl,
+            pos.leverage,
+            pos.liquidationPrice || undefined,
+          ));
+        }
+        
+        return positions;
+      }
+    }
+    // ========== End WebSocket cache check ==========
+
+    // Fallback to REST API
     return this.callInfo(this.WEIGHT_INFO_LIGHT, async () => {
-      // Always fetch fresh positions (no caching to ensure we see latest state)
       this.logger.debug(
-        `Fetching fresh positions from Hyperliquid for ${this.walletAddress}...`,
+        `Fetching positions from Hyperliquid REST API for ${this.walletAddress}...`,
       );
       const clearinghouseState = await this.infoClient.clearinghouseState({
         user: this.walletAddress,

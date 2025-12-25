@@ -184,7 +184,8 @@ interface SimulationResult {
 function simulateRateLimits(
   durationMinutes: number = 60,
   useWebSocketCache: boolean = false,
-  activeTrading: boolean = true
+  activeTrading: boolean = true,
+  hlWebSocketCache: boolean = false, // NEW: Hyperliquid WS cache option
 ): { hyperliquid: SimulationResult; lighter: SimulationResult } {
   
   const durationMs = durationMinutes * 60 * 1000;
@@ -202,26 +203,39 @@ function simulateRateLimits(
       
       for (const call of task.calls) {
         // Skip if using WebSocket cache for positions/orders
-        if (useWebSocketCache && 
-            (call.operation === 'getPositions' || call.operation === 'getOpenOrders')) {
-          // WebSocket cache hit - no REST call needed
-          // But only for Lighter (we implemented WS for Lighter, not HL yet)
-          if (call.exchange === 'LIGHTER') continue;
-          if (call.exchange === 'BOTH') {
-            // Only make call for Hyperliquid
-            for (let c = 0; c < call.count; c++) {
-              hlCalls.push({ task: task.name, operation: call.operation, weight: call.weight, timestamp });
+        const isPositionOrOrder = call.operation === 'getPositions' || call.operation === 'getOpenOrders';
+        
+        if (isPositionOrOrder) {
+          // Check Lighter WebSocket cache
+          if (useWebSocketCache && (call.exchange === 'LIGHTER' || call.exchange === 'BOTH')) {
+            // Skip Lighter call - using WebSocket
+            if (call.exchange === 'LIGHTER') continue;
+            // For BOTH: Skip Lighter, but still check Hyperliquid below
+          }
+          
+          // Check Hyperliquid WebSocket cache
+          if (hlWebSocketCache && (call.exchange === 'HYPERLIQUID' || call.exchange === 'BOTH')) {
+            // Skip Hyperliquid call - using WebSocket
+            if (call.exchange === 'HYPERLIQUID') continue;
+            if (call.exchange === 'BOTH' && useWebSocketCache) {
+              // Both exchanges using WebSocket cache - skip entirely
+              continue;
             }
-            continue;
           }
         }
         
         for (let c = 0; c < call.count; c++) {
           if (call.exchange === 'HYPERLIQUID' || call.exchange === 'BOTH') {
-            hlCalls.push({ task: task.name, operation: call.operation, weight: call.weight, timestamp });
+            // Skip if using Hyperliquid WebSocket cache for positions
+            if (!(hlWebSocketCache && isPositionOrOrder)) {
+              hlCalls.push({ task: task.name, operation: call.operation, weight: call.weight, timestamp });
+            }
           }
           if (call.exchange === 'LIGHTER' || call.exchange === 'BOTH') {
-            lighterCalls.push({ task: task.name, operation: call.operation, weight: call.weight, timestamp });
+            // Skip if using Lighter WebSocket cache for positions
+            if (!(useWebSocketCache && isPositionOrOrder)) {
+              lighterCalls.push({ task: task.name, operation: call.operation, weight: call.weight, timestamp });
+            }
           }
         }
       }
@@ -325,27 +339,34 @@ function runSimulation() {
   console.log('='.repeat(80));
   console.log('\nSimulating 60 minutes of bot operation...\n');
   
-  // Test 1: Without WebSocket caching (current behavior for Hyperliquid)
-  console.log('📊 SCENARIO 1: Without WebSocket Position Cache');
+  // Test 1: Without WebSocket caching (baseline)
+  console.log('📊 SCENARIO 1: Without WebSocket Position Cache (Baseline)');
   console.log('-'.repeat(60));
-  const withoutWS = simulateRateLimits(60, false, true);
+  const withoutWS = simulateRateLimits(60, false, true, false);
   printResult(withoutWS.hyperliquid);
   printResult(withoutWS.lighter);
   
-  // Test 2: With WebSocket caching (new behavior for Lighter)
-  console.log('\n📊 SCENARIO 2: With WebSocket Position Cache (Lighter only)');
+  // Test 2: With Lighter WebSocket caching only
+  console.log('\n📊 SCENARIO 2: With Lighter WebSocket Cache Only');
   console.log('-'.repeat(60));
-  const withWS = simulateRateLimits(60, true, true);
-  printResult(withWS.hyperliquid);
-  printResult(withWS.lighter);
+  const lighterWS = simulateRateLimits(60, true, true, false);
+  printResult(lighterWS.hyperliquid);
+  printResult(lighterWS.lighter);
   
-  // Test 3: Heavy trading scenario
-  console.log('\n📊 SCENARIO 3: Heavy Trading (2x order activity)');
+  // Test 3: With BOTH exchanges using WebSocket caching (NEW!)
+  console.log('\n📊 SCENARIO 3: With BOTH WebSocket Caches (Recommended!)');
+  console.log('-'.repeat(60));
+  const bothWS = simulateRateLimits(60, true, true, true);
+  printResult(bothWS.hyperliquid);
+  printResult(bothWS.lighter);
+  
+  // Test 4: Heavy trading scenario with both caches
+  console.log('\n📊 SCENARIO 4: Heavy Trading (2x order activity) + Both WS Caches');
   console.log('-'.repeat(60));
   ORDER_ACTIVITY.ordersPerHour = 40;
   ORDER_ACTIVITY.cancelsPerHour = 20;
   ORDER_ACTIVITY.modifiesPerHour = 60;
-  const heavyTrading = simulateRateLimits(60, true, true);
+  const heavyTrading = simulateRateLimits(60, true, true, true);
   printResult(heavyTrading.hyperliquid);
   printResult(heavyTrading.lighter);
   
@@ -354,39 +375,49 @@ function runSimulation() {
   console.log('SUMMARY & RECOMMENDATIONS');
   console.log('='.repeat(80));
   
-  console.log('\n🔴 HYPERLIQUID (Limit: 1200/min, Using: 960/min safe limit)');
-  console.log(`   Current usage: ${withoutWS.hyperliquid.weightPerMinute}/min (${withoutWS.hyperliquid.utilizationPercent}%)`);
-  console.log(`   Peak minute: ${withoutWS.hyperliquid.peakMinuteWeight}/min`);
-  console.log(`   Status: ${withoutWS.hyperliquid.wouldExceedLimit ? '⚠️ MAY EXCEED LIMIT' : '✅ Within limits'}`);
+  console.log('\n🔵 HYPERLIQUID (Limit: 1200/min, Using: 960/min safe limit)');
+  console.log(`   Without WS cache: ${withoutWS.hyperliquid.weightPerMinute}/min (${withoutWS.hyperliquid.utilizationPercent}%)`);
+  console.log(`   With WS cache:    ${bothWS.hyperliquid.weightPerMinute}/min (${bothWS.hyperliquid.utilizationPercent}%)`);
+  const hlImprovement = withoutWS.hyperliquid.weightPerMinute > 0 
+    ? Math.round((1 - bothWS.hyperliquid.weightPerMinute / withoutWS.hyperliquid.weightPerMinute) * 100)
+    : 0;
+  console.log(`   Improvement:      ${hlImprovement}% reduction ✅`);
   
   console.log('\n🟢 LIGHTER (Limit: 24000/min, Using: 19200/min safe limit)');
   console.log(`   Without WS cache: ${withoutWS.lighter.weightPerMinute}/min (${withoutWS.lighter.utilizationPercent}%)`);
-  console.log(`   With WS cache: ${withWS.lighter.weightPerMinute}/min (${withWS.lighter.utilizationPercent}%)`);
-  console.log(`   Improvement: ${Math.round((1 - withWS.lighter.weightPerMinute / withoutWS.lighter.weightPerMinute) * 100)}% reduction`);
+  console.log(`   With WS cache:    ${bothWS.lighter.weightPerMinute}/min (${bothWS.lighter.utilizationPercent}%)`);
+  const lighterImprovement = withoutWS.lighter.weightPerMinute > 0
+    ? Math.round((1 - bothWS.lighter.weightPerMinute / withoutWS.lighter.weightPerMinute) * 100)
+    : 0;
+  console.log(`   Improvement:      ${lighterImprovement}% reduction ✅`);
   
-  console.log('\n📋 TOP OPERATIONS BY WEIGHT:');
+  console.log('\n📊 TOTAL IMPROVEMENT WITH BOTH WEBSOCKET CACHES:');
+  const totalBeforeWeight = withoutWS.hyperliquid.totalWeight + withoutWS.lighter.totalWeight;
+  const totalAfterWeight = bothWS.hyperliquid.totalWeight + bothWS.lighter.totalWeight;
+  const totalImprovement = totalBeforeWeight > 0 
+    ? Math.round((1 - totalAfterWeight / totalBeforeWeight) * 100)
+    : 0;
+  console.log(`   Before: ${totalBeforeWeight} total weight/hour`);
+  console.log(`   After:  ${totalAfterWeight} total weight/hour`);
+  console.log(`   Improvement: ${totalImprovement}% reduction in API calls! 🚀`);
+  
+  console.log('\n📋 TOP OPERATIONS BY WEIGHT (Before WS Cache):');
   console.log('\n   Hyperliquid:');
   withoutWS.hyperliquid.operationBreakdown.slice(0, 5).forEach(op => {
     console.log(`   - ${op.operation}: ${op.calls} calls, ${op.weight} weight (${Math.round(op.weight / withoutWS.hyperliquid.totalWeight * 100)}%)`);
   });
   
-  console.log('\n   Lighter (without WS):');
+  console.log('\n   Lighter:');
   withoutWS.lighter.operationBreakdown.slice(0, 5).forEach(op => {
     console.log(`   - ${op.operation}: ${op.calls} calls, ${op.weight} weight (${Math.round(op.weight / withoutWS.lighter.totalWeight * 100)}%)`);
   });
   
-  console.log('\n💡 RECOMMENDATIONS:');
-  if (withoutWS.hyperliquid.utilizationPercent > 50) {
-    console.log('   1. Add WebSocket position subscription for Hyperliquid (like we did for Lighter)');
-    console.log('   2. Increase intervals for non-critical tasks');
-    console.log('   3. Consolidate multiple getPositions() calls into shared cache');
-  }
-  if (withoutWS.lighter.utilizationPercent > 10) {
-    console.log('   4. Lighter WS cache should reduce REST calls significantly');
-  }
+  console.log('\n✅ WEBSOCKET SUBSCRIPTIONS NOW ACTIVE:');
+  console.log('   Hyperliquid: clearinghouseState (positions), openOrders');
+  console.log('   Lighter:     account_all_positions, account_all_orders');
   
   // Return results for programmatic use
-  return { withoutWS, withWS, heavyTrading };
+  return { withoutWS, lighterWS, bothWS, heavyTrading };
 }
 
 function printResult(result: SimulationResult) {
