@@ -2171,6 +2171,25 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
   async getOpenOrders(): Promise<
     import('../../../domain/ports/IPerpExchangeAdapter').OpenOrder[]
   > {
+    // ========== Try WebSocket cache first to avoid REST call ==========
+    if (this.wsProvider && this.wsProvider.hasOrderData()) {
+      const cachedOrders = this.wsProvider.getCachedOpenOrders();
+      if (cachedOrders) {
+        this.logger.debug(`Using WebSocket cached orders (${cachedOrders.length} orders)`);
+        
+        return cachedOrders.map(order => ({
+          orderId: String(order.orderId),
+          symbol: order.coin,
+          side: order.side,
+          price: order.price,
+          size: order.size,
+          filledSize: order.size - order.origSize,
+          timestamp: new Date(order.timestamp),
+        }));
+      }
+    }
+    // ========== End WebSocket cache check ==========
+
     return this.callInfo(this.WEIGHT_INFO_LIGHT, async () => {
       await this.ensureSymbolConverter();
 
