@@ -365,8 +365,34 @@ export default function Dashboard() {
   );
 }
 
-function MetricCard({ title, value, subValue, trend, icon }: { title: string, value: string, subValue: string, trend?: 'up' | 'down', icon?: React.ReactNode }) {
-// ... same component ...
+function MetricCard({ title, value, subValue, trend, icon }: { 
+  title: string; 
+  value: string; 
+  subValue: string; 
+  trend?: 'up' | 'down'; 
+  icon?: React.ReactNode;
+}) {
+  return (
+    <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-5 shadow-sm hover:border-slate-700 transition-colors">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm text-slate-400 font-medium">{title}</h3>
+        {icon ? icon : (
+          trend === 'up' ? (
+            <TrendingUp className="w-4 h-4 text-green-400" />
+          ) : (
+            <TrendingDown className="w-4 h-4 text-red-400" />
+          )
+        )}
+      </div>
+      <p className={cn(
+        "text-2xl font-bold font-mono tracking-tight",
+        trend === 'up' ? "text-green-400" : trend === 'down' ? "text-red-400" : "text-slate-100"
+      )}>
+        {value}
+      </p>
+      <p className="text-xs text-slate-500 mt-1">{subValue}</p>
+    </div>
+  );
 }
 
 function EarningsChart({ data }: { data: any[] }) {
