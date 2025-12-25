@@ -34,13 +34,15 @@ export interface SlicedExecutionResult {
   totalShortFilled: number;
   sliceResults: SliceResult[];
   abortReason?: string;
+  timeToFundingMs?: number;
+  actualSlicesUsed?: number;
 }
 
 /**
  * SlicedExecutionConfig - Configuration for sliced execution
  */
 export interface SlicedExecutionConfig {
-  /** Number of slices to divide the order into */
+  /** Number of slices to divide the order into (ignored if dynamicSlicing is true) */
   numberOfSlices: number;
   /** Maximum time to wait for a slice to fill (ms) */
   sliceFillTimeoutMs: number;
@@ -50,6 +52,14 @@ export interface SlicedExecutionConfig {
   maxImbalancePercent: number;
   /** Whether to use market orders for final slice if limit doesn't fill */
   useMarketForFinalSlice: boolean;
+  /** Enable dynamic slicing based on time to funding */
+  dynamicSlicing: boolean;
+  /** Minimum time buffer before funding (ms) - ensure we're done this long before funding */
+  fundingBufferMs: number;
+  /** Minimum number of slices (even with time pressure) */
+  minSlices: number;
+  /** Maximum number of slices (even with lots of time) */
+  maxSlices: number;
 }
 
 const DEFAULT_CONFIG: SlicedExecutionConfig = {
@@ -58,6 +68,21 @@ const DEFAULT_CONFIG: SlicedExecutionConfig = {
   fillCheckIntervalMs: 2000, // Check every 2 seconds
   maxImbalancePercent: 10, // Abort if imbalance > 10% of slice
   useMarketForFinalSlice: false,
+  dynamicSlicing: true, // Enable by default
+  fundingBufferMs: 2 * 60 * 1000, // 2 minute buffer before funding
+  minSlices: 2, // At least 2 slices for safety
+  maxSlices: 20, // Cap at 20 slices to avoid excessive API calls
+};
+
+/**
+ * Funding period info for different exchanges
+ */
+const FUNDING_PERIODS: Record<ExchangeType, number> = {
+  [ExchangeType.HYPERLIQUID]: 8 * 60 * 60 * 1000, // 8 hours
+  [ExchangeType.LIGHTER]: 1 * 60 * 60 * 1000, // 1 hour
+  [ExchangeType.ASTER]: 8 * 60 * 60 * 1000, // 8 hours (assumed)
+  [ExchangeType.EXTENDED]: 8 * 60 * 60 * 1000, // 8 hours (assumed)
+  [ExchangeType.MOCK]: 1 * 60 * 60 * 1000, // 1 hour (for testing)
 };
 
 /**
@@ -68,10 +93,115 @@ const DEFAULT_CONFIG: SlicedExecutionConfig = {
  * 2. Allows early abort if one side consistently fails to fill
  * 3. Provides reconciliation checkpoints between slices
  * 4. Adapts pricing between slices based on market conditions
+ * 5. DYNAMIC SLICING: Maximizes slices while ensuring completion before funding
  */
 @Injectable()
 export class SlicedExecutionService {
   private readonly logger = new Logger(SlicedExecutionService.name);
+
+  /**
+   * Calculate milliseconds until next funding period
+   * 
+   * Hyperliquid: Every 8 hours at 00:00, 08:00, 16:00 UTC
+   * Lighter: Every 1 hour at the top of the hour
+   */
+  calculateTimeToNextFunding(exchange: ExchangeType): number {
+    const now = new Date();
+    const nowMs = now.getTime();
+    
+    if (exchange === ExchangeType.LIGHTER) {
+      // Lighter: Next hour boundary
+      const nextHour = new Date(now);
+      nextHour.setMinutes(0, 0, 0);
+      nextHour.setHours(nextHour.getHours() + 1);
+      return nextHour.getTime() - nowMs;
+    }
+    
+    // Hyperliquid/Aster: Every 8 hours at 00:00, 08:00, 16:00 UTC
+    const utcHour = now.getUTCHours();
+    const utcMinutes = now.getUTCMinutes();
+    const utcSeconds = now.getUTCSeconds();
+    
+    // Find next 8-hour boundary (0, 8, or 16)
+    const currentPeriod = Math.floor(utcHour / 8);
+    const nextPeriodHour = (currentPeriod + 1) * 8;
+    
+    const nextFunding = new Date(now);
+    nextFunding.setUTCHours(nextPeriodHour % 24, 0, 0, 0);
+    
+    // If next period is tomorrow (hour >= 24)
+    if (nextPeriodHour >= 24) {
+      nextFunding.setUTCDate(nextFunding.getUTCDate() + 1);
+    }
+    
+    return nextFunding.getTime() - nowMs;
+  }
+
+  /**
+   * Calculate the optimal number of slices based on time to funding
+   * 
+   * Logic:
+   * - Each slice takes: sliceFillTimeoutMs + buffer time
+   * - Available time: timeToFunding - fundingBuffer
+   * - Max slices: availableTime / timePerSlice
+   */
+  calculateOptimalSlices(
+    longExchange: ExchangeType,
+    shortExchange: ExchangeType,
+    config: SlicedExecutionConfig,
+  ): { slices: number; timeToFundingMs: number; constrainingExchange: ExchangeType } {
+    // Use the SHORTER funding period (more constrained exchange)
+    const longFundingMs = this.calculateTimeToNextFunding(longExchange);
+    const shortFundingMs = this.calculateTimeToNextFunding(shortExchange);
+    
+    const constrainingExchange = longFundingMs < shortFundingMs ? longExchange : shortExchange;
+    const timeToFundingMs = Math.min(longFundingMs, shortFundingMs);
+    
+    // Available time = time to funding - safety buffer
+    const availableTimeMs = timeToFundingMs - config.fundingBufferMs;
+    
+    if (availableTimeMs <= 0) {
+      // No time! Use minimum slices with aggressive timing
+      this.logger.warn(
+        `⚠️ Only ${Math.round(timeToFundingMs / 1000)}s until ${constrainingExchange} funding! ` +
+        `Using minimum slices (${config.minSlices})`
+      );
+      return { slices: config.minSlices, timeToFundingMs, constrainingExchange };
+    }
+    
+    // Time per slice = fill timeout + inter-slice pause (500ms)
+    const timePerSliceMs = config.sliceFillTimeoutMs + 500;
+    
+    // Calculate max slices that fit
+    let optimalSlices = Math.floor(availableTimeMs / timePerSliceMs);
+    
+    // Clamp to min/max
+    optimalSlices = Math.max(config.minSlices, Math.min(config.maxSlices, optimalSlices));
+    
+    this.logger.log(
+      `📊 Dynamic slicing: ${Math.round(timeToFundingMs / 1000)}s to ${constrainingExchange} funding, ` +
+      `${Math.round(availableTimeMs / 1000)}s available → ${optimalSlices} slices ` +
+      `(${Math.round(timePerSliceMs / 1000)}s per slice)`
+    );
+    
+    return { slices: optimalSlices, timeToFundingMs, constrainingExchange };
+  }
+
+  /**
+   * Format time until funding for logging
+   */
+  formatTimeToFunding(ms: number): string {
+    const minutes = Math.floor(ms / 60000);
+    const seconds = Math.floor((ms % 60000) / 1000);
+    
+    if (minutes >= 60) {
+      const hours = Math.floor(minutes / 60);
+      const remainingMinutes = minutes % 60;
+      return `${hours}h ${remainingMinutes}m`;
+    }
+    
+    return `${minutes}m ${seconds}s`;
+  }
 
   /**
    * Execute a hedged trade in slices
@@ -98,29 +228,54 @@ export class SlicedExecutionService {
     config: Partial<SlicedExecutionConfig> = {},
   ): Promise<SlicedExecutionResult> {
     const cfg = { ...DEFAULT_CONFIG, ...config };
-    const sliceSize = totalSize / cfg.numberOfSlices;
+    
+    // DYNAMIC SLICING: Calculate optimal slices based on time to funding
+    let numberOfSlices = cfg.numberOfSlices;
+    let timeToFundingMs: number | undefined;
+    let constrainingExchange: ExchangeType | undefined;
+    
+    if (cfg.dynamicSlicing) {
+      const sliceCalc = this.calculateOptimalSlices(longExchange, shortExchange, cfg);
+      numberOfSlices = sliceCalc.slices;
+      timeToFundingMs = sliceCalc.timeToFundingMs;
+      constrainingExchange = sliceCalc.constrainingExchange;
+      
+      // If very close to funding, reduce fill timeout for faster execution
+      if (timeToFundingMs < 5 * 60 * 1000) { // < 5 minutes
+        cfg.sliceFillTimeoutMs = Math.min(cfg.sliceFillTimeoutMs, 15000); // Cap at 15s
+        this.logger.warn(
+          `⏰ URGENT: Only ${this.formatTimeToFunding(timeToFundingMs)} to funding! ` +
+          `Reduced slice timeout to ${cfg.sliceFillTimeoutMs / 1000}s`
+        );
+      }
+    }
+    
+    const sliceSize = totalSize / numberOfSlices;
     
     this.logger.log(
       `🍕 Starting sliced execution for ${symbol}: ` +
-      `${totalSize.toFixed(4)} total in ${cfg.numberOfSlices} slices of ${sliceSize.toFixed(4)} each`
+      `${totalSize.toFixed(4)} total in ${numberOfSlices} slices of ${sliceSize.toFixed(4)} each` +
+      (timeToFundingMs ? ` (${this.formatTimeToFunding(timeToFundingMs)} to ${constrainingExchange} funding)` : '')
     );
 
     const result: SlicedExecutionResult = {
       success: false,
-      totalSlices: cfg.numberOfSlices,
+      totalSlices: numberOfSlices,
       completedSlices: 0,
       totalLongFilled: 0,
       totalShortFilled: 0,
       sliceResults: [],
+      timeToFundingMs,
+      actualSlicesUsed: numberOfSlices,
     };
 
     // Track cumulative fills
     let cumulativeLongFilled = 0;
     let cumulativeShortFilled = 0;
 
-    for (let i = 0; i < cfg.numberOfSlices; i++) {
+    for (let i = 0; i < numberOfSlices; i++) {
       const sliceNumber = i + 1;
-      this.logger.debug(`📍 Executing slice ${sliceNumber}/${cfg.numberOfSlices}`);
+      this.logger.debug(`📍 Executing slice ${sliceNumber}/${numberOfSlices}`);
 
       // Refresh prices for this slice (market may have moved)
       const [currentLongPrice, currentShortPrice] = await Promise.all([
@@ -197,7 +352,7 @@ export class SlicedExecutionService {
       }
 
       // Brief pause between slices to let market settle
-      if (i < cfg.numberOfSlices - 1) {
+      if (i < numberOfSlices - 1) {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
     }
@@ -205,14 +360,15 @@ export class SlicedExecutionService {
     result.totalLongFilled = cumulativeLongFilled;
     result.totalShortFilled = cumulativeShortFilled;
     result.success = 
-      result.completedSlices === cfg.numberOfSlices &&
+      result.completedSlices === numberOfSlices &&
       Math.abs(cumulativeLongFilled - cumulativeShortFilled) / totalSize < 0.02; // < 2% total imbalance
 
     this.logger.log(
       `${result.success ? '✅' : '⚠️'} Sliced execution ${result.success ? 'complete' : 'partial'}: ` +
-      `${result.completedSlices}/${cfg.numberOfSlices} slices, ` +
+      `${result.completedSlices}/${numberOfSlices} slices, ` +
       `LONG: ${cumulativeLongFilled.toFixed(4)}, SHORT: ${cumulativeShortFilled.toFixed(4)}` +
-      (result.abortReason ? ` (Aborted: ${result.abortReason})` : '')
+      (result.abortReason ? ` (Aborted: ${result.abortReason})` : '') +
+      (timeToFundingMs ? ` [${this.formatTimeToFunding(timeToFundingMs)} was available]` : '')
     );
 
     return result;
