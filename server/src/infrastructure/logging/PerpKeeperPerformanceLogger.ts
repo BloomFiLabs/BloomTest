@@ -698,51 +698,35 @@ export class PerpKeeperPerformanceLogger
    * Prefers real exchange API data over locally recorded payments
    */
   calculateRealizedAPY(capitalDeployed: number): number {
-    // Prefer real funding data from exchange APIs
-    if (this.realFundingSummary && capitalDeployed > 0) {
-      return this.realFundingSummary.realAPY;
+    if (capitalDeployed === 0) return 0;
+
+    let totalProfit = 0;
+    
+    // 1. Get real funding data from exchange APIs if available
+    if (this.realFundingSummary) {
+      totalProfit += this.realFundingSummary.netFunding;
+    } else {
+      // Fallback to locally recorded payments
+      totalProfit += this.realizedFundingPayments.reduce((sum, p) => sum + p.amount, 0);
     }
 
-    // Fallback to locally recorded payments
-    if (capitalDeployed === 0 || this.realizedFundingPayments.length === 0)
-      return 0;
+    // 2. Add Realized P&L (Basis drift) and subtract costs
+    // Note: this.totalRealizedPnl only tracks current session unless persisted
+    totalProfit += (this.totalRealizedPnl - this.totalTradingCosts);
 
-    // Calculate NET realized profit (Funding + P&L - Trading Costs)
-    const totalFunding = this.realizedFundingPayments.reduce(
-      (sum, p) => sum + p.amount,
-      0,
-    );
-    const netProfit = totalFunding + this.totalRealizedPnl - this.totalTradingCosts;
     const runtimeDays = this.getRuntimeDays();
-
     if (runtimeDays === 0) return 0;
 
-    // IMPORTANT: Don't extrapolate from very short periods - results are unreliable
-    // Require at least 1 hour (1/24 day) of runtime for APY calculation
+    // Requirement for extrapolation
     const MIN_DAYS_FOR_APY = 1 / 24; // 1 hour
-
     if (runtimeDays < MIN_DAYS_FOR_APY) {
-      // For very short periods, just show the current return rate (not annualized)
-      const rawReturn = (netProfit / capitalDeployed) * 100;
-      return rawReturn;
+      return (totalProfit / capitalDeployed) * 100;
     }
 
     // Calculate daily return and annualize
-    const dailyReturn = netProfit / capitalDeployed / runtimeDays;
-
-    // Cap APY at reasonable maximum to prevent misleading numbers
-    // Even the best funding arb strategies rarely exceed 500% APY sustainably
-    const MAX_REASONABLE_APY = 1000; // 1000% APY cap
-    const annualizedAPY = Math.min(dailyReturn * 365 * 100, MAX_REASONABLE_APY);
-
-    if (dailyReturn * 365 * 100 > MAX_REASONABLE_APY) {
-      this.logger.warn(
-        `Calculated APY (${(dailyReturn * 365 * 100).toFixed(0)}%) exceeds cap, showing ${MAX_REASONABLE_APY}%. ` +
-          `This may indicate insufficient runtime (${(runtimeDays * 24).toFixed(1)}h) for accurate extrapolation.`,
-      );
-    }
-
-    return annualizedAPY;
+    const dailyReturn = totalProfit / capitalDeployed / runtimeDays;
+    const MAX_REASONABLE_APY = 1000; 
+    return Math.min(dailyReturn * 365 * 100, MAX_REASONABLE_APY);
   }
 
   /**
@@ -895,19 +879,23 @@ export class PerpKeeperPerformanceLogger
   }
 
   /**
-   * Capture an hourly snapshot of expected vs actual earnings
+   * Capture a snapshot of cumulative net profit for the chart
    */
   captureHourlyEarnings(expected: number, actual: number): void {
     const now = new Date();
-    // Normalize to the start of the current hour
     const timestamp = new Date(now);
-    timestamp.setMinutes(0, 0, 0);
+    // Don't normalize to 0 minutes, otherwise we lose resolution on restarts
+    
+    // Calculate total cumulative profit to date
+    const totalFunding = this.realFundingSummary ? this.realFundingSummary.netFunding : 
+      this.realizedFundingPayments.reduce((sum, p) => sum + p.amount, 0);
+    const cumulativeProfit = totalFunding + this.totalRealizedPnl - this.totalTradingCosts;
 
     // Add to history
     this.historicalEarnings.push({
       timestamp,
-      expected,
-      actual,
+      expected: expected, // 1h projected return
+      actual: cumulativeProfit, // Real cumulative equity curve
     });
 
     // Keep only last 48 hours of data for the graph
@@ -916,7 +904,7 @@ export class PerpKeeperPerformanceLogger
     }
 
     this.logger.debug(
-      `📊 Hourly earnings snapshot captured: Expected=$${expected.toFixed(4)}, Actual=$${actual.toFixed(4)}`,
+      `📊 Hourly earnings snapshot captured: Projected Hourly=$${expected.toFixed(4)}, Cumulative Net=$${cumulativeProfit.toFixed(4)}`,
     );
   }
 

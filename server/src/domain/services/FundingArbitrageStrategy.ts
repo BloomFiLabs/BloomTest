@@ -4559,4 +4559,11 @@ export class FundingArbitrageStrategy {
       });
     }
   }
+
+  /**
+   * Normalize symbol by removing common suffixes
+   */
+  private normalizeSymbol(symbol: string): string {
+    return symbol.toUpperCase().replace(/USDT|USDC|-PERP|PERP/g, '');
+  }
 }

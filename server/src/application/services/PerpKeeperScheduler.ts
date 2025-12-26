@@ -130,6 +130,16 @@ export class PerpKeeperScheduler implements OnModuleInit {
       this.logger.log('🚀 Starting execution cycle...');
       await this.unifiedStateService.refresh();
 
+      // Capture performance snapshot before strategy execution
+      const currentEquity = await this.getCurrentTotalEquity();
+      const perfMetrics = this.performanceLogger.getPerformanceMetrics(currentEquity);
+      
+      // Update chart with projected 1h return and actual cumulative profit
+      this.performanceLogger.captureHourlyEarnings(
+        perfMetrics.expectedEarningsNextPeriod,
+        perfMetrics.totalRealizedPnl + perfMetrics.netFundingCaptured - this.performanceLogger.getTotalTradingCosts()
+      );
+
       const symbols = await this.discoverAssetsIfNeeded();
       if (symbols.length === 0) return;
 
@@ -209,6 +219,16 @@ export class PerpKeeperScheduler implements OnModuleInit {
       }
       this.performanceLogger.logCompactSummary(total);
     } catch (e) {}
+  }
+
+  private async getCurrentTotalEquity(): Promise<number> {
+    let totalEquity = 0;
+    for (const exchangeType of [ExchangeType.LIGHTER, ExchangeType.HYPERLIQUID]) {
+      try {
+        totalEquity += await this.keeperService.getEquity(exchangeType).catch(() => 0);
+      } catch (e) {}
+    }
+    return totalEquity;
   }
 
   private isBlacklisted(symbol: string): boolean {
