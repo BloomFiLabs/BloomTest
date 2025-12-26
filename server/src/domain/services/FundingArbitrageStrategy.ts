@@ -939,6 +939,26 @@ export class FundingArbitrageStrategy {
       // Fetch existing positions FIRST to account for already-deployed margin
       const existingPositions = await this.getAllPositions(adapters);
 
+      // --- NEW: IMBALANCE CIRCUIT BREAKER ---
+      // Check if any existing position has a severe imbalance.
+      // If so, do NOT deploy any new capital as it will only complicate the recovery.
+      const symbolsWithPositions = new Set(existingPositions.map(p => this.normalizeSymbol(p.symbol)));
+      for (const symbol of symbolsWithPositions) {
+        const symbolPositions = existingPositions.filter(p => this.normalizeSymbol(p.symbol) === symbol);
+        const long = symbolPositions.find(p => p.side === OrderSide.LONG);
+        const short = symbolPositions.find(p => p.side === OrderSide.SHORT);
+        
+        if (!long || !short) {
+          const orphan = long || short;
+          if (orphan && Math.abs(orphan.size) > 0.001) {
+            this.logger.error(`🛑 CIRCUIT BREAKER: Single-leg position detected for ${symbol} ($${orphan.getPositionValue().toFixed(2)}). Aborting new strategy execution until reconciled.`);
+            result.errors.push(`Existing single-leg position for ${symbol}`);
+            return result;
+          }
+        }
+      }
+      // --------------------------------------
+
       // Calculate margin used per exchange from existing positions
       // Margin used = positionValue / leverage (since leverage multiplies position size)
       const marginUsedPerExchange = new Map<ExchangeType, number>();

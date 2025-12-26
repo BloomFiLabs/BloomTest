@@ -183,6 +183,26 @@ export class ExecutionPlanBuilder implements IExecutionPlanBuilder {
         }
       }
 
+      // Validate open interest
+      if (!opportunity.longOpenInterest || !opportunity.shortOpenInterest) {
+        return Result.failure(
+          new ValidationException(
+            'Open interest is required for both exchanges',
+            'MISSING_OPEN_INTEREST',
+          ),
+        );
+      }
+
+      const minOI = Math.min(opportunity.longOpenInterest, opportunity.shortOpenInterest);
+      if (minOI < config.minOpenInterestUsd) {
+        return Result.failure(
+          new ValidationException(
+            `Open interest too low: ${minOI} < ${config.minOpenInterestUsd}`,
+            'INSUFFICIENT_OPEN_INTEREST',
+          ),
+        );
+      }
+
       // BASIS RISK CHECK:
       // Instead of a heuristic (150bps), use Statistical Z-Score and Time-to-Recover
       const basisBps =

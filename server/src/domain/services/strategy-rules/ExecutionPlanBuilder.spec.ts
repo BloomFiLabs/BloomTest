@@ -265,6 +265,9 @@ describe('ExecutionPlanBuilder', () => {
 
     it('should fetch mark prices when not provided', async () => {
       const opportunity = createMockOpportunity();
+      // Clear mark prices to force fetch
+      opportunity.longMarkPrice = undefined;
+      opportunity.shortMarkPrice = undefined;
       const asterAdapter = mockAdapters.get(ExchangeType.ASTER)!;
       const lighterAdapter = mockAdapters.get(ExchangeType.LIGHTER)!;
 
@@ -284,6 +287,9 @@ describe('ExecutionPlanBuilder', () => {
 
     it('should return failure if mark price fetch fails', async () => {
       const opportunity = createMockOpportunity();
+      // Clear mark prices to force fetch
+      opportunity.longMarkPrice = undefined;
+      opportunity.shortMarkPrice = undefined;
       const asterAdapter = mockAdapters.get(ExchangeType.ASTER)!;
       asterAdapter.getMarkPrice.mockRejectedValue(new Error('API error'));
 

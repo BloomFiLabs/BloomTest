@@ -329,8 +329,8 @@ export class HyperLiquidWebSocketProvider
           }
         }
       }
-    } else if (message.channel === 'user' && message.data) {
-      // User events - handle fills and order updates
+    } else if (message.channel === 'userEvents' && message.data) {
+      // Correct channel name per docs: userEvents
       this.handleUserEvent(message.data);
     } else if (message.channel === 'userFills' && message.data) {
       // User fills stream
@@ -350,8 +350,14 @@ export class HyperLiquidWebSocketProvider
    */
   private handleClearinghouseState(data: any): void {
     try {
+      // The message data might be nested under clearinghouseState
+      const state = data.clearinghouseState || data;
+      
+      // Hyperliquid docs show marginSummary and crossMarginSummary
+      const margin = state.marginSummary || state.crossMarginSummary || {};
+      
       this.clearinghouseCache = {
-        assetPositions: (data.assetPositions || []).map((ap: any) => ({
+        assetPositions: (state.assetPositions || []).map((ap: any) => ({
           coin: ap.position?.coin || '',
           position: {
             coin: ap.position?.coin || '',
@@ -366,18 +372,23 @@ export class HyperLiquidWebSocketProvider
           },
         })),
         marginSummary: {
-          accountValue: data.marginSummary?.accountValue || 0,
-          totalNtlPos: data.marginSummary?.totalNtlPos || 0,
-          totalRawUsd: data.marginSummary?.totalRawUsd || 0,
-          totalMarginUsed: data.marginSummary?.totalMarginUsed || 0,
+          accountValue: parseFloat(margin.accountValue || '0'),
+          totalNtlPos: parseFloat(margin.totalNtlPos || '0'),
+          totalRawUsd: parseFloat(margin.totalRawUsd || '0'),
+          totalMarginUsed: parseFloat(margin.totalMarginUsed || '0'),
         },
-        withdrawable: data.withdrawable || 0,
+        withdrawable: parseFloat(state.withdrawable || '0'),
         lastUpdated: new Date(),
       };
       
       const posCount = this.clearinghouseCache.assetPositions.filter(
-        p => Math.abs(parseFloat(p.position.szi)) > 0
+        p => Math.abs(parseFloat(p.position.szi)) > 0.0001
       ).length;
+      
+      // If we see 0 positions but non-zero account value, or vice versa, log a warning
+      if (posCount === 0 && this.clearinghouseCache.marginSummary.accountValue > 0) {
+        this.logger.warn(`⚠️ Clearinghouse reported $${this.clearinghouseCache.marginSummary.accountValue.toFixed(2)} equity but 0 positions. Structure keys: ${Object.keys(state).join(', ')}`);
+      }
       
       this.logger.debug(`📊 Updated clearinghouseState: ${posCount} positions, $${this.clearinghouseCache.marginSummary.accountValue.toFixed(2)} account value`);
     } catch (error: any) {
@@ -437,10 +448,13 @@ export class HyperLiquidWebSocketProvider
   private handleUserFills(data: any): void {
     if (!data) return;
 
-    // Can be a single fill or array of fills
-    const fills = Array.isArray(data) ? data : [data];
-    for (const fill of fills) {
-      this.emitFillEvent(fill);
+    // The data might be a wrapper with a fills array
+    const fills = data.fills || (Array.isArray(data) ? data : [data]);
+    
+    if (Array.isArray(fills)) {
+      for (const fill of fills) {
+        this.emitFillEvent(fill);
+      }
     }
   }
 

@@ -584,9 +584,21 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
         
         const positions: PerpPosition[] = [];
         for (const pos of cachedPositions) {
+          let coin = pos.coin;
+          // Resolve numeric coin name if needed (sometimes WS sends index as string)
+          const parsed = parseInt(coin, 10);
+          if (!isNaN(parsed) && String(parsed) === coin) {
+            try {
+              // Note: getCoinFromAssetIndex already uses rate limiter
+              coin = await this.getCoinFromAssetIndex(parsed);
+            } catch (e) {
+              this.logger.warn(`Could not resolve coin index ${parsed} from WebSocket cache: ${e.message}`);
+            }
+          }
+
           positions.push(new PerpPosition(
             ExchangeType.HYPERLIQUID,
-            pos.coin,
+            coin,
             pos.side === 'LONG' ? OrderSide.LONG : OrderSide.SHORT,
             pos.size,
             pos.entryPrice,

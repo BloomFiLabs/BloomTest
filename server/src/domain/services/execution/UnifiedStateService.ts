@@ -83,14 +83,52 @@ export class UnifiedStateService implements OnModuleInit {
   }
 
   /**
+   * Force a position refresh from REST API to ensure no "blindness"
+   */
+  async forcePositionRefresh(): Promise<void> {
+    this.logger.log('🔄 Forcing position refresh from REST APIs...');
+    const now = Date.now();
+    
+    const promises = Array.from(this.adapters.entries()).map(async ([type, adapter]) => {
+      try {
+        // Clear adapter cache if it has one
+        if ('clearBalanceCache' in adapter && typeof (adapter as any).clearBalanceCache === 'function') {
+          (adapter as any).clearBalanceCache();
+        }
+        
+        const positions = await adapter.getPositions();
+        this.logger.debug(`Fetched ${positions.length} positions from ${type} via REST`);
+        
+        // Update cache
+        for (const pos of positions) {
+          this.updateCachedPosition(pos);
+        }
+        
+        return true;
+      } catch (error: any) {
+        this.logger.error(`Failed to force refresh positions for ${type}: ${error.message}`);
+        return false;
+      }
+    });
+    
+    await Promise.all(promises);
+    this.lastPositionRefresh = now;
+  }
+
+  /**
    * Main refresh loop - keeps REST fallback data fresh
    */
   @Interval(60000)
   async refresh() {
     const now = Date.now();
-    if (now - this.lastPositionRefresh > this.REFRESH_THRESHOLD_MS) {
+    // Use forcePositionRefresh every 5 minutes as a safety measure
+    // This is the "eye opener" that prevents persistent blindness
+    if (now - this.lastPositionRefresh > 300000) {
+      await this.forcePositionRefresh();
+    } else if (now - this.lastPositionRefresh > this.REFRESH_THRESHOLD_MS) {
       await this.refreshPositions();
     }
+    
     if (now - this.lastFundingRefresh > 300000) { // 5 mins for funding
       await this.refreshFundingRates();
     }

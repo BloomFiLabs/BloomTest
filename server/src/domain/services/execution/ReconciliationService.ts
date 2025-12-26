@@ -72,7 +72,7 @@ export class ReconciliationService implements OnModuleInit {
   // Configuration
   private readonly IMBALANCE_THRESHOLD_PERCENT = 5;
   private readonly NUCLEAR_THRESHOLD_PERCENT = 20;
-  private readonly NUCLEAR_TIMEOUT_MINUTES = 3;
+  private readonly NUCLEAR_TIMEOUT_MINUTES = 1; // Reduced to 1 minute for faster recovery
   private readonly MAX_RECOVERY_ATTEMPTS = 3;
 
   constructor(
