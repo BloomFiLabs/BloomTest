@@ -4,7 +4,11 @@ import {
   Optional,
   Inject,
   forwardRef,
+  OnModuleInit,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import * as fs from 'fs';
+import * as path from 'path';
 import { ExchangeType } from '../../domain/value-objects/ExchangeConfig';
 import type {
   CircuitBreakerService,
@@ -670,8 +674,13 @@ export interface DiagnosticsResponse {
  * Provides condensed summaries suitable for API responses and AI context windows.
  */
 @Injectable()
-export class DiagnosticsService {
+export class DiagnosticsService implements OnModuleInit {
   private readonly logger = new Logger(DiagnosticsService.name);
+  
+  // Persistence state
+  private readonly dataFilePath: string;
+  private saveInProgress = false;
+  private pendingSave = false;
   
   // Start time for uptime calculation
   private readonly startTime: Date = new Date();
@@ -842,8 +851,14 @@ export class DiagnosticsService {
   // Market quality filter reference
   private marketQualityFilter?: any;
 
-  constructor() {
+  constructor(@Optional() private readonly configService?: ConfigService) {
+    const dataDir = configService?.get<string>('DIAGNOSTICS_DATA_DIR', 'data') || 'data';
+    this.dataFilePath = path.join(process.cwd(), dataDir, 'diagnostics-state.json');
     this.logger.log('DiagnosticsService initialized with enhanced tracking');
+  }
+
+  async onModuleInit() {
+    await this.loadFromFile();
   }
 
   // ==================== Recording Methods ====================
@@ -881,6 +896,8 @@ export class DiagnosticsService {
         this.errorsWithContext.shift();
       }
     }
+
+    this.persistToFile();
   }
 
   /**
@@ -937,6 +954,8 @@ export class DiagnosticsService {
       });
     }
     
+    this.persistToFile();
+
     this.logger.warn(
       `📋 MARGIN MODE ERROR tracked for ${symbol} on ${exchange} ` +
       `(${existing ? existing.count + 1 : 1} occurrences). ` +
@@ -1033,6 +1052,8 @@ export class DiagnosticsService {
     if (this.driftEvents.length > this.MAX_DRIFT_EVENTS) {
       this.driftEvents.shift();
     }
+
+    this.persistToFile();
 
     // Log based on severity
     if (severity === 'critical') {
@@ -1169,6 +1190,8 @@ export class DiagnosticsService {
         bucket.orders.cancelled++;
         break;
     }
+
+    this.persistToFile();
   }
 
   /**
@@ -1179,6 +1202,8 @@ export class DiagnosticsService {
     
     const bucket = this.getOrCreateCurrentBucket();
     bucket.singleLegs.started++;
+
+    this.persistToFile();
 
     const reasonStr = event.reason ? ` (Reason: ${event.reason})` : '';
     const missingStr = event.missingExchange ? ` (Missing: ${event.missingExchange})` : '';
@@ -1210,6 +1235,8 @@ export class DiagnosticsService {
     
     // Remove from active
     this.activeSingleLegs.delete(id);
+
+    this.persistToFile();
   }
 
   /**
@@ -1328,6 +1355,7 @@ export class DiagnosticsService {
     const bucket = this.getOrCreateCurrentBucket();
     const count = bucket.liquidityFilters.get(event.reason) || 0;
     bucket.liquidityFilters.set(event.reason, count + 1);
+    this.persistToFile();
   }
 
   /**
@@ -1351,6 +1379,8 @@ export class DiagnosticsService {
         connStats.lastError = event.errorMessage;
         break;
     }
+
+    this.persistToFile();
   }
 
   /**
@@ -1374,6 +1404,7 @@ export class DiagnosticsService {
     byExchange: Record<string, number>;
   }): void {
     this.apyData = data;
+    this.persistToFile();
   }
 
   /**
@@ -1442,6 +1473,7 @@ export class DiagnosticsService {
     this.lastPositionCount = data.count;
     
     this.positionData = data;
+    this.persistToFile();
   }
 
   /**
@@ -1455,6 +1487,7 @@ export class DiagnosticsService {
     totalHarvested: number;
   }): void {
     this.rewardsData = data;
+    this.persistToFile();
   }
 
   /**
@@ -2787,5 +2820,121 @@ export class DiagnosticsService {
     }
 
     return lines.join('\n');
+  }
+
+  // ==================== Persistence Helpers ====================
+
+  private async loadFromFile(): Promise<void> {
+    try {
+      const dir = path.dirname(this.dataFilePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      if (!fs.existsSync(this.dataFilePath)) {
+        return;
+      }
+
+      const data = fs.readFileSync(this.dataFilePath, 'utf-8');
+      const serialized = JSON.parse(data);
+
+      // Restore active single-legs
+      if (serialized.activeSingleLegs) {
+        for (const [id, event] of Object.entries(serialized.activeSingleLegs)) {
+          this.activeSingleLegs.set(id, {
+            ...(event as any),
+            startedAt: new Date((event as any).startedAt),
+            resolvedAt: (event as any).resolvedAt ? new Date((event as any).resolvedAt) : undefined,
+          });
+        }
+      }
+
+      // Restore recent errors
+      if (Array.isArray(serialized.recentErrors)) {
+        this.recentErrors.length = 0;
+        this.recentErrors.push(...serialized.recentErrors.map((e: any) => ({
+          ...e,
+          timestamp: new Date(e.timestamp)
+        })));
+      }
+
+      // Restore margin mode errors
+      if (serialized.marginModeErrors) {
+        for (const [key, error] of Object.entries(serialized.marginModeErrors)) {
+          this.marginModeErrors.set(key, {
+            ...(error as any),
+            firstSeen: new Date((error as any).firstSeen),
+            lastSeen: new Date((error as any).lastSeen),
+          });
+        }
+      }
+
+      // Restore hourly buckets
+      if (serialized.hourlyBuckets) {
+        for (const [hourTs, bucket] of Object.entries(serialized.hourlyBuckets)) {
+          const b = bucket as any;
+          this.hourlyBuckets.set(parseInt(hourTs), {
+            hour: b.hour,
+            orders: b.orders,
+            errors: new Map(Object.entries(b.errors).map(([k, v]: [string, any]) => [k, {
+              ...v,
+              lastTimestamp: new Date(v.lastTimestamp)
+            }])),
+            singleLegs: b.singleLegs,
+            liquidityFilters: new Map(Object.entries(b.liquidityFilters)),
+            connections: new Map(Object.entries(b.connections).map(([k, v]: [string, any]) => [k as ExchangeType, v])),
+          });
+        }
+      }
+
+      this.logger.log(`Loaded diagnostics state from file: ${this.hourlyBuckets.size} hourly buckets`);
+    } catch (error: any) {
+      this.logger.error(`Failed to load diagnostics file: ${error.message}`);
+    }
+  }
+
+  private async persistToFile(): Promise<void> {
+    if (this.saveInProgress) {
+      this.pendingSave = true;
+      return;
+    }
+
+    this.saveInProgress = true;
+
+    try {
+      const dir = path.dirname(this.dataFilePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      const serialized = {
+        activeSingleLegs: Object.fromEntries(this.activeSingleLegs),
+        recentErrors: this.recentErrors,
+        marginModeErrors: Object.fromEntries(this.marginModeErrors),
+        hourlyBuckets: Object.fromEntries(
+          Array.from(this.hourlyBuckets.entries()).map(([ts, bucket]) => [
+            ts,
+            {
+              ...bucket,
+              errors: Object.fromEntries(bucket.errors),
+              liquidityFilters: Object.fromEntries(bucket.liquidityFilters),
+              connections: Object.fromEntries(bucket.connections),
+            }
+          ])
+        ),
+      };
+
+      const tempPath = `${this.dataFilePath}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify(serialized, null, 2), 'utf-8');
+      fs.renameSync(tempPath, this.dataFilePath);
+    } catch (error: any) {
+      this.logger.error(`Failed to persist diagnostics: ${error.message}`);
+    } finally {
+      this.saveInProgress = false;
+      if (this.pendingSave) {
+        this.pendingSave = false;
+        await this.persistToFile();
+      }
+    }
   }
 }

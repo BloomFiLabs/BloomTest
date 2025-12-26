@@ -185,6 +185,19 @@ export class ReconciliationService implements OnModuleInit {
   private async handleSingleLeg(symbol: string, pos: PerpPosition) {
     this.logger.error(`🚨 SINGLE LEG DETECTED: ${symbol} ${pos.side} on ${pos.exchangeType}`);
     
+    // Record in diagnostics for visibility
+    if (this.diagnosticsService) {
+      this.diagnosticsService.recordSingleLegStart({
+        id: `single-leg-${pos.exchangeType}-${symbol}-${pos.side}-${Date.now()}`,
+        symbol,
+        exchange: pos.exchangeType,
+        side: pos.side as any,
+        startedAt: new Date(),
+        retryCount: 0,
+        reason: 'Orphan position detected during reconciliation'
+      });
+    }
+
     let status = this.hedgePairs.get(symbol);
     if (!status) {
       status = { symbol, longExchange: pos.exchangeType, shortExchange: pos.exchangeType, longSize: 0, shortSize: 0, imbalance: 100, imbalancePercent: 100, isBalanced: false, lastReconciled: new Date(), firstImbalanceAt: new Date(), imbalanceCount: 1 };
