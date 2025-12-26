@@ -1794,7 +1794,7 @@ export class OrderExecutor implements IOrderExecutor {
           opportunity.shortExchange!,
           this.unifiedExecutionConfig,
         );
-        
+
         if (unifiedResult.success) {
           // Success! Both sides filled across all slices
           result.opportunitiesExecuted = 1;
@@ -1849,18 +1849,18 @@ export class OrderExecutor implements IOrderExecutor {
             );
           } else if (unifiedResult.completedSlices > 0) {
             // Partial success - some slices completed
-            result.opportunitiesExecuted = 1;
+          result.opportunitiesExecuted = 1;
             result.ordersPlaced = unifiedResult.completedSlices * 2;
             result.totalExpectedReturn = plan.expectedNetReturn * (unifiedResult.completedSlices / unifiedResult.totalSlices);
-            
+
             this.logger.warn(
               `⚠️ Unified execution PARTIAL for ${opportunity.symbol}: ` +
               `${unifiedResult.completedSlices}/${unifiedResult.totalSlices} slices completed. ` +
               `Reason: ${unifiedResult.abortReason}`
             );
             
-            return Result.success(result);
-          } else {
+          return Result.success(result);
+        } else {
             // Complete failure - nothing filled
             this.logger.error(
               `❌ Unified execution COMPLETE FAILURE for ${opportunity.symbol}: ${unifiedResult.abortReason}`
@@ -1874,8 +1874,8 @@ export class OrderExecutor implements IOrderExecutor {
                 { symbol: opportunity.symbol },
               ),
             );
-          }
         }
+      }
       }
       
       // ========================================================

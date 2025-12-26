@@ -40,6 +40,10 @@ export class LighterFundingDataProvider
   private fundingRatesCache: Map<number, number> = new Map();
   private lastCacheUpdate: number = 0;
   private readonly CACHE_TTL = 10000; // 10 second cache (funding rates update hourly, but we want fresh data for performance metrics)
+  
+  // Cache for OI/Price data (key: market_id, value: {openInterest, markPrice, timestamp})
+  private oiPriceCache: Map<number, { openInterest: number; markPrice: number; timestamp: number }> = new Map();
+  private readonly OI_PRICE_CACHE_TTL = 300000; // 5 minutes cache for OI/Price to preserve API weight
 
   // Rate limiter weights (matching LighterExchangeAdapter)
   private readonly WEIGHT_INFO = 1; // Light read operations
@@ -358,11 +362,23 @@ export class LighterFundingDataProvider
       const wsMarkPrice = this.wsProvider.getMarkPrice(marketIndex);
       
       if (wsOi !== undefined && wsMarkPrice !== undefined && wsOi > 0 && wsMarkPrice > 0) {
+        // Update cache with WebSocket data
+        this.oiPriceCache.set(marketIndex, {
+          openInterest: wsOi,
+          markPrice: wsMarkPrice,
+          timestamp: Date.now(),
+        });
         return { openInterest: wsOi, markPrice: wsMarkPrice };
       }
     }
 
-    // 2. Fall back to REST API
+    // 2. Check cache before falling back to REST API
+    const cached = this.oiPriceCache.get(marketIndex);
+    if (cached && Date.now() - cached.timestamp < this.OI_PRICE_CACHE_TTL) {
+      return { openInterest: cached.openInterest, markPrice: cached.markPrice };
+    }
+
+    // 3. Fall back to REST API
     const maxRetries = 3;
     let lastError: Error | null = null;
 
@@ -488,7 +504,14 @@ export class LighterFundingDataProvider
           );
         }
 
-        return { openInterest: oiUsd, markPrice };
+        // Cache the result to avoid repeated REST API calls
+        const result = { openInterest: oiUsd, markPrice };
+        this.oiPriceCache.set(marketIndex, {
+          ...result,
+          timestamp: Date.now(),
+        });
+        
+        return result;
       } catch (error: any) {
         // Check if it's a rate limit error (429)
         const statusCode = error.response?.status;

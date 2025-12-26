@@ -385,9 +385,9 @@ export class HyperLiquidWebSocketProvider
         p => Math.abs(parseFloat(p.position.szi)) > 0.0001
       ).length;
       
-      // If we see 0 positions but non-zero account value, or vice versa, log a warning
+      // Only log as debug to avoid spam - it's normal to have equity but 0 positions
       if (posCount === 0 && this.clearinghouseCache.marginSummary.accountValue > 0) {
-        this.logger.warn(`⚠️ Clearinghouse reported $${this.clearinghouseCache.marginSummary.accountValue.toFixed(2)} equity but 0 positions. Structure keys: ${Object.keys(state).join(', ')}`);
+        this.logger.debug(`Clearinghouse snapshot: $${this.clearinghouseCache.marginSummary.accountValue.toFixed(2)} equity, 0 positions.`);
       }
       
       this.logger.debug(`📊 Updated clearinghouseState: ${posCount} positions, $${this.clearinghouseCache.marginSummary.accountValue.toFixed(2)} account value`);

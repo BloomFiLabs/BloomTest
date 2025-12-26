@@ -52,7 +52,7 @@ export class HyperLiquidDataProvider
   // Asset name to index mapping (populated on first call)
   private assetIndexMap: Map<string, number> = new Map();
   private lastMetaFetch: number = 0;
-  private readonly META_CACHE_TTL = 60000; // 1 minute cache
+  private readonly META_CACHE_TTL = 300000; // 5 minutes cache for metadata (OI/Volume) to preserve API weight for execution
   private lastRequestTime: number = 0;
   private readonly MIN_REQUEST_INTERVAL = 1000; // Minimum 1 second between requests to avoid rate limits
 
