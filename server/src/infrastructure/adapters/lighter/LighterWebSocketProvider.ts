@@ -200,6 +200,23 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
   /**
    * Connect to Lighter WebSocket
    */
+  /**
+   * Subscribe to position and order updates for the account
+   */
+  subscribeToPositionUpdates(): void {
+    if (!this.accountAddress) {
+      this.logger.warn(`Cannot subscribe to positions: account address unknown`);
+      return;
+    }
+    
+    this.isPositionsSubscribed = true;
+    this.isOrdersSubscribed = true;
+    
+    if (this.isConnected) {
+      this.resubscribeAll();
+    }
+  }
+
   private async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {

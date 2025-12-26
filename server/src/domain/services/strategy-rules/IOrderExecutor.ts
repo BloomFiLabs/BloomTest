@@ -3,6 +3,7 @@ import {
   ArbitrageExecutionResult,
 } from '../FundingArbitrageStrategy';
 import { ArbitrageOpportunity } from '../FundingRateAggregator';
+import { PerpSpotExecutionPlan } from './PerpSpotExecutionPlanBuilder';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
 import { PerpOrderResponse } from '../../value-objects/PerpOrder';
@@ -37,7 +38,7 @@ export interface IOrderExecutor {
   executeMultiplePositions(
     opportunities: Array<{
       opportunity: ArbitrageOpportunity;
-      plan: ArbitrageExecutionPlan | null;
+      plan: ArbitrageExecutionPlan | PerpSpotExecutionPlan | null;
       maxPortfolioFor35APY: number | null;
       isExisting?: boolean;
       currentValue?: number;

@@ -136,6 +136,9 @@ export class LighterExchangeAdapter
     );
 
     // Removed adapter initialization log - only execution logs shown
+    if (this.wsProvider) {
+      this.wsProvider.subscribeToPositionUpdates();
+    }
   }
 
   /**
@@ -714,14 +717,9 @@ export class LighterExchangeAdapter
 
     // Acquire mutex to prevent concurrent order placements
     // Lighter uses sequential nonces - concurrent orders cause "invalid nonce" errors
-    const releaseMutex = await this.acquireOrderMutex();
-
-    try {
-      return await this.placeOrderInternal(request);
-    } finally {
-      // Always release the mutex when done
-      releaseMutex();
-    }
+    // We hold the mutex ONLY for the duration of a single attempt to avoid blocking
+    // other orders during the exponential backoff delay.
+    return await this.placeOrderInternal(request);
   }
 
   /**
@@ -827,36 +825,36 @@ export class LighterExchangeAdapter
   }
 
   /**
-   * Internal order placement logic - must only be called while holding the order mutex
+   * Internal order placement logic - handles retries and mutex management
    */
   private async placeOrderInternal(
     request: PerpOrderRequest,
   ): Promise<PerpOrderResponse> {
-    // Add retry logic with exponential backoff for order placement (rate limiting)
-    // For market orders, limit to 5 retries with progressive price improvement
     const maxRetries = request.type === OrderType.MARKET ? 5 : 6;
-    const baseDelay = 2000; // 2 seconds base delay
-    const maxDelay = 60000; // 60 seconds max delay
+    const baseDelay = 2000;
+    const maxDelay = 60000;
     let lastError: any = null;
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
+      if (attempt > 0) {
+        const exponentialDelay = Math.min(
+          baseDelay * Math.pow(2, attempt - 1),
+          maxDelay,
+        );
+        const jitter = exponentialDelay * 0.2 * (Math.random() * 2 - 1);
+        const delay = Math.max(1000, exponentialDelay + jitter);
+
+        this.logger.warn(
+          `Retrying order placement for ${request.symbol} after ${Math.floor(delay / 1000)}s ` +
+            `(attempt ${attempt + 1}/${maxRetries})`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+
+      // Acquire mutex ONLY for the critical section (nonce + submission)
+      const releaseMutex = await this.acquireOrderMutex();
+      
       try {
-        if (attempt > 0) {
-          // Exponential backoff with jitter: 2s, 4s, 8s, 16s, 32s, 60s (capped)
-          const exponentialDelay = Math.min(
-            baseDelay * Math.pow(2, attempt - 1),
-            maxDelay,
-          );
-          const jitter = exponentialDelay * 0.2 * (Math.random() * 2 - 1);
-          const delay = Math.max(1000, exponentialDelay + jitter);
-
-          this.logger.warn(
-            `Retrying order placement for ${request.symbol} after ${Math.floor(delay / 1000)}s ` +
-              `(attempt ${attempt + 1}/${maxRetries})`,
-          );
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-
         this.logger.debug(
           `Initializing Lighter adapter for order placement (attempt ${attempt + 1})...`,
         );
@@ -866,558 +864,55 @@ export class LighterExchangeAdapter
         const nonce = await this.getFreshNonce();
         this.logger.debug(`Using fresh nonce for ${request.symbol}: ${nonce}`);
 
-        this.logger.debug(`Getting market index for ${request.symbol}...`);
         const marketIndex = await this.getMarketIndex(request.symbol);
-        this.logger.debug(`Market index for ${request.symbol}: ${marketIndex}`);
-
-        this.logger.debug(`Getting market helper for market ${marketIndex}...`);
         const market = await this.getMarketHelper(marketIndex);
 
-        const isBuy = request.side === OrderSide.LONG;
-        const isAsk = !isBuy;
-
-        // Convert size to market units
-        this.logger.debug(`Converting size ${request.size} to market units...`);
-        const baseAmount = market.amountToUnits(request.size);
-        this.logger.debug(`Base amount: ${baseAmount}`);
-
-        let orderParams: any;
-        let useCreateMarketOrder = false;
-
-        if (request.type === OrderType.MARKET) {
-          // For closing positions (reduceOnly=true), use createMarketOrder
-          if (request.reduceOnly) {
-            useCreateMarketOrder = true;
-
-            // Strategy for closing:
-            // - Attempt 0: Use mark price (candlesticks) for fair value
-            // - Attempt 1: Use actual order book at best bid/ask (no slippage)
-            // - Attempt 2+: Use order book with progressive slippage
-            let avgExecutionPrice: number;
-
-            // Progressive slippage: starts at attempt 2
-            // [attempt 0 = mark, attempt 1 = book no slippage, attempt 2+ = book + slippage]
-            const priceImprovements = [0, 0, 0.001, 0.005, 0.01, 0.02, 0.05];
-            const priceImprovement =
-              priceImprovements[Math.min(attempt, priceImprovements.length - 1)];
-
-            if (attempt === 0) {
-              // First attempt: try mark price (fair value)
-            try {
-              const markPrice = await this.getMarkPrice(request.symbol);
-              avgExecutionPrice = markPrice;
-                this.logger.debug(
-                  `Closing ${request.symbol}: using mark price $${markPrice.toFixed(6)}`,
-                );
-            } catch (priceError: any) {
-                // Mark price failed, fall back to order book immediately
-                this.logger.warn(
-                  `Mark price unavailable for ${request.symbol} close, using order book: ${priceError.message}`,
-                );
-                this.clearOrderBookCache(request.symbol);
-                const { bestBid, bestAsk } = await this.getOrderBookBidAsk(request.symbol);
-                avgExecutionPrice = isBuy ? bestAsk : bestBid;
-              }
-            } else if (attempt === 1) {
-              // Second attempt: use order book at best price (no slippage yet)
-              this.logger.warn(
-                `🔄 Closing retry ${attempt + 1}/${maxRetries} for ${request.symbol}: ` +
-                  `Using order book at best price (no slippage)`,
-              );
-              this.clearOrderBookCache(request.symbol);
-              
-              try {
-                const { bestBid, bestAsk } = await this.getOrderBookBidAsk(request.symbol);
-                avgExecutionPrice = isBuy ? bestAsk : bestBid;
-              } catch (obError: any) {
-                // Order book failed, try mark price
-                this.logger.warn(
-                  `Order book unavailable for ${request.symbol} close, using mark price: ${obError.message}`,
-                );
-                avgExecutionPrice = await this.getMarkPrice(request.symbol);
-              }
-            } else {
-              // Subsequent retries: use order book with progressive slippage
-              this.logger.warn(
-                `🔄 Closing retry ${attempt + 1}/${maxRetries} for ${request.symbol}: ` +
-                  `Using order book with ${(priceImprovement * 100).toFixed(2)}% slippage`,
-              );
-              this.clearOrderBookCache(request.symbol);
-              
-              try {
-                const { bestBid, bestAsk } = await this.getOrderBookBidAsk(request.symbol);
-                avgExecutionPrice = isBuy ? bestAsk : bestBid;
-              } catch (obError: any) {
-                // Order book failed, try mark price
-                this.logger.warn(
-                  `Order book unavailable for ${request.symbol} close, using mark price: ${obError.message}`,
-                );
-                avgExecutionPrice = await this.getMarkPrice(request.symbol);
-              }
-            }
-
-            if (!avgExecutionPrice || avgExecutionPrice <= 0) {
-              throw new Error(
-                `Could not determine price for closing ${request.symbol}: avgExecutionPrice=${avgExecutionPrice}`,
-              );
-            }
-
-            // Apply price improvement (worse price = better chance to fill)
-            // For BUY (closing SHORT): worse = higher price
-            // For SELL (closing LONG): worse = lower price
-            const adjustedPrice = isBuy
-              ? avgExecutionPrice * (1 + priceImprovement)
-              : avgExecutionPrice * (1 - priceImprovement);
-
-            if (attempt > 1 && priceImprovement > 0) {
-              this.logger.warn(
-                `🔄 Closing ${request.symbol}: Applying ${(priceImprovement * 100).toFixed(2)}% slippage ` +
-                  `($${adjustedPrice.toFixed(6)} vs base $${avgExecutionPrice.toFixed(6)})`,
-              );
-            }
-
-            // Use createMarketOrder for closing positions (per Lighter docs)
-            const [tx, hash, error] = await this.callApi(this.WEIGHT_TX, () =>
-              this.signerClient!.createMarketOrder({
-                marketIndex,
-                clientOrderIndex: Date.now(),
-                baseAmount,
-                avgExecutionPrice: market.priceToUnits(adjustedPrice),
-                isAsk,
-                reduceOnly: true,
-              })
-            );
-
-            if (error) {
-              throw new Error(`Failed to close position: ${error}`);
-            }
-
-            // Wait for transaction
-            try {
-              await this.signerClient!.waitForTransaction(hash, 30000, 2000);
-            } catch (waitError: any) {
-              this.logger.warn(`Transaction wait failed: ${waitError.message}`);
-            }
-
-            // Track successful order - reset consecutive nonce error counter
-            this.consecutiveNonceErrors = 0;
-            this.lastSuccessfulOrderTime = new Date();
-
-            return new PerpOrderResponse(
-              hash,
-              OrderStatus.SUBMITTED,
-              request.symbol,
-              request.side,
-              request.clientOrderId,
-              undefined,
-              undefined,
-              undefined,
-              new Date(),
-            );
-          } else {
-            // For opening market orders, use createUnifiedOrder with idealPrice and maxSlippage
-            // Strategy: 
-            // - Attempt 0: Use mark price (candlesticks) for fair price
-            // - Attempt 1: Use actual order book at best bid/ask (no slippage)
-            // - Attempt 2+: Use order book with progressive slippage
-            
-            let idealPrice: number;
-            
-            // Progressive price improvement: starts at attempt 2
-            // [attempt 0 = mark, attempt 1 = book no slippage, attempt 2+ = book + slippage]
-            const priceImprovements = [0, 0, 0.001, 0.005, 0.01, 0.02, 0.05];
-            const priceImprovement =
-              priceImprovements[Math.min(attempt, priceImprovements.length - 1)];
-
-            if (attempt === 0) {
-              // First attempt: try mark price (fair value)
-              try {
-                const markPrice = await this.getMarkPrice(request.symbol);
-                idealPrice = markPrice;
-                  this.logger.debug(
-                  `Market order ${request.symbol}: using mark price $${markPrice.toFixed(6)}`,
-                );
-              } catch (markError: any) {
-                // Mark price failed, fall back to order book immediately
-                this.logger.warn(
-                  `Mark price unavailable for ${request.symbol}, using order book: ${markError.message}`,
-                  );
-                this.clearOrderBookCache(request.symbol);
-                const { bestBid, bestAsk } = await this.getOrderBookBidAsk(request.symbol);
-                idealPrice = isBuy ? bestAsk : bestBid;
-              }
-            } else if (attempt === 1) {
-              // Second attempt: use order book at best price (no slippage yet)
-              this.logger.warn(
-                `🔄 Market order retry ${attempt + 1}/${maxRetries} for ${request.symbol}: ` +
-                  `Using order book at best price (no slippage)`,
-              );
-              this.clearOrderBookCache(request.symbol);
-              
-              try {
-                const { bestBid, bestAsk } = await this.getOrderBookBidAsk(request.symbol);
-                idealPrice = isBuy ? bestAsk : bestBid;
-              } catch (obError: any) {
-                // Order book failed, try mark price
-                this.logger.warn(
-                  `Order book unavailable for ${request.symbol}, using mark price: ${obError.message}`,
-                );
-                idealPrice = await this.getMarkPrice(request.symbol);
-              }
-            } else {
-              // Subsequent retries: use order book with progressive slippage
-              this.logger.warn(
-                `🔄 Market order retry ${attempt + 1}/${maxRetries} for ${request.symbol}: ` +
-                  `Using order book with ${(priceImprovement * 100).toFixed(2)}% slippage`,
-              );
-              this.clearOrderBookCache(request.symbol);
-              
-              try {
-                const { bestBid, bestAsk } = await this.getOrderBookBidAsk(request.symbol);
-                // Apply slippage to take from the book
-            idealPrice = isBuy
-                  ? bestAsk * (1 + priceImprovement)
-                  : bestBid * (1 - priceImprovement);
-              } catch (obError: any) {
-                // Order book failed, try mark price + slippage
-              this.logger.warn(
-                  `Order book unavailable for ${request.symbol}, using mark price + slippage: ${obError.message}`,
-                );
-                const markPrice = await this.getMarkPrice(request.symbol);
-                idealPrice = isBuy
-                  ? markPrice * (1 + priceImprovement)
-                  : markPrice * (1 - priceImprovement);
-              }
-            }
-
-            if (!idealPrice || idealPrice <= 0) {
-              throw new Error(
-                `Could not determine price for ${request.symbol}: idealPrice=${idealPrice}`,
-              );
-            }
-
-            // Use createUnifiedOrder with MARKET order type (per Lighter docs)
-            // For opening market orders: orderExpiry = 0
-            const now = Date.now();
-            orderParams = {
-              marketIndex,
-              clientOrderIndex: now,
-              baseAmount,
-              isAsk,
-              orderType: LighterOrderType.MARKET,
-              idealPrice: market.priceToUnits(idealPrice),
-              maxSlippage: 0.01, // 1% max slippage
-              orderExpiry: 0, // 0 for opening market orders
-            };
-          }
+        let orderResponse: PerpOrderResponse;
+        
+        if (request.type === OrderType.MARKET && request.reduceOnly) {
+          orderResponse = await this.executeLighterMarketClose(request, marketIndex, market, attempt, maxRetries, nonce);
+        } else if (request.type === OrderType.MARKET) {
+          orderResponse = await this.executeLighterMarketOpen(request, marketIndex, market, attempt, maxRetries, nonce);
         } else {
-          // Limit order
-          if (!request.price) {
-            throw new Error('Limit price is required for LIMIT orders');
-          }
-
-          // Updated to match the known working implementation:
-          // 1 hour expiry, uses Date.now() for clientOrderIndex, no expiredAt field
-          const now = Date.now();
-          const EXPIRY_DURATION_MS = 60 * 60 * 1000; // 1 hour
-          const orderExpiry = now + EXPIRY_DURATION_MS;
-
-          this.logger.debug(
-            `LIMIT order for ${request.symbol}: using 1 hour expiry (${new Date(orderExpiry).toISOString()})`,
-          );
-
-          orderParams = {
-            marketIndex,
-            clientOrderIndex: now,
-            baseAmount,
-            price: market.priceToUnits(request.price),
-            isAsk,
-            orderType: LighterOrderType.LIMIT,
-            orderExpiry,
-            reduceOnly: request.reduceOnly || false,
-          };
+          orderResponse = await this.executeLighterLimitOrder(request, marketIndex, market, nonce);
         }
 
-        // Log order details
-        if (request.type === OrderType.LIMIT) {
-          this.logger.log(
-            `📋 LIMIT order for ${request.symbol}: 1 hour expiry (${new Date(orderParams.orderExpiry).toISOString()}), reduceOnly: ${orderParams.reduceOnly}`,
-          );
-        }
-
-        this.logger.debug(
-          `Creating unified order with params: ${JSON.stringify({
-            marketIndex: orderParams.marketIndex,
-            clientOrderIndex: orderParams.clientOrderIndex,
-            baseAmount: orderParams.baseAmount.toString(),
-            price:
-              orderParams.price?.toString() ||
-              orderParams.idealPrice?.toString() ||
-              'N/A',
-            isAsk: orderParams.isAsk,
-            orderType: orderParams.orderType,
-            orderExpiry: orderParams.orderExpiry,
-            reduceOnly: orderParams.reduceOnly,
-          })}`,
-        );
-
-        await this.rateLimiter.acquire(ExchangeType.LIGHTER, this.WEIGHT_TX);
-        // Cast to any because the type definition might missing the nonce parameter
-        const result = await (this.signerClient as any).createUnifiedOrder({
-          ...orderParams,
-          nonce: nonce || undefined
-        });
-
-        if (!result.success) {
-          const errorMsg = result.mainOrder.error || 'Order creation failed';
-          this.logger.error(`❌ Lighter order creation failed: ${errorMsg}`);
-          this.logger.error(`Order params: ${JSON.stringify(orderParams)}`);
-          this.recordError(
-            'LIGHTER_ORDER_CREATION_FAILED',
-            errorMsg,
-            request.symbol,
-            { orderParams },
-          );
-          throw new Error(errorMsg);
-        }
-
-        const orderId = result.mainOrder.hash;
-        this.logger.log(`✅ Lighter order created successfully: ${orderId}`);
-
-        // Wait for transaction to be processed (matching script behavior)
-        try {
-          await this.signerClient!.waitForTransaction(orderId, 30000, 2000);
-        } catch (error: any) {
-          // Transaction wait might fail, but order may still be submitted
-          this.logger.warn(`Order transaction wait failed: ${error.message}`);
-          this.recordError(
-            'LIGHTER_TX_WAIT_FAILED',
-            error.message,
-            request.symbol,
-            { orderId },
-          );
-        }
-
-        // CRITICAL: Wait a short time and check if order was immediately filled or canceled
-        // Lighter may cancel orders immediately if they don't meet certain conditions
-        await new Promise((resolve) => setTimeout(resolve, 2000)); // 2 second wait
-
-        // Check positions to see if order filled immediately
-        try {
-          const positions = await this.getPositions();
-          const matchingPosition = positions.find(
-            (p) =>
-              p.symbol === request.symbol &&
-              p.side === request.side &&
-              Math.abs(p.size) > 0.0001,
-          );
-
-          if (matchingPosition) {
-            // Order filled immediately - check if size matches
-            const expectedSize = request.size;
-            const actualSize = matchingPosition.size;
-            const sizeMatch = Math.abs(actualSize - expectedSize) < 0.0001;
-
-            if (sizeMatch || actualSize >= expectedSize * 0.9) {
-              // Allow 10% tolerance
-              this.logger.log(
-                `✅ Lighter order ${orderId} filled immediately: ${actualSize.toFixed(4)} ${request.symbol}`,
-              );
-              // Record success for market quality tracking
-              this.recordSuccess(request.symbol);
-              return new PerpOrderResponse(
-                orderId,
-                OrderStatus.FILLED,
-                request.symbol,
-                request.side,
-                request.clientOrderId,
-                actualSize,
-                undefined,
-                undefined,
-                new Date(),
-              );
-            }
-          }
-        } catch (positionError: any) {
-          this.logger.debug(
-            `Could not check positions immediately after order placement: ${positionError.message}`,
-          );
-        }
-
-        // Order is resting on the book (or may have been canceled - will be checked in waitForOrderFill)
-        // Mark as SUBMITTED - caller should verify via waitForOrderFill
-
-        // Track successful order - reset consecutive nonce error counter
         this.consecutiveNonceErrors = 0;
         this.lastSuccessfulOrderTime = new Date();
+        return orderResponse;
 
-        return new PerpOrderResponse(
-          orderId,
-          OrderStatus.SUBMITTED,
-          request.symbol,
-          request.side,
-          request.clientOrderId,
-          undefined,
-          undefined,
-          undefined,
-          new Date(),
-        );
       } catch (error: any) {
         lastError = error;
-        const errorMsg = error?.message || String(error);
-        const errorStack = error?.stack || '';
+        const errorMessage = error.message || String(error);
 
-        // Log detailed error information
-        this.logger.error(
-          `❌ Lighter order placement failed (attempt ${attempt + 1}/${maxRetries}): ${errorMsg}`,
-        );
-        if (errorStack) {
-          this.logger.debug(`Error stack: ${errorStack}`);
-        }
-        if (error?.response) {
-          this.logger.debug(
-            `Error response: ${JSON.stringify(error.response.data)}`,
-          );
-        }
-
-        const isRateLimit =
-          errorMsg.includes('Too Many Requests') ||
-          errorMsg.includes('429') ||
-          errorMsg.includes('rate limit') ||
-          errorMsg.includes('market config');
-        const isMarginModeError =
-          errorMsg.includes('invalid margin mode') ||
-          errorMsg.includes('margin mode');
-        const isNonceError =
-          errorMsg.toLowerCase().includes('invalid nonce') ||
-          errorMsg.toLowerCase().includes('nonce');
-
-        if (isRateLimit && attempt < maxRetries - 1) {
-          // Silenced 429/rate limit warnings - only show errors
-          this.logger.debug(
-            `Order placement rate limited for ${request.symbol} ` +
-              `(attempt ${attempt + 1}/${maxRetries}): ${errorMsg}. Will retry.`,
-          );
-          continue;
-        }
-
-        // Nonce errors - reset client and retry (with max consecutive error limit)
-        const MAX_CONSECUTIVE_NONCE_ERRORS = 10; // Stop retrying after 10 consecutive nonce errors
-        if (isNonceError && attempt < maxRetries - 1) {
+        if (
+          errorMessage.includes('invalid nonce') ||
+          errorMessage.includes('nonce too low') ||
+          errorMessage.includes('AccountSequenceMismatch')
+        ) {
           this.consecutiveNonceErrors++;
-          const timeSinceLastSuccess = this.lastSuccessfulOrderTime
-            ? `${Math.round((Date.now() - this.lastSuccessfulOrderTime.getTime()) / 1000)}s ago`
-            : 'never';
-
-          // If we've hit too many consecutive nonce errors, something is fundamentally wrong
-          // Stop retrying and let the error propagate
-          if (this.consecutiveNonceErrors >= MAX_CONSECUTIVE_NONCE_ERRORS) {
-            this.logger.error(
-              `❌ Lighter nonce error limit reached (${this.consecutiveNonceErrors} consecutive errors). ` +
-                `Stopping retries. Last successful order: ${timeSinceLastSuccess}. ` +
-                `This may indicate a fundamental issue with the Lighter SDK or account state.`,
-            );
-            this.recordError(
-              'LIGHTER_NONCE_ERROR_LIMIT',
-              `Consecutive nonce error limit (${MAX_CONSECUTIVE_NONCE_ERRORS}) reached`,
-              request.symbol,
-              {
-                consecutiveNonceErrors: this.consecutiveNonceErrors,
-                lastSuccessfulOrder: timeSinceLastSuccess,
-                originalError: errorMsg,
-              },
-            );
-            // Don't continue - let it fall through to the final error handling
-          } else {
-            this.logger.warn(
-              `⚠️ Lighter nonce error #${this.consecutiveNonceErrors} for ${request.symbol}: ${errorMsg}. ` +
-                `Last successful order: ${timeSinceLastSuccess}. ` +
-                `Re-syncing nonce and retrying (attempt ${attempt + 1}/${maxRetries})...`,
-            );
-            this.recordError('LIGHTER_NONCE_ERROR', errorMsg, request.symbol, {
-              attempt: attempt + 1,
-              consecutiveNonceErrors: this.consecutiveNonceErrors,
-              lastSuccessfulOrder: timeSinceLastSuccess,
-            });
-
-            // IMPROVED: Try lightweight refresh first (faster, less disruptive)
-            // Only do full reset if lightweight refresh fails or after 3+ consecutive errors
-            let refreshed = false;
-            if (this.consecutiveNonceErrors < 3) {
-              refreshed = await this.tryLightweightNonceRefresh();
-            }
-            
-            if (!refreshed) {
-              // Fall back to full SignerClient recreation
-            await this.resetSignerClient();
-            }
-
-            // Progressive backoff for nonce errors - reduced for faster recovery
-            // 500ms, 1s, 2s, 4s... capped at 5s
-            const nonceBackoff = Math.min(
-              500 * Math.pow(2, this.consecutiveNonceErrors - 1),
-              5000,
-            );
-            this.logger.debug(
-              `Waiting ${nonceBackoff}ms before retry after nonce error`,
-            );
-            await new Promise((resolve) => setTimeout(resolve, nonceBackoff));
-            continue;
-          }
-        }
-
-        // Margin mode errors are not retryable - account configuration issue
-        if (isMarginModeError) {
           this.logger.error(
-            `❌ MARGIN MODE ERROR on ${request.symbol}: ${errorMsg}. ` +
-              `Order details: ${request.side} ${request.size} @ ${request.price} (type: ${request.type}). ` +
-              `This indicates the account may need margin mode configured for this market. ` +
-              `Please check your Lighter account settings or contact support.`,
-          );
-          this.recordError(
-            'LIGHTER_MARGIN_MODE_ERROR',
-            `${request.symbol}: ${errorMsg}`,
-            request.symbol,
-            {
-              orderSide: request.side,
-              orderSize: request.size,
-              orderPrice: request.price,
-              orderType: request.type,
-              reduceOnly: request.reduceOnly,
-              rawError: errorMsg,
-              timestamp: new Date().toISOString(),
-            },
+            `❌ Lighter nonce error (attempt ${attempt + 1}/${maxRetries}): ${errorMessage}`,
           );
           
-          // Track this symbol as having margin mode issues
-          if (this.diagnosticsService) {
-            this.diagnosticsService.recordMarginModeError?.(
-              request.symbol,
-              ExchangeType.LIGHTER,
-              errorMsg,
-            );
+          if (this.consecutiveNonceErrors >= 2) {
+            this.logger.warn(`🔄 Multiple nonce errors, clearing signer client...`);
+            this.signerClient = null;
           }
-          
-          throw new ExchangeError(
-            `Invalid margin mode for ${request.symbol}: Account may need margin mode configured. ${errorMsg}`,
-            ExchangeType.LIGHTER,
-            undefined,
-            error,
+        } else {
+          this.logger.error(
+            `❌ Lighter order error (attempt ${attempt + 1}/${maxRetries}): ${errorMessage}`,
           );
         }
 
-        // Not retryable or max retries reached
-        this.logger.error(`Failed to place order: ${errorMsg}`);
-        this.recordError('LIGHTER_ORDER_FAILED', errorMsg, request.symbol, {
-          attempt: attempt + 1,
-          maxRetries,
-        });
-        throw new ExchangeError(
-          `Failed to place order: ${errorMsg}`,
-          ExchangeType.LIGHTER,
-          undefined,
-          error,
-        );
+        if (attempt === maxRetries - 1) {
+          throw new ExchangeError(
+            `Lighter order failed after ${maxRetries} attempts: ${errorMessage}`,
+            ExchangeType.LIGHTER,
+          );
+        }
+      } finally {
+        releaseMutex();
       }
     }
 
@@ -1775,6 +1270,215 @@ export class LighterExchangeAdapter
         error,
       );
     }
+  }
+
+  private async executeLighterMarketClose(
+    request: PerpOrderRequest,
+    marketIndex: number,
+    market: any,
+    attempt: number,
+    maxRetries: number,
+    nonce: number | null,
+  ): Promise<PerpOrderResponse> {
+    const isBuy = request.side === OrderSide.LONG;
+    const isAsk = !isBuy;
+    const baseAmount = market.amountToUnits(request.size);
+
+    let avgExecutionPrice: number;
+    const priceImprovements = [0, 0, 0.001, 0.005, 0.01, 0.02, 0.05];
+    const priceImprovement =
+      priceImprovements[Math.min(attempt, priceImprovements.length - 1)];
+
+    try {
+      if (attempt === 0) {
+        avgExecutionPrice = await this.getMarkPrice(request.symbol);
+      } else {
+        const { bestBid, bestAsk } = await this.getOrderBookBidAsk(
+          request.symbol,
+        );
+        avgExecutionPrice = isBuy ? bestAsk : bestBid;
+      }
+    } catch (e) {
+      const { bestBid, bestAsk } = await this.getOrderBookBidAsk(
+        request.symbol,
+      ).catch(() => ({ bestBid: 0, bestAsk: 0 }));
+      avgExecutionPrice = isBuy ? bestAsk : bestBid;
+      if (!avgExecutionPrice)
+        throw new Error(
+          `Could not get price for ${request.symbol}: ${e.message}`,
+        );
+    }
+
+    const adjustedPrice = isBuy
+      ? avgExecutionPrice * (1 + priceImprovement)
+      : avgExecutionPrice * (1 - priceImprovement);
+
+    const orderParams = {
+      marketIndex,
+      clientOrderIndex: Date.now(),
+      baseAmount,
+      isAsk,
+      orderType: LighterOrderType.MARKET,
+      idealPrice: market.priceToUnits(adjustedPrice),
+      maxSlippage: 0.05,
+      orderExpiry: 0,
+      reduceOnly: true,
+      nonce: nonce || undefined,
+    };
+
+    const result = (await this.callApi(this.WEIGHT_TX, () =>
+      (this.signerClient as any).createUnifiedOrder(orderParams),
+    )) as any;
+
+    if (!result.success) {
+      throw new Error(`Failed to close position: ${result.mainOrder?.error || 'Unknown error'}`);
+    }
+
+    const hash = result.mainOrder.hash;
+
+    try {
+      await this.signerClient!.waitForTransaction(hash, 30000, 2000);
+    } catch (e) {}
+
+    return new PerpOrderResponse(
+      hash,
+      OrderStatus.SUBMITTED,
+      request.symbol,
+      request.side,
+      request.clientOrderId,
+      undefined,
+      undefined,
+      undefined,
+      new Date(),
+    );
+  }
+
+  private async executeLighterMarketOpen(
+    request: PerpOrderRequest,
+    marketIndex: number,
+    market: any,
+    attempt: number,
+    maxRetries: number,
+    nonce: number | null,
+  ): Promise<PerpOrderResponse> {
+    const isBuy = request.side === OrderSide.LONG;
+    const isAsk = !isBuy;
+    const baseAmount = market.amountToUnits(request.size);
+
+    let idealPrice: number;
+    const priceImprovements = [0, 0, 0.001, 0.005, 0.01, 0.02, 0.05];
+    const priceImprovement =
+      priceImprovements[Math.min(attempt, priceImprovements.length - 1)];
+
+    try {
+      if (attempt === 0) {
+        idealPrice = await this.getMarkPrice(request.symbol);
+      } else {
+        const { bestBid, bestAsk } = await this.getOrderBookBidAsk(
+          request.symbol,
+        );
+        idealPrice = isBuy ? bestAsk : bestBid;
+      }
+    } catch (e) {
+      const { bestBid, bestAsk } = await this.getOrderBookBidAsk(
+        request.symbol,
+      ).catch(() => ({ bestBid: 0, bestAsk: 0 }));
+      idealPrice = isBuy ? bestAsk : bestBid;
+      if (!idealPrice)
+        throw new Error(
+          `Could not get price for ${request.symbol}: ${e.message}`,
+        );
+    }
+
+    const adjustedPrice = isBuy
+      ? idealPrice * (1 + priceImprovement)
+      : idealPrice * (1 - priceImprovement);
+
+    const orderParams = {
+      marketIndex,
+      clientOrderIndex: Date.now(),
+      baseAmount,
+      isAsk,
+      orderType: LighterOrderType.MARKET,
+      idealPrice: market.priceToUnits(adjustedPrice),
+      maxSlippage: 0.05,
+      orderExpiry: 0,
+      reduceOnly: false,
+      nonce: nonce || undefined,
+    };
+
+    const result = (await this.callApi(this.WEIGHT_TX, () =>
+      (this.signerClient as any).createUnifiedOrder(orderParams),
+    )) as any;
+
+    if (!result.success) {
+      throw new Error(`Failed to open market order: ${result.mainOrder?.error || 'Unknown error'}`);
+    }
+
+    const hash = result.mainOrder.hash;
+
+    return new PerpOrderResponse(
+      hash,
+      OrderStatus.SUBMITTED,
+      request.symbol,
+      request.side,
+      request.clientOrderId,
+      undefined,
+      undefined,
+      undefined,
+      new Date(),
+    );
+  }
+
+  private async executeLighterLimitOrder(
+    request: PerpOrderRequest,
+    marketIndex: number,
+    market: any,
+    nonce: number | null,
+  ): Promise<PerpOrderResponse> {
+    const isBuy = request.side === OrderSide.LONG;
+    const isAsk = !isBuy;
+    const baseAmount = market.amountToUnits(request.size);
+
+    if (!request.price) throw new Error('Limit order requires a price');
+
+    const now = Date.now();
+    const EXPIRY_DURATION_MS = 60 * 60 * 1000; // 1 hour
+    const orderExpiry = now + EXPIRY_DURATION_MS;
+
+    const orderParams = {
+      marketIndex,
+      clientOrderIndex: now,
+      baseAmount,
+      price: market.priceToUnits(request.price!),
+      isAsk,
+      orderType: LighterOrderType.LIMIT,
+      orderExpiry,
+      reduceOnly: request.reduceOnly || false,
+      nonce: nonce || undefined,
+    };
+
+    const result = (await this.callApi(this.WEIGHT_TX, () =>
+      (this.signerClient as any).createUnifiedOrder(orderParams),
+    )) as any;
+
+    if (!result.success) {
+      throw new Error(`Failed to place limit order: ${result.mainOrder?.error || 'Unknown error'}`);
+    }
+
+    const hash = result.mainOrder.hash;
+
+    return new PerpOrderResponse(
+      hash,
+      OrderStatus.SUBMITTED,
+      request.symbol,
+      request.side,
+      request.clientOrderId,
+      undefined,
+      undefined,
+      undefined,
+      new Date(),
+    );
   }
 
   /**

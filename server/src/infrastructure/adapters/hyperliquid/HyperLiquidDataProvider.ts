@@ -269,6 +269,19 @@ export class HyperLiquidDataProvider
 
   // --- Private Methods ---
 
+  /**
+   * Get coin name from asset index using cached metadata
+   */
+  async getCoinNameFromIndex(index: number): Promise<string | null> {
+    const data = await this.fetchMetaAndAssetCtxs();
+    if (data.meta.universe && Array.isArray(data.meta.universe)) {
+      if (index >= 0 && index < data.meta.universe.length) {
+        return data.meta.universe[index].name;
+      }
+    }
+    return null;
+  }
+
   private async fetchMetaAndAssetCtxs(
     retries: number = 3,
   ): Promise<HyperLiquidMetaAndAssetCtxs> {

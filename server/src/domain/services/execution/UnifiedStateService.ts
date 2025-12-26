@@ -78,7 +78,7 @@ export class UnifiedStateService implements OnModuleInit {
       this.hyperliquidWs.subscribeToPositionUpdates();
     }
     if (this.lighterWs) {
-      // Lighter WS provider will handle subscriptions internally
+      this.lighterWs.subscribeToPositionUpdates();
     }
   }
 

@@ -274,8 +274,14 @@ export class UnifiedExecutionService {
       if (!secondResp.isSuccess()) {
         // CRITICAL: Leg B failed to even place. Must rollback Leg A immediately.
         result.error = `Leg B (${secondSide}) placement failed. EMERGENCY ROLLBACK of Leg A.`;
-        await this.rollback(firstAdapter, symbol, matchedSize, firstSide);
-        if (firstIsLong) result.longFilledSize = 0; else result.shortFilledSize = 0;
+        try {
+          await this.rollback(firstAdapter, symbol, matchedSize, firstSide);
+          // Only reset filled size if rollback succeeded
+          if (firstIsLong) result.longFilledSize = 0; else result.shortFilledSize = 0;
+        } catch (rollbackError: any) {
+          this.logger.error(`🚨 FAILED TO ROLLBACK Leg A after Leg B placement failure! We are now unhedged: ${rollbackError.message}`);
+          // DO NOT reset filled size - we need to know we have this unhedged position
+        }
         return result;
       }
 
@@ -299,8 +305,13 @@ export class UnifiedExecutionService {
         
         if (secondFill.filledSize === 0) {
            result.error = `Leg B failed to fill. Rolling back Leg A.`;
-           await this.rollback(firstAdapter, symbol, firstFill.filledSize, firstSide);
-           if (firstIsLong) result.longFilledSize = 0; else result.shortFilledSize = 0;
+           try {
+             await this.rollback(firstAdapter, symbol, firstFill.filledSize, firstSide);
+             if (firstIsLong) result.longFilledSize = 0; else result.shortFilledSize = 0;
+           } catch (rollbackError: any) {
+             this.logger.error(`🚨 FAILED TO ROLLBACK Leg A after Leg B fill failure! We are now unhedged: ${rollbackError.message}`);
+             // Keep the filled size so handleFinalImbalance can clean it up
+           }
            return result;
         }
         

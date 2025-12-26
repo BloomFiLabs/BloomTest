@@ -17,6 +17,7 @@ import {
   ArbitrageExecutionPlan,
   ArbitrageExecutionResult,
 } from '../FundingArbitrageStrategy';
+import { PerpSpotExecutionPlan } from './PerpSpotExecutionPlanBuilder';
 import { ArbitrageOpportunity } from '../FundingRateAggregator';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
@@ -1874,14 +1875,16 @@ export class OrderExecutor implements IOrderExecutor {
                 { symbol: opportunity.symbol },
               ),
             );
+          }
         }
       }
-      
+
       // ========================================================
       // FALLBACK: Original all-at-once execution (if sliced disabled)
       // ========================================================
-      if (!this.useSlicedExecution || !this.unifiedExecutionService) {
-        this.logger.warn(`⚠️ Using ALL-AT-ONCE execution for ${opportunity.symbol} (sliced disabled or service unavailable)`);
+      this.logger.warn(
+        `⚠️ Using ALL-AT-ONCE execution for ${opportunity.symbol} (sliced disabled or service unavailable)`,
+      );
 
       let longResponse: PerpOrderResponse;
       let shortResponse: PerpOrderResponse;
@@ -1896,7 +1899,7 @@ export class OrderExecutor implements IOrderExecutor {
           longOrder,
           shortOrder,
           opportunity.longExchange,
-          opportunity.shortExchange,
+          opportunity.shortExchange!,
         );
       } catch (err: any) {
         // If placeOrderPair throws, we need to determine which order failed
@@ -1965,7 +1968,7 @@ export class OrderExecutor implements IOrderExecutor {
             plan.estimatedCosts.total ||
             (plan.estimatedCosts.fees || 0) +
               (plan.estimatedCosts.slippage || 0);
-          this.performanceLogger.recordTradingCosts(totalCosts);
+          this.performanceLogger!.recordTradingCosts(totalCosts);
         }
 
         this.logger.log(
@@ -1989,7 +1992,7 @@ export class OrderExecutor implements IOrderExecutor {
         // Record single-leg failure for patterns if one leg succeeded
         if (this.diagnosticsService) {
           if (longResponse.isSuccess() && !shortResponse.isSuccess()) {
-            this.diagnosticsService.recordSingleLegFailure({
+            this.diagnosticsService!.recordSingleLegFailure({
               id: `sl-f-${opportunity.symbol}-${Date.now()}`,
               symbol: opportunity.symbol,
               timestamp: new Date(),
@@ -2001,7 +2004,7 @@ export class OrderExecutor implements IOrderExecutor {
               timeBetweenLegsMs: 0,
             });
           } else if (!longResponse.isSuccess() && shortResponse.isSuccess()) {
-            this.diagnosticsService.recordSingleLegFailure({
+            this.diagnosticsService!.recordSingleLegFailure({
               id: `sl-f-${opportunity.symbol}-${Date.now()}`,
               symbol: opportunity.symbol,
               timestamp: new Date(),
@@ -2014,7 +2017,6 @@ export class OrderExecutor implements IOrderExecutor {
             });
           }
         }
-
         return Result.failure(
           new OrderExecutionException(
             `Order execution failed: Long (${opportunity.longExchange}): ${longErrorMsg}, Short (${opportunity.shortExchange}): ${shortErrorMsg}`,
@@ -2059,10 +2061,7 @@ export class OrderExecutor implements IOrderExecutor {
   async executeMultiplePositions(
     opportunities: Array<{
       opportunity: ArbitrageOpportunity;
-      plan:
-        | ArbitrageExecutionPlan
-        | import('./PerpSpotExecutionPlanBuilder').PerpSpotExecutionPlan
-        | null;
+      plan: ArbitrageExecutionPlan | PerpSpotExecutionPlan | null;
       maxPortfolioFor35APY: number | null;
       isExisting?: boolean;
       currentValue?: number;
@@ -2123,7 +2122,7 @@ export class OrderExecutor implements IOrderExecutor {
           this.executionLockService?.generateThreadId() ||
           `batch-${Date.now()}-${i}`;
         if (this.executionLockService) {
-          const lockAcquired = this.executionLockService.tryAcquireSymbolLock(
+          const lockAcquired = this.executionLockService!.tryAcquireSymbolLock(
             opportunity.symbol,
             threadId,
             'executeMultiplePositions',
@@ -2171,16 +2170,21 @@ export class OrderExecutor implements IOrderExecutor {
             // PRE-FLIGHT CHECK: Cancel any existing open orders for this symbol to free up margin
             try {
               const [longCancelled, shortCancelled] = await Promise.allSettled([
-                longAdapter.cancelAllOrders(opportunity.symbol).catch(() => 0),
-                shortAdapter.cancelAllOrders(opportunity.symbol).catch(() => 0),
+                longAdapter!.cancelAllOrders(opportunity.symbol).catch(() => 0),
+                shortAdapter!.cancelAllOrders(opportunity.symbol).catch(() => 0),
               ]);
-              const totalCancelled =
-                (longCancelled.status === 'fulfilled'
-                  ? longCancelled.value
-                  : 0) +
-                (shortCancelled.status === 'fulfilled'
-                  ? shortCancelled.value
-                  : 0);
+              
+              let longVal = 0;
+              if (longCancelled.status === 'fulfilled') {
+                longVal = (longCancelled as any).value || 0;
+              }
+              
+              let shortVal = 0;
+              if (shortCancelled.status === 'fulfilled') {
+                shortVal = (shortCancelled as any).value || 0;
+              }
+              
+              const totalCancelled = longVal + shortVal;
               if (totalCancelled > 0) {
                 this.logger.log(
                   `🗑️ Pre-flight: Cancelled ${totalCancelled} existing order(s) for ${opportunity.symbol}`,
@@ -2210,8 +2214,8 @@ export class OrderExecutor implements IOrderExecutor {
             // PRE-FLIGHT CHECK: Verify both exchanges have sufficient margin
             // Use getAvailableMargin() which accounts for existing positions
             const [longMargin, shortMargin] = await Promise.all([
-              this.getAdapterAvailableMargin(longAdapter),
-              this.getAdapterAvailableMargin(shortAdapter),
+              this.getAdapterAvailableMargin(longAdapter!),
+              this.getAdapterAvailableMargin(shortAdapter!),
             ]);
 
             const avgPrice =
@@ -2311,12 +2315,12 @@ export class OrderExecutor implements IOrderExecutor {
 
             // Use placeOrderPair which handles sequential vs parallel execution
             const [longResponse, shortResponse] = await this.placeOrderPair(
-              longAdapter,
-              shortAdapter,
+              longAdapter!,
+              shortAdapter!,
               longOrder,
               shortOrder,
               opportunity.longExchange,
-              opportunity.shortExchange,
+              opportunity.shortExchange!,
             );
 
             // Wait for orders to fill if they're not immediately filled
@@ -2336,7 +2340,7 @@ export class OrderExecutor implements IOrderExecutor {
               longResponse.orderId
             ) {
               finalLongResponse = await this.waitForOrderFill(
-                longAdapter,
+                longAdapter!,
                 longResponse.orderId,
                 opportunity.symbol,
                 opportunity.longExchange,
@@ -2355,10 +2359,10 @@ export class OrderExecutor implements IOrderExecutor {
               shortResponse.orderId
             ) {
               finalShortResponse = await this.waitForOrderFill(
-                shortAdapter,
+                shortAdapter!,
                 shortResponse.orderId,
                 opportunity.symbol,
-                opportunity.shortExchange,
+                opportunity.shortExchange!,
                 actualPositionBaseAsset,
                 this.config.maxOrderWaitRetries,
                 this.config.orderWaitBaseInterval,
@@ -2485,7 +2489,7 @@ export class OrderExecutor implements IOrderExecutor {
                   perpPerpPlan.estimatedCosts.total ||
                   (perpPerpPlan.estimatedCosts.fees || 0) +
                     (perpPerpPlan.estimatedCosts.slippage || 0);
-                this.performanceLogger.recordTradingCosts(totalCosts);
+                this.performanceLogger!.recordTradingCosts(totalCosts);
               }
 
               // Record break-even info for diagnostics
@@ -2494,7 +2498,7 @@ export class OrderExecutor implements IOrderExecutor {
                 const hourlyReturn = Math.abs(perpPerpPlan.expectedNetReturn);
                 const breakEvenHours =
                   hourlyReturn > 0 ? totalCosts / hourlyReturn : 24;
-                this.diagnosticsService.recordPositionBreakEven(
+                this.diagnosticsService!.recordPositionBreakEven(
                   opportunity.symbol,
                   opportunity.longExchange,
                   breakEvenHours,
@@ -2529,7 +2533,7 @@ export class OrderExecutor implements IOrderExecutor {
                 if (longFilled) {
                   const closeResult =
                     await this.positionManager.closeFilledPosition(
-                      longAdapter,
+                      longAdapter!,
                       opportunity.symbol,
                       'LONG',
                       perpPerpPlan.positionSize.toBaseAsset(),
@@ -2547,11 +2551,11 @@ export class OrderExecutor implements IOrderExecutor {
                 if (shortFilled) {
                   const closeResult =
                     await this.positionManager.closeFilledPosition(
-                      shortAdapter,
+                      shortAdapter!,
                       opportunity.symbol,
                       'SHORT',
                       perpPerpPlan.positionSize.toBaseAsset(),
-                      opportunity.shortExchange,
+                      opportunity.shortExchange!,
                       result,
                     );
                   if (closeResult.isFailure) {
@@ -2638,7 +2642,7 @@ export class OrderExecutor implements IOrderExecutor {
       // Release all symbol locks acquired in this batch
       if (this.executionLockService) {
         for (const [symbol, threadId] of lockedSymbols.entries()) {
-          this.executionLockService.releaseSymbolLock(symbol, threadId);
+          this.executionLockService!.releaseSymbolLock(symbol, threadId);
         }
       }
     }

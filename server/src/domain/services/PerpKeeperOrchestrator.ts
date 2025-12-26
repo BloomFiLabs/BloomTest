@@ -25,6 +25,7 @@ import {
   ArbitrageExecutionResult,
 } from './FundingArbitrageStrategy';
 import { MarketStateService } from '../../infrastructure/services/MarketStateService';
+import { UnifiedStateService } from './execution/UnifiedStateService';
 
 /**
  * Strategy execution result
@@ -67,6 +68,7 @@ export class PerpKeeperOrchestrator {
     private readonly aggregator: FundingRateAggregator,
     private readonly arbitrageStrategy: FundingArbitrageStrategy,
     private readonly marketStateService?: MarketStateService,
+    private readonly unifiedStateService?: UnifiedStateService,
   ) {}
 
   /**
@@ -313,8 +315,21 @@ export class PerpKeeperOrchestrator {
     const positionsByExchange = new Map<ExchangeType, PerpPosition[]>();
 
     // Step 1: Get positions from all exchanges
-    // Use MarketStateService if available to reduce API calls
-    if (this.marketStateService) {
+    // Prefer UnifiedStateService (WebSocket-backed) > MarketStateService > Direct adapter calls
+    if (this.unifiedStateService) {
+      // UnifiedStateService uses WebSocket cache - fastest and most accurate
+      const cachedPositions = this.unifiedStateService.getAllPositions();
+      for (const pos of cachedPositions) {
+        // Filter out positions with very small sizes (likely rounding errors or stale data)
+        if (Math.abs(pos.size) > 0.0001) {
+          allPositions.push(pos);
+          if (!positionsByExchange.has(pos.exchangeType)) {
+            positionsByExchange.set(pos.exchangeType, []);
+          }
+          positionsByExchange.get(pos.exchangeType)!.push(pos);
+        }
+      }
+    } else if (this.marketStateService) {
       const cachedPositions = this.marketStateService.getAllPositions();
       for (const pos of cachedPositions) {
         // Filter out positions with very small sizes (likely rounding errors or stale data)
@@ -327,20 +342,20 @@ export class PerpKeeperOrchestrator {
         }
       }
     } else {
-      // Fallback to fetching directly if MarketStateService not available
-    for (const [exchangeType, adapter] of this.exchangeAdapters) {
-      try {
-        const positions = await adapter.getPositions();
+      // Fallback to fetching directly if no state service available
+      for (const [exchangeType, adapter] of this.exchangeAdapters) {
+        try {
+          const positions = await adapter.getPositions();
           // Filter out positions with very small sizes
-        const validPositions = positions.filter(
-          (p) => Math.abs(p.size) > 0.0001,
-        );
-        allPositions.push(...validPositions);
-        positionsByExchange.set(exchangeType, validPositions);
-      } catch (error) {
-        this.logger.error(
-          `Failed to get positions from ${exchangeType}: ${error.message}`,
-        );
+          const validPositions = positions.filter(
+            (p) => Math.abs(p.size) > 0.0001,
+          );
+          allPositions.push(...validPositions);
+          positionsByExchange.set(exchangeType, validPositions);
+        } catch (error) {
+          this.logger.error(
+            `Failed to get positions from ${exchangeType}: ${error.message}`,
+          );
         }
       }
     }
