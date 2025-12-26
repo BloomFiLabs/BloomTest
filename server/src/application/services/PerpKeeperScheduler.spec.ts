@@ -7,17 +7,48 @@ import { PerpKeeperService } from './PerpKeeperService';
 import { ArbitrageOpportunity } from '../../domain/services/FundingRateAggregator';
 import { ExchangeType } from '../../domain/value-objects/ExchangeConfig';
 import { Percentage } from '../../domain/value-objects/Percentage';
+import { OrderGuardianService } from '../../domain/services/execution/OrderGuardianService';
+import { ReconciliationService } from '../../domain/services/execution/ReconciliationService';
+import { ProfitTakingService } from '../../domain/services/execution/ProfitTakingService';
+import { UnifiedStateService } from '../../domain/services/execution/UnifiedStateService';
+import { LiquidationMonitorService } from '../../domain/services/LiquidationMonitorService';
+import { WithdrawalFulfiller } from '../../infrastructure/adapters/blockchain/WithdrawalFulfiller';
+import { NAVReporter } from '../../infrastructure/adapters/blockchain/NAVReporter';
+import { StrategyConfig } from '../../domain/value-objects/StrategyConfig';
+import { DiagnosticsService } from '../../infrastructure/services/DiagnosticsService';
+import { ExecutionLockService } from '../../infrastructure/services/ExecutionLockService';
+import { MarketQualityFilter } from '../../domain/services/MarketQualityFilter';
+import { OpportunityEvaluator } from '../../domain/services/strategy-rules/OpportunityEvaluator';
+import { ExecutionPlanBuilder } from '../../domain/services/strategy-rules/ExecutionPlanBuilder';
+import { RateLimiterService } from '../../infrastructure/services/RateLimiterService';
+
+// Mock WithdrawalFulfiller and NAVReporter to avoid ESM issues with Hyperliquid SDK
+jest.mock('../../infrastructure/adapters/blockchain/WithdrawalFulfiller', () => ({
+  WithdrawalFulfiller: jest.fn().mockImplementation(() => ({
+    processPendingWithdrawals: jest.fn(),
+  })),
+}));
+
+jest.mock('../../infrastructure/adapters/blockchain/NAVReporter', () => ({
+  NAVReporter: jest.fn().mockImplementation(() => ({
+    isNAVStale: jest.fn().mockReturnValue(false),
+    forceReportNAV: jest.fn(),
+  })),
+}));
 
 // Mock PerpKeeperService to avoid complex dependencies
 jest.mock('./PerpKeeperService', () => {
   return {
     PerpKeeperService: jest.fn().mockImplementation(() => ({
       getExchangeAdapters: jest.fn().mockReturnValue(new Map()),
+      getSpotAdapters: jest.fn().mockReturnValue(new Map()),
       rebalanceExchangeBalances: jest.fn().mockResolvedValue({
         transfersExecuted: 0,
         totalTransferred: 0,
         errors: [],
       }),
+      getBalance: jest.fn().mockResolvedValue(10000),
+      getAllPositions: jest.fn().mockResolvedValue([]),
     })),
   };
 });
@@ -28,6 +59,19 @@ describe('PerpKeeperScheduler - Blacklist Filtering', () => {
   let mockConfigService: jest.Mocked<ConfigService>;
   let mockPerformanceLogger: jest.Mocked<PerpKeeperPerformanceLogger>;
   let mockKeeperService: jest.Mocked<PerpKeeperService>;
+  let mockOrderGuardian: jest.Mocked<OrderGuardianService>;
+  let mockReconciliation: jest.Mocked<ReconciliationService>;
+  let mockProfitTaking: jest.Mocked<ProfitTakingService>;
+  let mockUnifiedState: jest.Mocked<UnifiedStateService>;
+  let mockLiquidationMonitor: jest.Mocked<LiquidationMonitorService>;
+  let mockWithdrawalFulfiller: jest.Mocked<WithdrawalFulfiller>;
+  let mockNAVReporter: jest.Mocked<NAVReporter>;
+  let mockDiagnostics: jest.Mocked<DiagnosticsService>;
+  let mockExecutionLock: jest.Mocked<ExecutionLockService>;
+  let mockMarketQuality: jest.Mocked<MarketQualityFilter>;
+  let mockOpportunityEvaluator: jest.Mocked<OpportunityEvaluator>;
+  let mockExecutionPlanBuilder: jest.Mocked<ExecutionPlanBuilder>;
+  let mockRateLimiter: jest.Mocked<RateLimiterService>;
 
   beforeEach(async () => {
     mockOrchestrator = {
@@ -52,15 +96,78 @@ describe('PerpKeeperScheduler - Blacklist Filtering', () => {
 
     mockPerformanceLogger = {
       recordArbitrageOpportunity: jest.fn(),
+      updatePositionMetrics: jest.fn(),
     } as any;
 
     mockKeeperService = {
       getExchangeAdapters: jest.fn().mockReturnValue(new Map()),
+      getSpotAdapters: jest.fn().mockReturnValue(new Map()),
       rebalanceExchangeBalances: jest.fn().mockResolvedValue({
         transfersExecuted: 0,
         totalTransferred: 0,
         errors: [],
       }),
+      getBalance: jest.fn().mockResolvedValue(10000),
+      getAllPositions: jest.fn().mockResolvedValue([]),
+    } as any;
+
+    mockOrderGuardian = {
+      protect: jest.fn(),
+    } as any;
+
+    mockReconciliation = {
+      reconcile: jest.fn(),
+    } as any;
+
+    mockProfitTaking = {
+      isInProfitTakeCooldown: jest.fn().mockReturnValue(false),
+    } as any;
+
+    mockUnifiedState = {
+      refresh: jest.fn(),
+    } as any;
+
+    mockLiquidationMonitor = {
+      checkLiquidationRisk: jest.fn(),
+      initialize: jest.fn(),
+      updateConfig: jest.fn(),
+    } as any;
+
+    mockWithdrawalFulfiller = {
+      processPendingWithdrawals: jest.fn(),
+    } as any;
+
+    mockNAVReporter = {
+      isNAVStale: jest.fn().mockReturnValue(false),
+      forceReportNAV: jest.fn(),
+    } as any;
+
+    mockDiagnostics = {
+      recordThreadStatus: jest.fn(),
+      recordHeartbeat: jest.fn(),
+    } as any;
+
+    mockExecutionLock = {
+      isGlobalLockHeld: jest.fn().mockReturnValue(false),
+      generateThreadId: jest.fn().mockReturnValue('test-thread'),
+      tryAcquireGlobalLock: jest.fn().mockReturnValue(true),
+      releaseGlobalLock: jest.fn(),
+    } as any;
+
+    mockMarketQuality = {
+      isBlacklisted: jest.fn().mockReturnValue(false),
+    } as any;
+
+    mockOpportunityEvaluator = {
+      enrichOpportunityWithPredictions: jest.fn().mockImplementation((opp) => Promise.resolve(opp)),
+    } as any;
+
+    mockExecutionPlanBuilder = {
+      buildExecutionPlan: jest.fn(),
+    } as any;
+
+    mockRateLimiter = {
+      getUsageMetrics: jest.fn().mockReturnValue(new Map()),
     } as any;
 
     const module: TestingModule = await Test.createTestingModule({
@@ -73,6 +180,20 @@ describe('PerpKeeperScheduler - Blacklist Filtering', () => {
           useValue: mockPerformanceLogger,
         },
         { provide: PerpKeeperService, useValue: mockKeeperService },
+        { provide: StrategyConfig, useValue: StrategyConfig.withDefaults() },
+        { provide: OrderGuardianService, useValue: mockOrderGuardian },
+        { provide: ReconciliationService, useValue: mockReconciliation },
+        { provide: ProfitTakingService, useValue: mockProfitTaking },
+        { provide: UnifiedStateService, useValue: mockUnifiedState },
+        { provide: DiagnosticsService, useValue: mockDiagnostics },
+        { provide: WithdrawalFulfiller, useValue: mockWithdrawalFulfiller },
+        { provide: NAVReporter, useValue: mockNAVReporter },
+        { provide: ExecutionLockService, useValue: mockExecutionLock },
+        { provide: MarketQualityFilter, useValue: mockMarketQuality },
+        { provide: LiquidationMonitorService, useValue: mockLiquidationMonitor },
+        { provide: OpportunityEvaluator, useValue: mockOpportunityEvaluator },
+        { provide: ExecutionPlanBuilder, useValue: mockExecutionPlanBuilder },
+        { provide: RateLimiterService, useValue: mockRateLimiter },
       ],
     }).compile();
 
@@ -98,6 +219,20 @@ describe('PerpKeeperScheduler - Blacklist Filtering', () => {
             useValue: mockPerformanceLogger,
           },
           { provide: PerpKeeperService, useValue: mockKeeperService },
+          { provide: StrategyConfig, useValue: StrategyConfig.withDefaults() },
+          { provide: OrderGuardianService, useValue: mockOrderGuardian },
+          { provide: ReconciliationService, useValue: mockReconciliation },
+          { provide: ProfitTakingService, useValue: mockProfitTaking },
+          { provide: UnifiedStateService, useValue: mockUnifiedState },
+          { provide: DiagnosticsService, useValue: mockDiagnostics },
+          { provide: WithdrawalFulfiller, useValue: mockWithdrawalFulfiller },
+          { provide: NAVReporter, useValue: mockNAVReporter },
+          { provide: ExecutionLockService, useValue: mockExecutionLock },
+          { provide: MarketQualityFilter, useValue: mockMarketQuality },
+          { provide: LiquidationMonitorService, useValue: mockLiquidationMonitor },
+          { provide: OpportunityEvaluator, useValue: mockOpportunityEvaluator },
+          { provide: ExecutionPlanBuilder, useValue: mockExecutionPlanBuilder },
+          { provide: RateLimiterService, useValue: mockRateLimiter },
         ],
       }).compile();
 
@@ -127,6 +262,20 @@ describe('PerpKeeperScheduler - Blacklist Filtering', () => {
             useValue: mockPerformanceLogger,
           },
           { provide: PerpKeeperService, useValue: mockKeeperService },
+          { provide: StrategyConfig, useValue: StrategyConfig.withDefaults() },
+          { provide: OrderGuardianService, useValue: mockOrderGuardian },
+          { provide: ReconciliationService, useValue: mockReconciliation },
+          { provide: ProfitTakingService, useValue: mockProfitTaking },
+          { provide: UnifiedStateService, useValue: mockUnifiedState },
+          { provide: DiagnosticsService, useValue: mockDiagnostics },
+          { provide: WithdrawalFulfiller, useValue: mockWithdrawalFulfiller },
+          { provide: NAVReporter, useValue: mockNAVReporter },
+          { provide: ExecutionLockService, useValue: mockExecutionLock },
+          { provide: MarketQualityFilter, useValue: mockMarketQuality },
+          { provide: LiquidationMonitorService, useValue: mockLiquidationMonitor },
+          { provide: OpportunityEvaluator, useValue: mockOpportunityEvaluator },
+          { provide: ExecutionPlanBuilder, useValue: mockExecutionPlanBuilder },
+          { provide: RateLimiterService, useValue: mockRateLimiter },
         ],
       }).compile();
 
@@ -155,6 +304,20 @@ describe('PerpKeeperScheduler - Blacklist Filtering', () => {
             useValue: mockPerformanceLogger,
           },
           { provide: PerpKeeperService, useValue: mockKeeperService },
+          { provide: StrategyConfig, useValue: StrategyConfig.withDefaults() },
+          { provide: OrderGuardianService, useValue: mockOrderGuardian },
+          { provide: ReconciliationService, useValue: mockReconciliation },
+          { provide: ProfitTakingService, useValue: mockProfitTaking },
+          { provide: UnifiedStateService, useValue: mockUnifiedState },
+          { provide: DiagnosticsService, useValue: mockDiagnostics },
+          { provide: WithdrawalFulfiller, useValue: mockWithdrawalFulfiller },
+          { provide: NAVReporter, useValue: mockNAVReporter },
+          { provide: ExecutionLockService, useValue: mockExecutionLock },
+          { provide: MarketQualityFilter, useValue: mockMarketQuality },
+          { provide: LiquidationMonitorService, useValue: mockLiquidationMonitor },
+          { provide: OpportunityEvaluator, useValue: mockOpportunityEvaluator },
+          { provide: ExecutionPlanBuilder, useValue: mockExecutionPlanBuilder },
+          { provide: RateLimiterService, useValue: mockRateLimiter },
         ],
       }).compile();
 
@@ -195,6 +358,20 @@ describe('PerpKeeperScheduler - Blacklist Filtering', () => {
             useValue: mockPerformanceLogger,
           },
           { provide: PerpKeeperService, useValue: mockKeeperService },
+          { provide: StrategyConfig, useValue: StrategyConfig.withDefaults() },
+          { provide: OrderGuardianService, useValue: mockOrderGuardian },
+          { provide: ReconciliationService, useValue: mockReconciliation },
+          { provide: ProfitTakingService, useValue: mockProfitTaking },
+          { provide: UnifiedStateService, useValue: mockUnifiedState },
+          { provide: DiagnosticsService, useValue: mockDiagnostics },
+          { provide: WithdrawalFulfiller, useValue: mockWithdrawalFulfiller },
+          { provide: NAVReporter, useValue: mockNAVReporter },
+          { provide: ExecutionLockService, useValue: mockExecutionLock },
+          { provide: MarketQualityFilter, useValue: mockMarketQuality },
+          { provide: LiquidationMonitorService, useValue: mockLiquidationMonitor },
+          { provide: OpportunityEvaluator, useValue: mockOpportunityEvaluator },
+          { provide: ExecutionPlanBuilder, useValue: mockExecutionPlanBuilder },
+          { provide: RateLimiterService, useValue: mockRateLimiter },
         ],
       }).compile();
 
@@ -229,6 +406,20 @@ describe('PerpKeeperScheduler - Blacklist Filtering', () => {
             useValue: mockPerformanceLogger,
           },
           { provide: PerpKeeperService, useValue: mockKeeperService },
+          { provide: StrategyConfig, useValue: StrategyConfig.withDefaults() },
+          { provide: OrderGuardianService, useValue: mockOrderGuardian },
+          { provide: ReconciliationService, useValue: mockReconciliation },
+          { provide: ProfitTakingService, useValue: mockProfitTaking },
+          { provide: UnifiedStateService, useValue: mockUnifiedState },
+          { provide: DiagnosticsService, useValue: mockDiagnostics },
+          { provide: WithdrawalFulfiller, useValue: mockWithdrawalFulfiller },
+          { provide: NAVReporter, useValue: mockNAVReporter },
+          { provide: ExecutionLockService, useValue: mockExecutionLock },
+          { provide: MarketQualityFilter, useValue: mockMarketQuality },
+          { provide: LiquidationMonitorService, useValue: mockLiquidationMonitor },
+          { provide: OpportunityEvaluator, useValue: mockOpportunityEvaluator },
+          { provide: ExecutionPlanBuilder, useValue: mockExecutionPlanBuilder },
+          { provide: RateLimiterService, useValue: mockRateLimiter },
         ],
       }).compile();
 
@@ -303,6 +494,20 @@ describe('PerpKeeperScheduler - Blacklist Filtering', () => {
             useValue: mockPerformanceLogger,
           },
           { provide: PerpKeeperService, useValue: mockKeeperService },
+          { provide: StrategyConfig, useValue: StrategyConfig.withDefaults() },
+          { provide: OrderGuardianService, useValue: mockOrderGuardian },
+          { provide: ReconciliationService, useValue: mockReconciliation },
+          { provide: ProfitTakingService, useValue: mockProfitTaking },
+          { provide: UnifiedStateService, useValue: mockUnifiedState },
+          { provide: DiagnosticsService, useValue: mockDiagnostics },
+          { provide: WithdrawalFulfiller, useValue: mockWithdrawalFulfiller },
+          { provide: NAVReporter, useValue: mockNAVReporter },
+          { provide: ExecutionLockService, useValue: mockExecutionLock },
+          { provide: MarketQualityFilter, useValue: mockMarketQuality },
+          { provide: LiquidationMonitorService, useValue: mockLiquidationMonitor },
+          { provide: OpportunityEvaluator, useValue: mockOpportunityEvaluator },
+          { provide: ExecutionPlanBuilder, useValue: mockExecutionPlanBuilder },
+          { provide: RateLimiterService, useValue: mockRateLimiter },
         ],
       }).compile();
 
@@ -375,6 +580,20 @@ describe('PerpKeeperScheduler - Blacklist Filtering', () => {
             useValue: mockPerformanceLogger,
           },
           { provide: PerpKeeperService, useValue: mockKeeperService },
+          { provide: StrategyConfig, useValue: StrategyConfig.withDefaults() },
+          { provide: OrderGuardianService, useValue: mockOrderGuardian },
+          { provide: ReconciliationService, useValue: mockReconciliation },
+          { provide: ProfitTakingService, useValue: mockProfitTaking },
+          { provide: UnifiedStateService, useValue: mockUnifiedState },
+          { provide: DiagnosticsService, useValue: mockDiagnostics },
+          { provide: WithdrawalFulfiller, useValue: mockWithdrawalFulfiller },
+          { provide: NAVReporter, useValue: mockNAVReporter },
+          { provide: ExecutionLockService, useValue: mockExecutionLock },
+          { provide: MarketQualityFilter, useValue: mockMarketQuality },
+          { provide: LiquidationMonitorService, useValue: mockLiquidationMonitor },
+          { provide: OpportunityEvaluator, useValue: mockOpportunityEvaluator },
+          { provide: ExecutionPlanBuilder, useValue: mockExecutionPlanBuilder },
+          { provide: RateLimiterService, useValue: mockRateLimiter },
         ],
       }).compile();
 
@@ -415,6 +634,20 @@ describe('PerpKeeperScheduler - Blacklist Filtering', () => {
             useValue: mockPerformanceLogger,
           },
           { provide: PerpKeeperService, useValue: mockKeeperService },
+          { provide: StrategyConfig, useValue: StrategyConfig.withDefaults() },
+          { provide: OrderGuardianService, useValue: mockOrderGuardian },
+          { provide: ReconciliationService, useValue: mockReconciliation },
+          { provide: ProfitTakingService, useValue: mockProfitTaking },
+          { provide: UnifiedStateService, useValue: mockUnifiedState },
+          { provide: DiagnosticsService, useValue: mockDiagnostics },
+          { provide: WithdrawalFulfiller, useValue: mockWithdrawalFulfiller },
+          { provide: NAVReporter, useValue: mockNAVReporter },
+          { provide: ExecutionLockService, useValue: mockExecutionLock },
+          { provide: MarketQualityFilter, useValue: mockMarketQuality },
+          { provide: LiquidationMonitorService, useValue: mockLiquidationMonitor },
+          { provide: OpportunityEvaluator, useValue: mockOpportunityEvaluator },
+          { provide: ExecutionPlanBuilder, useValue: mockExecutionPlanBuilder },
+          { provide: RateLimiterService, useValue: mockRateLimiter },
         ],
       }).compile();
 
@@ -440,6 +673,20 @@ describe('PerpKeeperScheduler - Blacklist Filtering', () => {
             useValue: mockPerformanceLogger,
           },
           { provide: PerpKeeperService, useValue: mockKeeperService },
+          { provide: StrategyConfig, useValue: StrategyConfig.withDefaults() },
+          { provide: OrderGuardianService, useValue: mockOrderGuardian },
+          { provide: ReconciliationService, useValue: mockReconciliation },
+          { provide: ProfitTakingService, useValue: mockProfitTaking },
+          { provide: UnifiedStateService, useValue: mockUnifiedState },
+          { provide: DiagnosticsService, useValue: mockDiagnostics },
+          { provide: WithdrawalFulfiller, useValue: mockWithdrawalFulfiller },
+          { provide: NAVReporter, useValue: mockNAVReporter },
+          { provide: ExecutionLockService, useValue: mockExecutionLock },
+          { provide: MarketQualityFilter, useValue: mockMarketQuality },
+          { provide: LiquidationMonitorService, useValue: mockLiquidationMonitor },
+          { provide: OpportunityEvaluator, useValue: mockOpportunityEvaluator },
+          { provide: ExecutionPlanBuilder, useValue: mockExecutionPlanBuilder },
+          { provide: RateLimiterService, useValue: mockRateLimiter },
         ],
       }).compile();
 

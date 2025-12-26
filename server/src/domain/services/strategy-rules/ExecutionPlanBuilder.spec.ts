@@ -19,6 +19,7 @@ describe('ExecutionPlanBuilder', () => {
   let builder: ExecutionPlanBuilder;
   let mockCostCalculator: jest.Mocked<CostCalculator>;
   let mockAggregator: jest.Mocked<FundingRateAggregator>;
+  let mockHistoricalService: any;
   let mockAdapters: Map<ExchangeType, jest.Mocked<IPerpExchangeAdapter>>;
   let config: StrategyConfig;
 
@@ -37,6 +38,10 @@ describe('ExecutionPlanBuilder', () => {
         (symbol: string, exchange: ExchangeType) => symbol,
       ),
     } as any;
+
+    mockHistoricalService = {
+      getHistoricalFundingRates: jest.fn().mockResolvedValue([]),
+    };
 
     // Create mock adapters
     mockAdapters = new Map();
@@ -64,6 +69,10 @@ describe('ExecutionPlanBuilder', () => {
         ExecutionPlanBuilder,
         { provide: CostCalculator, useValue: mockCostCalculator },
         { provide: FundingRateAggregator, useValue: mockAggregator },
+        {
+          provide: 'IHistoricalFundingRateService',
+          useValue: mockHistoricalService,
+        },
         { provide: StrategyConfig, useValue: config },
       ],
     }).compile();

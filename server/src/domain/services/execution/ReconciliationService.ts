@@ -1,10 +1,12 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
 import { PerpPosition } from '../../entities/PerpPosition';
+import { OrderSide, OrderType, TimeInForce, PerpOrderRequest, OrderStatus } from '../../value-objects/PerpOrder';
 import { DiagnosticsService } from '../../../infrastructure/services/DiagnosticsService';
-import { ExecutionLockService, ActiveOrder } from '../../../infrastructure/services/ExecutionLockService';
+import { ExecutionLockService } from '../../../infrastructure/services/ExecutionLockService';
+import { PerpKeeperService } from '../../../application/services/PerpKeeperService';
 
 /**
  * PositionExpectation - What we expect a position to be
@@ -48,446 +50,208 @@ export interface HedgePairStatus {
   imbalancePercent: number;
   isBalanced: boolean;
   lastReconciled: Date;
+  firstImbalanceAt?: Date;
+  imbalanceCount: number;
 }
 
 /**
- * ReconciliationService - Continuously verifies positions match expectations
- * 
- * This service:
- * 1. Tracks expected positions from order placement
- * 2. Polls exchanges for actual positions
- * 3. Detects discrepancies (partial fills, no fills, orphans)
- * 4. Triggers corrective actions
- * 5. Maintains hedge pair balance tracking
+ * ReconciliationService - The "intelligent being" for position health and reconciliation
  */
 @Injectable()
 export class ReconciliationService implements OnModuleInit {
   private readonly logger = new Logger(ReconciliationService.name);
 
-  // Expected positions from orders we've placed
   private readonly expectations: Map<string, PositionExpectation> = new Map();
-  
-  // Actual positions from exchanges (cache)
   private readonly actualPositions: Map<string, PerpPosition> = new Map();
-  
-  // Hedge pair tracking
   private readonly hedgePairs: Map<string, HedgePairStatus> = new Map();
-  
-  // Exchange adapters
   private adapters: Map<ExchangeType, IPerpExchangeAdapter> = new Map();
   
-  // Recent reconciliation results for diagnostics
-  private readonly recentResults: ReconciliationResult[] = [];
   private readonly MAX_RECENT_RESULTS = 50;
+  private readonly recentResults: ReconciliationResult[] = [];
 
   // Configuration
-  private readonly RECONCILIATION_INTERVAL_MS = 5000; // 5 seconds
-  private readonly STALE_EXPECTATION_MS = 5 * 60 * 1000; // 5 minutes
-  private readonly IMBALANCE_THRESHOLD_PERCENT = 5; // 5% imbalance triggers alert
+  private readonly IMBALANCE_THRESHOLD_PERCENT = 5;
+  private readonly NUCLEAR_THRESHOLD_PERCENT = 20;
+  private readonly NUCLEAR_TIMEOUT_MINUTES = 3;
+  private readonly MAX_RECOVERY_ATTEMPTS = 3;
 
   constructor(
-    private readonly diagnosticsService?: DiagnosticsService,
-    private readonly executionLockService?: ExecutionLockService,
+    @Optional() private readonly diagnosticsService?: DiagnosticsService,
+    @Optional() private readonly executionLockService?: ExecutionLockService,
+    @Optional() private readonly keeperService?: PerpKeeperService,
   ) {}
 
   onModuleInit() {
-    this.logger.log('ReconciliationService initialized');
+    this.logger.log('⚖️ ReconciliationService initialized - Position monitoring active');
   }
 
-  /**
-   * Register exchange adapters
-   */
   setAdapters(adapters: Map<ExchangeType, IPerpExchangeAdapter>): void {
     this.adapters = adapters;
-    this.logger.log(`Registered ${adapters.size} exchange adapters for reconciliation`);
   }
 
   /**
-   * Register an expected position from an order placement
+   * Main reconciliation loop - runs every 60 seconds (for position checks)
    */
-  registerExpectation(
-    symbol: string,
-    exchange: ExchangeType,
-    side: 'LONG' | 'SHORT',
-    expectedSize: number,
-    orderId?: string,
-  ): void {
-    const key = `${exchange}-${symbol}-${side}`;
-    
-    this.expectations.set(key, {
-      symbol,
-      exchange,
-      side,
-      expectedSize,
-      orderId,
-      placedAt: new Date(),
-      verified: false,
-    });
-
-    this.logger.debug(
-      `📋 Registered expectation: ${exchange} ${symbol} ${side} ${expectedSize.toFixed(4)}`
-    );
-  }
-
-  /**
-   * Clear an expectation (order cancelled or position closed)
-   */
-  clearExpectation(
-    symbol: string,
-    exchange: ExchangeType,
-    side: 'LONG' | 'SHORT',
-  ): void {
-    const key = `${exchange}-${symbol}-${side}`;
-    this.expectations.delete(key);
-    this.logger.debug(`🗑️ Cleared expectation: ${exchange} ${symbol} ${side}`);
-  }
-
-  /**
-   * Mark an expectation as verified (position confirmed)
-   */
-  markVerified(
-    symbol: string,
-    exchange: ExchangeType,
-    side: 'LONG' | 'SHORT',
-    actualSize: number,
-  ): void {
-    const key = `${exchange}-${symbol}-${side}`;
-    const expectation = this.expectations.get(key);
-    
-    if (expectation) {
-      expectation.verified = true;
-      expectation.lastChecked = new Date();
-      // Update expected size to actual (in case of partial fill)
-      expectation.expectedSize = actualSize;
-    }
-  }
-
-  /**
-   * Register a hedge pair for tracking
-   */
-  registerHedgePair(
-    symbol: string,
-    longExchange: ExchangeType,
-    shortExchange: ExchangeType,
-    expectedSize: number,
-  ): void {
-    this.hedgePairs.set(symbol, {
-      symbol,
-      longExchange,
-      shortExchange,
-      longSize: expectedSize,
-      shortSize: expectedSize,
-      imbalance: 0,
-      imbalancePercent: 0,
-      isBalanced: true,
-      lastReconciled: new Date(),
-    });
-
-    this.logger.debug(
-      `📊 Registered hedge pair: ${symbol} (LONG@${longExchange}, SHORT@${shortExchange})`
-    );
-  }
-
-  /**
-   * Main reconciliation loop - runs every 5 seconds
-   */
-  @Interval(5000)
+  @Interval(60000)
   async reconcile(): Promise<void> {
-    if (this.adapters.size === 0) {
-      return; // No adapters registered yet
+    if (this.adapters.size === 0 && this.keeperService) {
+      this.adapters = this.keeperService.getExchangeAdapters();
     }
+    if (this.adapters.size === 0) return;
 
     try {
-      // 1. Fetch actual positions from all exchanges
       await this.fetchActualPositions();
-
-      // 2. Check each expectation against actual
       await this.checkExpectations();
-
-      // 3. Check hedge pair balances
-      await this.checkHedgePairBalances();
-
-      // 4. Clean up stale expectations
+      await this.checkHedgePairHealth();
       this.cleanupStaleExpectations();
-
     } catch (error: any) {
       this.logger.error(`Reconciliation error: ${error.message}`);
     }
   }
 
-  /**
-   * Fetch actual positions from all exchanges
-   */
-  private async fetchActualPositions(): Promise<void> {
-    const fetchPromises: Promise<void>[] = [];
-
-    for (const [exchange, adapter] of this.adapters) {
-      fetchPromises.push(
-        adapter.getPositions()
-          .then(positions => {
-            for (const pos of positions) {
-              if (Math.abs(pos.size) > 0.0001) {
-                const key = `${exchange}-${pos.symbol}-${pos.side}`;
-                this.actualPositions.set(key, pos);
-              }
-            }
-          })
-          .catch(error => {
-            this.logger.warn(`Failed to fetch positions from ${exchange}: ${error.message}`);
-          })
-      );
-    }
-
-    await Promise.all(fetchPromises);
+  private async fetchActualPositions() {
+    this.actualPositions.clear();
+    const promises = Array.from(this.adapters.entries()).map(async ([exchange, adapter]) => {
+      try {
+        const positions = await adapter.getPositions();
+        for (const pos of positions) {
+          if (Math.abs(pos.size) > 0.0001) {
+            this.actualPositions.set(`${exchange}-${pos.symbol}-${pos.side}`, pos);
+          }
+        }
+      } catch (e) {
+        this.logger.warn(`Failed fetch positions from ${exchange}`);
+      }
+    });
+    await Promise.all(promises);
   }
 
-  /**
-   * Check expectations against actual positions
-   */
-  private async checkExpectations(): Promise<void> {
+  private async checkExpectations() {
     for (const [key, expectation] of this.expectations) {
       const actual = this.actualPositions.get(key);
       const actualSize = actual ? Math.abs(actual.size) : 0;
-      const discrepancy = actualSize - expectation.expectedSize;
-      const discrepancyPercent = expectation.expectedSize > 0 
-        ? (discrepancy / expectation.expectedSize) * 100 
-        : (actualSize > 0 ? 100 : 0);
-
-      let status: ReconciliationResult['status'];
-      let action: ReconciliationResult['action'] = 'NONE';
-      let message: string | undefined;
-
-      if (Math.abs(discrepancyPercent) < 2) {
-        status = 'MATCHED';
+      
+      if (Math.abs(actualSize - expectation.expectedSize) < 0.0001) {
         expectation.verified = true;
-      } else if (actualSize === 0) {
-        status = 'NO_FILL';
-        const age = Date.now() - expectation.placedAt.getTime();
-        if (age > 60000) { // > 1 minute
-          action = 'CANCEL_ORDER';
-          message = `Order ${expectation.orderId} not filled after ${Math.round(age / 1000)}s`;
-        }
-      } else if (actualSize < expectation.expectedSize * 0.95) {
-        status = 'PARTIAL_FILL';
-        message = `Only ${((actualSize / expectation.expectedSize) * 100).toFixed(0)}% filled`;
-      } else if (actualSize > expectation.expectedSize * 1.05) {
-        status = 'OVERFILL';
-        action = 'ALERT';
-        message = `Position larger than expected by ${discrepancyPercent.toFixed(1)}%`;
+      }
+    }
+  }
+
+  /**
+   * Unified hedge pair health check
+   * Coalesces balance checking, drift recording, and nuclear recovery
+   */
+  private async checkHedgePairHealth() {
+    const symbols = new Set<string>();
+    for (const pos of this.actualPositions.values()) {
+      symbols.add(this.normalizeSymbol(pos.symbol));
+    }
+
+    for (const symbol of symbols) {
+      await this.reconcileSymbolPositions(symbol);
+    }
+  }
+
+  private async reconcileSymbolPositions(symbol: string) {
+    const symbolPositions = Array.from(this.actualPositions.values()).filter(
+      p => this.normalizeSymbol(p.symbol) === symbol
+    );
+
+    const longPos = symbolPositions.find(p => p.side === OrderSide.LONG);
+    const shortPos = symbolPositions.find(p => p.side === OrderSide.SHORT);
+
+    if (!longPos || !shortPos) {
+      // Handle Single-Leg Position (The most dangerous state)
+      if (longPos || shortPos) {
+        await this.handleSingleLeg(symbol, longPos || shortPos!);
+      }
+      return;
+    }
+
+    // Both legs exist - check balance
+    const longSize = Math.abs(longPos.size);
+    const shortSize = Math.abs(shortPos.size);
+    const imbalance = Math.abs(longSize - shortSize);
+    const avgSize = (longSize + shortSize) / 2;
+    const imbalancePercent = (imbalance / avgSize) * 100;
+
+    if (imbalancePercent > this.IMBALANCE_THRESHOLD_PERCENT) {
+      await this.handleImbalance(symbol, longPos, shortPos, imbalancePercent);
+    } else {
+      this.hedgePairs.delete(symbol); // Balanced
+    }
+  }
+
+  private async handleSingleLeg(symbol: string, pos: PerpPosition) {
+    this.logger.error(`🚨 SINGLE LEG DETECTED: ${symbol} ${pos.side} on ${pos.exchangeType}`);
+    
+    let status = this.hedgePairs.get(symbol);
+    if (!status) {
+      status = { symbol, longExchange: pos.exchangeType, shortExchange: pos.exchangeType, longSize: 0, shortSize: 0, imbalance: 100, imbalancePercent: 100, isBalanced: false, lastReconciled: new Date(), firstImbalanceAt: new Date(), imbalanceCount: 1 };
+      this.hedgePairs.set(symbol, status);
+      return;
+    }
+
+    status.imbalanceCount++;
+    const durationMin = (Date.now() - status.firstImbalanceAt!.getTime()) / 60000;
+
+    if (durationMin >= this.NUCLEAR_TIMEOUT_MINUTES) {
+      this.logger.error(`☢️ NUCLEAR OPTION: Single leg ${symbol} persisted ${durationMin.toFixed(1)}m. Closing...`);
+      await this.executeNuclearClose(pos);
+      this.hedgePairs.delete(symbol);
+    }
+  }
+
+  private async handleImbalance(symbol: string, long: PerpPosition, short: PerpPosition, percent: number) {
+    this.logger.warn(`⚠️ Imbalance for ${symbol}: ${percent.toFixed(1)}%`);
+    
+    if (this.diagnosticsService) {
+      this.diagnosticsService.recordPositionDrift(symbol, long.exchangeType, short.exchangeType, Math.abs(long.size), Math.abs(short.size), long.markPrice || 0);
+    }
+
+    if (percent > this.NUCLEAR_THRESHOLD_PERCENT) {
+      let status = this.hedgePairs.get(symbol);
+      if (!status) {
+        status = { symbol, longExchange: long.exchangeType, shortExchange: short.exchangeType, longSize: Math.abs(long.size), shortSize: Math.abs(short.size), imbalance: Math.abs(long.size - short.size), imbalancePercent: percent, isBalanced: false, lastReconciled: new Date(), firstImbalanceAt: new Date(), imbalanceCount: 1 };
+        this.hedgePairs.set(symbol, status);
       } else {
-        status = 'MATCHED';
-        expectation.verified = true;
-      }
-
-      const result: ReconciliationResult = {
-        symbol: expectation.symbol,
-        exchange: expectation.exchange,
-        status,
-        expectedSize: expectation.expectedSize,
-        actualSize,
-        discrepancy,
-        discrepancyPercent,
-        action,
-        message,
-      };
-
-      this.recordResult(result);
-
-      // Take action if needed
-      if (action !== 'NONE') {
-        await this.handleDiscrepancy(result, expectation);
-      }
-
-      expectation.lastChecked = new Date();
-    }
-  }
-
-  /**
-   * Check hedge pair balances
-   */
-  private async checkHedgePairBalances(): Promise<void> {
-    for (const [symbol, pair] of this.hedgePairs) {
-      const longKey = `${pair.longExchange}-${symbol}-LONG`;
-      const shortKey = `${pair.shortExchange}-${symbol}-SHORT`;
-
-      const longPos = this.actualPositions.get(longKey);
-      const shortPos = this.actualPositions.get(shortKey);
-
-      const longSize = longPos ? Math.abs(longPos.size) : 0;
-      const shortSize = shortPos ? Math.abs(shortPos.size) : 0;
-
-      const imbalance = Math.abs(longSize - shortSize);
-      const avgSize = (longSize + shortSize) / 2;
-      const imbalancePercent = avgSize > 0 ? (imbalance / avgSize) * 100 : 0;
-
-      pair.longSize = longSize;
-      pair.shortSize = shortSize;
-      pair.imbalance = imbalance;
-      pair.imbalancePercent = imbalancePercent;
-      pair.isBalanced = imbalancePercent < this.IMBALANCE_THRESHOLD_PERCENT;
-      pair.lastReconciled = new Date();
-
-      if (!pair.isBalanced) {
-        this.logger.warn(
-          `⚠️ Hedge pair ${symbol} IMBALANCED: ` +
-          `LONG=${longSize.toFixed(4)}@${pair.longExchange}, ` +
-          `SHORT=${shortSize.toFixed(4)}@${pair.shortExchange} ` +
-          `(${imbalancePercent.toFixed(1)}% imbalance)`
-        );
-
-        // Record to diagnostics
-        if (this.diagnosticsService) {
-          this.diagnosticsService.recordPositionDrift(
-            symbol,
-            pair.longExchange,
-            pair.shortExchange,
-            longSize,
-            shortSize,
-          );
+        status.imbalanceCount++;
+        const durationMin = (Date.now() - status.firstImbalanceAt!.getTime()) / 60000;
+        if (durationMin >= this.NUCLEAR_TIMEOUT_MINUTES) {
+          this.logger.error(`☢️ NUCLEAR OPTION: Severe imbalance for ${symbol} persisted. Closing BOTH legs.`);
+          await Promise.all([this.executeNuclearClose(long), this.executeNuclearClose(short)]);
+          this.hedgePairs.delete(symbol);
         }
       }
     }
   }
 
-  /**
-   * Handle a discrepancy
-   */
-  private async handleDiscrepancy(
-    result: ReconciliationResult,
-    expectation: PositionExpectation,
-  ): Promise<void> {
-    const adapter = this.adapters.get(result.exchange);
+  private async executeNuclearClose(pos: PerpPosition) {
+    const adapter = this.adapters.get(pos.exchangeType);
     if (!adapter) return;
 
-    switch (result.action) {
-      case 'CANCEL_ORDER':
-        if (expectation.orderId) {
-          try {
-            await adapter.cancelOrder(expectation.orderId, result.symbol);
-            this.logger.log(`🗑️ Cancelled unfilled order ${expectation.orderId} for ${result.symbol}`);
-            this.clearExpectation(result.symbol, result.exchange, expectation.side);
-          } catch (error: any) {
-            this.logger.warn(`Failed to cancel order: ${error.message}`);
-          }
-        }
-        break;
-
-      case 'CLOSE_POSITION':
-        // This would be handled by PerpKeeperScheduler's nuclear option
-        this.logger.warn(
-          `🚨 Position ${result.symbol} on ${result.exchange} needs closing - ` +
-          `delegating to PerpKeeperScheduler`
-        );
-        break;
-
-      case 'ALERT':
-        this.logger.warn(`🚨 ALERT: ${result.message}`);
-        if (this.diagnosticsService) {
-          this.diagnosticsService.recordError({
-            type: 'RECONCILIATION_ALERT',
-            message: result.message || 'Position discrepancy detected',
-            exchange: result.exchange,
-            symbol: result.symbol,
-            timestamp: new Date(),
-            context: { result },
-          });
-        }
-        break;
-    }
+    const closeSide = pos.side === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG;
+    const closeOrder = new PerpOrderRequest(pos.symbol, closeSide, OrderType.MARKET, Math.abs(pos.size), undefined, TimeInForce.IOC, true);
+    
+    this.logger.warn(`☢️ Market closing ${pos.exchangeType} ${pos.symbol} ${pos.side} ${Math.abs(pos.size)}`);
+    await adapter.placeOrder(closeOrder);
   }
 
-  /**
-   * Clean up stale expectations
-   */
+  private normalizeSymbol(symbol: string): string {
+    return symbol.toUpperCase().replace(/USDT|USDC|-PERP|PERP/g, '');
+  }
+
   private cleanupStaleExpectations(): void {
     const now = Date.now();
-    const keysToDelete: string[] = [];
-
     for (const [key, expectation] of this.expectations) {
-      const age = now - expectation.placedAt.getTime();
-      
-      // Remove verified expectations after 1 minute
-      if (expectation.verified && age > 60000) {
-        keysToDelete.push(key);
-        continue;
-      }
-
-      // Remove unverified expectations after STALE_EXPECTATION_MS
-      if (!expectation.verified && age > this.STALE_EXPECTATION_MS) {
-        this.logger.warn(
-          `🗑️ Removing stale expectation: ${key} (age: ${Math.round(age / 1000)}s, never verified)`
-        );
-        keysToDelete.push(key);
+      if (expectation.verified && (now - expectation.placedAt.getTime() > 60000)) {
+        this.expectations.delete(key);
       }
     }
-
-    for (const key of keysToDelete) {
-      this.expectations.delete(key);
-    }
   }
 
-  /**
-   * Record a reconciliation result
-   */
-  private recordResult(result: ReconciliationResult): void {
-    this.recentResults.push(result);
-    
-    if (this.recentResults.length > this.MAX_RECENT_RESULTS) {
-      this.recentResults.shift();
-    }
-
-    if (result.status !== 'MATCHED') {
-      this.logger.debug(
-        `📊 Reconciliation: ${result.exchange} ${result.symbol} - ${result.status} ` +
-        `(expected: ${result.expectedSize.toFixed(4)}, actual: ${result.actualSize.toFixed(4)})`
-      );
-    }
-  }
-
-  /**
-   * Get current hedge pair statuses
-   */
-  getHedgePairStatuses(): HedgePairStatus[] {
-    return Array.from(this.hedgePairs.values());
-  }
-
-  /**
-   * Get recent reconciliation results
-   */
-  getRecentResults(): ReconciliationResult[] {
-    return [...this.recentResults];
-  }
-
-  /**
-   * Get unverified expectations (potential issues)
-   */
-  getUnverifiedExpectations(): PositionExpectation[] {
-    return Array.from(this.expectations.values()).filter(e => !e.verified);
-  }
-
-  /**
-   * Get summary for diagnostics
-   */
-  getSummary(): {
-    totalExpectations: number;
-    verifiedExpectations: number;
-    hedgePairs: number;
-    imbalancedPairs: number;
-    recentDiscrepancies: number;
-  } {
-    const verified = Array.from(this.expectations.values()).filter(e => e.verified).length;
-    const imbalanced = Array.from(this.hedgePairs.values()).filter(p => !p.isBalanced).length;
-    const discrepancies = this.recentResults.filter(
-      r => r.status !== 'MATCHED' && Date.now() - 60000 < Date.now()
-    ).length;
-
-    return {
-      totalExpectations: this.expectations.size,
-      verifiedExpectations: verified,
-      hedgePairs: this.hedgePairs.size,
-      imbalancedPairs: imbalanced,
-      recentDiscrepancies: discrepancies,
-    };
+  registerExpectation(symbol: string, exchange: ExchangeType, side: 'LONG' | 'SHORT', expectedSize: number, orderId?: string) {
+    const key = `${exchange}-${symbol}-${side}`;
+    this.expectations.set(key, { symbol, exchange, side, expectedSize, orderId, placedAt: new Date(), verified: false });
   }
 }
-

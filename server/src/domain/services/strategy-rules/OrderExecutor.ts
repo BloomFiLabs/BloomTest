@@ -60,9 +60,6 @@ export class OrderExecutor implements IOrderExecutor {
   private readonly logger = new Logger(OrderExecutor.name);
   private executionAnalytics?: ExecutionAnalytics;
   
-  // Unified execution service for safer hedged trades (The "Beautiful Architecture" engine)
-  private unifiedExecutionService?: UnifiedExecutionService;
-  
   // Whether to use sliced execution (can be configured via env)
   private useSlicedExecution: boolean = true;
   private unifiedExecutionConfig: Partial<UnifiedExecutionConfig> = {
@@ -113,12 +110,16 @@ export class OrderExecutor implements IOrderExecutor {
     private readonly executionLockService?: ExecutionLockService,
     @Optional()
     private readonly configService?: ConfigService,
+    @Optional()
+    private readonly unifiedExecutionService?: UnifiedExecutionService,
   ) {
     // Initialize execution analytics
     this.executionAnalytics = new ExecutionAnalytics();
     
-    // Initialize unified execution service
-    this.unifiedExecutionService = new UnifiedExecutionService();
+    // Check if unified execution is available, if not create default (for tests/backward compatibility)
+    if (!this.unifiedExecutionService) {
+      this.unifiedExecutionService = new UnifiedExecutionService();
+    }
     
     // Check if sliced execution is disabled via env
     const disableSliced = this.configService?.get('DISABLE_SLICED_EXECUTION');
@@ -1881,6 +1882,11 @@ export class OrderExecutor implements IOrderExecutor {
       // FALLBACK: Original all-at-once execution (if sliced disabled)
       // ========================================================
       this.logger.warn(`⚠️ Using ALL-AT-ONCE execution for ${opportunity.symbol} (sliced disabled)`);
+
+      let longResponse: PerpOrderResponse;
+      let shortResponse: PerpOrderResponse;
+      let longError: any = null;
+      let shortError: any = null;
 
       try {
         // Use placeOrderPair which handles sequential vs parallel execution

@@ -51,11 +51,11 @@ describe('OpportunityEvaluator', () => {
       providers: [
         OpportunityEvaluator,
         {
-          provide: HistoricalFundingRateService,
+          provide: 'IHistoricalFundingRateService',
           useValue: mockHistoricalService,
         },
         { provide: FundingRateAggregator, useValue: mockAggregator },
-        { provide: PositionLossTracker, useValue: mockLossTracker },
+        { provide: 'IPositionLossTracker', useValue: mockLossTracker },
         { provide: CostCalculator, useValue: mockCostCalculator },
         { provide: StrategyConfig, useValue: config },
       ],
@@ -141,6 +141,7 @@ describe('OpportunityEvaluator', () => {
         plan,
       );
 
+      expect(result.isSuccess).toBe(true);
       expect((result as any).value.consistencyScore).toBe(0.75); // Average of 0.8 and 0.7
       expect((result as any).value.historicalMetrics.long).toEqual(longMetrics);
       expect((result as any).value.historicalMetrics.short).toEqual(shortMetrics);
@@ -178,6 +179,7 @@ describe('OpportunityEvaluator', () => {
         plan,
       );
 
+      expect(result.isSuccess).toBe(true);
       expect((result as any).value.worstCaseBreakEvenHours).not.toBeNull();
       expect((result as any).value.worstCaseBreakEvenHours).toBeGreaterThan(0);
     });
@@ -190,6 +192,7 @@ describe('OpportunityEvaluator', () => {
         null,
       );
 
+      expect(result.isSuccess).toBe(true);
       expect((result as any).value.worstCaseBreakEvenHours).toBeNull();
     });
 
@@ -204,6 +207,7 @@ describe('OpportunityEvaluator', () => {
         plan,
       );
 
+      expect(result.isSuccess).toBe(true);
       expect((result as any).value.consistencyScore).toBe(0);
       expect((result as any).value.historicalMetrics.long).toBeNull();
       expect((result as any).value.historicalMetrics.short).toBeNull();
@@ -315,7 +319,8 @@ describe('OpportunityEvaluator', () => {
         new Map(),
       );
 
-      expect(result).not.toBeNull();
+      expect(result.isSuccess).toBe(true);
+      expect((result as any).value).not.toBeNull();
       expect((result as any).value.opportunity.symbol).toBeDefined();
     });
 
@@ -327,7 +332,8 @@ describe('OpportunityEvaluator', () => {
         new Map(),
       );
 
-      expect(result).toBeNull();
+      expect(result.isSuccess).toBe(true);
+      expect((result as any).value).toBeNull();
     });
 
     it('should filter out opportunities with break-even exceeding max days', async () => {
@@ -374,7 +380,8 @@ describe('OpportunityEvaluator', () => {
 
       // Should filter out if break-even > MAX_WORST_CASE_BREAK_EVEN_DAYS (7 days)
       // With very low rates, break-even will be very long
-      expect(result).toBeNull();
+      expect(result.isSuccess).toBe(true);
+      expect((result as any).value).toBeNull();
     });
   });
 
@@ -475,6 +482,7 @@ describe('OpportunityEvaluator', () => {
         new Map(),
       );
 
+      expect(result.isSuccess).toBe(true);
       expect((result as any).value.shouldRebalance).toBe(true);
       expect((result as any).value.reason).toContain('instantly profitable');
     });
@@ -517,6 +525,7 @@ describe('OpportunityEvaluator', () => {
         new Map(),
       );
 
+      expect(result.isSuccess).toBe(true);
       expect((result as any).value.shouldRebalance).toBe(false);
       expect((result as any).value.reason).toContain('already profitable');
     });
@@ -573,6 +582,7 @@ describe('OpportunityEvaluator', () => {
       );
 
       // Should compare break-even times
+      expect(result.isSuccess).toBe(true);
       expect((result as any).value.shouldRebalance).toBeDefined();
       expect((result as any).value.currentBreakEvenHours).toBe(20);
     });
@@ -615,6 +625,7 @@ describe('OpportunityEvaluator', () => {
       );
 
       // Should handle Infinity case
+      expect(result.isSuccess).toBe(true);
       expect((result as any).value.shouldRebalance).toBeDefined();
     });
   });

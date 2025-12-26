@@ -129,7 +129,7 @@ describe('HyperliquidSpotAdapter', () => {
       mockSymbolConverter.getAssetId.mockReturnValue(0);
       mockSymbolConverter.getSzDecimals.mockReturnValue(4);
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': '3000.5',
+        'ETH-SPOT': { bid: '3000.4', ask: '3000.6' },
       });
 
       mockExchangeClient.placeOrder.mockResolvedValue({
@@ -202,7 +202,7 @@ describe('HyperliquidSpotAdapter', () => {
       mockSymbolConverter.getAssetId.mockReturnValue(0);
       mockSymbolConverter.getSzDecimals.mockReturnValue(4);
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': '3000.5',
+        'ETH-SPOT': { bid: '3000.4', ask: '3000.6' },
       });
 
       mockExchangeClient.placeOrder.mockResolvedValue({
@@ -457,7 +457,7 @@ describe('HyperliquidSpotAdapter', () => {
 
   describe('isReady', () => {
     it('should return true if connection test passes', async () => {
-      mockInfoClient.meta.mockResolvedValue({});
+      mockInfoClient.meta.mockResolvedValue({ universe: [] });
 
       const ready = await adapter.isReady();
 
@@ -486,7 +486,7 @@ describe('HyperliquidSpotAdapter', () => {
       mockSymbolConverter.getAssetId.mockReturnValue(0);
       mockSymbolConverter.getSzDecimals.mockReturnValue(4);
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': '3000.5',
+        'ETH-SPOT': { bid: '3000.4', ask: '3000.6' },
       });
       mockExchangeClient.placeOrder.mockResolvedValue({
         response: {
@@ -522,7 +522,7 @@ describe('HyperliquidSpotAdapter', () => {
       mockSymbolConverter.getAssetId.mockReturnValue(0);
       mockSymbolConverter.getSzDecimals.mockReturnValue(4);
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': '3000.5',
+        'ETH-SPOT': { bid: '3000.4', ask: '3000.6' },
       });
       mockExchangeClient.placeOrder.mockResolvedValue({
         response: {
@@ -557,7 +557,7 @@ describe('HyperliquidSpotAdapter', () => {
       mockSymbolConverter.getAssetId.mockReturnValue(0);
       mockSymbolConverter.getSzDecimals.mockReturnValue(4);
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': '3000.5',
+        'ETH-SPOT': { bid: '3000.4', ask: '3000.6' },
       });
       mockExchangeClient.placeOrder.mockResolvedValue({
         response: {
@@ -620,7 +620,7 @@ describe('HyperliquidSpotAdapter', () => {
       mockSymbolConverter.getAssetId.mockReturnValue(0);
       mockSymbolConverter.getSzDecimals.mockReturnValue(4);
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': '3000.5',
+        'ETH-SPOT': { bid: '3000.4', ask: '3000.6' },
       });
       mockExchangeClient.placeOrder.mockResolvedValue({
         response: {
@@ -692,7 +692,7 @@ describe('HyperliquidSpotAdapter', () => {
       mockSymbolConverter.getAssetId.mockReturnValue(0);
       mockSymbolConverter.getSzDecimals.mockReturnValue(4);
       mockInfoClient.allMids.mockResolvedValue({
-        'ETH-SPOT': '3000.5',
+        'ETH-SPOT': { bid: '3000', ask: '3001' },
       });
       mockExchangeClient.placeOrder.mockResolvedValue({
         response: {

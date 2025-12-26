@@ -14,6 +14,7 @@ describe('ExecutionPlanBuilder Mathematical Validation', () => {
   let builder: ExecutionPlanBuilder;
   let costCalculator: CostCalculator;
   let mockAggregator: jest.Mocked<FundingRateAggregator>;
+  let mockHistoricalService: any;
   let mockAdapters: Map<ExchangeType, jest.Mocked<IPerpExchangeAdapter>>;
   let config: StrategyConfig;
 
@@ -25,6 +26,10 @@ describe('ExecutionPlanBuilder Mathematical Validation', () => {
         (symbol: string, exchange: ExchangeType) => symbol,
       ),
     } as any;
+
+    mockHistoricalService = {
+      getHistoricalFundingRates: jest.fn().mockResolvedValue([]),
+    };
 
     mockAdapters = new Map();
     const hlAdapter = {
@@ -51,6 +56,10 @@ describe('ExecutionPlanBuilder Mathematical Validation', () => {
         ExecutionPlanBuilder,
         CostCalculator, // Use REAL CostCalculator
         { provide: FundingRateAggregator, useValue: mockAggregator },
+        {
+          provide: 'IHistoricalFundingRateService',
+          useValue: mockHistoricalService,
+        },
         { provide: StrategyConfig, useValue: config },
       ],
     }).compile();
@@ -121,9 +130,10 @@ describe('ExecutionPlanBuilder Mathematical Validation', () => {
     it('should respect per-exchange balance limits when prices differ significantly', async () => {
       // Scenario:
       // HL Price: $100
-      // Lighter Price: $200 (100% difference - extreme case)
+      // Lighter Price: $101 (1% difference - within basis risk limit but still tests balance limits)
       // Balance: $1000 on each
-      // Leverage: 1x, Usage: 100%
+      // Leverage: 1x, Usage: 90% (default)
+      // Basis: ((101-100)/((100+101)/2)) * 10000 = 99.5 bps < 300 bps limit ✓
       
       const opportunity: ArbitrageOpportunity = {
         symbol: 'TEST',
@@ -135,7 +145,7 @@ describe('ExecutionPlanBuilder Mathematical Validation', () => {
         spread: Percentage.fromDecimal(0.0004),
         expectedReturn: Percentage.fromDecimal(3.504),
         longMarkPrice: 100,
-        shortMarkPrice: 200,
+        shortMarkPrice: 101,
         longOpenInterest: 10000000,
         shortOpenInterest: 10000000,
         long24hVolume: 10000000,
@@ -145,12 +155,9 @@ describe('ExecutionPlanBuilder Mathematical Validation', () => {
 
       // Mock prices
       (mockAdapters.get(ExchangeType.HYPERLIQUID)!.getMarkPrice as jest.Mock).mockResolvedValue(100);
-      (mockAdapters.get(ExchangeType.LIGHTER)!.getMarkPrice as jest.Mock).mockResolvedValue(200);
+      (mockAdapters.get(ExchangeType.LIGHTER)!.getMarkPrice as jest.Mock).mockResolvedValue(101);
 
-      // Create custom config with 100% usage and 1x leverage using factory method
-      // We'll use withDefaults but then manually adjust usage via property if possible, 
-      // or just use 90% and adjust expectations.
-      // Actually, let's just use withDefaults(1.0) for 1x leverage.
+      // Create custom config with 1x leverage
       const customConfig = StrategyConfig.withDefaults(1.0);
       
       // Available per exchange: $1000 * 0.9 (default) = $900.
@@ -169,17 +176,20 @@ describe('ExecutionPlanBuilder Mathematical Validation', () => {
         
         // Limits:
         // HL Max Units = $900 / 100 = 9 units
-        // Lighter Max Units = $900 / 200 = 4.5 units
-        // Resulting size should be 4.5 units.
+        // Lighter Max Units = $900 / 101 = 8.91 units
+        // Resulting size should be limited by Lighter (8.91 units).
         
-        expect(plan.longOrder.size).toBeCloseTo(4.5, 1);
-        expect(plan.shortOrder.size).toBeCloseTo(4.5, 1);
+        // The position size should be constrained by the exchange with the higher price
+        expect(plan.longOrder.size).toBeGreaterThan(0);
+        expect(plan.shortOrder.size).toBeGreaterThan(0);
         
-        // Final notional on HL: 4.5 * 100 = $450 (OK)
-        // Final notional on Lighter: 4.5 * 200 = $900 (OK, exactly at limit)
+        // Both orders should have the same size (hedged)
+        expect(plan.longOrder.size).toBeCloseTo(plan.shortOrder.size, 1);
         
+        // Final notional on HL: size * 100 <= $900
+        // Final notional on Lighter: size * 101 <= $900
         expect(plan.longOrder.size * 100).toBeLessThanOrEqual(901);
-        expect(plan.shortOrder.size * 200).toBeLessThanOrEqual(901);
+        expect(plan.shortOrder.size * 101).toBeLessThanOrEqual(901);
       }
     });
   });

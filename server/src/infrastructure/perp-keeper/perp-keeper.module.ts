@@ -42,7 +42,9 @@ import { DiagnosticsService } from '../services/DiagnosticsService';
 import { MarketQualityFilter } from '../../domain/services/MarketQualityFilter';
 import { CircuitBreakerService } from '../services/CircuitBreakerService';
 import { ExecutionLockService } from '../services/ExecutionLockService';
-import { OrderFillMonitor } from '../services/OrderFillMonitor';
+import { OrderGuardianService } from '../../domain/services/execution/OrderGuardianService';
+import { ReconciliationService } from '../../domain/services/execution/ReconciliationService';
+import { ProfitTakingService } from '../../domain/services/execution/ProfitTakingService';
 import { LiquidationMonitorService } from '../../domain/services/LiquidationMonitorService';
 import { MarketStateService } from '../services/MarketStateService';
 import { PositionStateRepository } from '../repositories/PositionStateRepository';
@@ -72,6 +74,7 @@ import { PredictedBreakEvenCalculator } from '../../domain/services/strategy-rul
 import { StrategyConfig } from '../../domain/value-objects/StrategyConfig';
 import { MakerEfficiencyService } from '../../domain/services/strategy-rules/MakerEfficiencyService';
 import { SimpleEventBus } from '../events/SimpleEventBus';
+import { UnifiedStateService } from '../../domain/services/execution/UnifiedStateService';
 import { UnifiedExecutionService } from '../../domain/services/execution/UnifiedExecutionService';
 import {
   TWAPOptimizer,
@@ -703,8 +706,17 @@ import { PredictionAutoCalibrator } from '../../domain/services/prediction/Predi
     // Execution lock service for symbol-level locking
     ExecutionLockService,
 
-    // Order fill monitor - real-time fill detection via WebSocket
-    OrderFillMonitor,
+    // Order guardian service for unified order management
+    OrderGuardianService,
+
+    // Unified state service
+    UnifiedStateService,
+
+    // Reconciliation service for position health
+    ReconciliationService,
+
+    // Profit taking service
+    ProfitTakingService,
 
     // Maker efficiency service - ensures we are best maker on book
     MakerEfficiencyService,
@@ -834,6 +846,14 @@ import { PredictionAutoCalibrator } from '../../domain/services/prediction/Predi
     KeeperStrategyEventListener,
     WithdrawalFulfiller,
     NAVReporter,
+    // Order guardian service
+    OrderGuardianService,
+    // Unified state service
+    UnifiedStateService,
+    // Reconciliation service
+    ReconciliationService,
+    // Profit taking service
+    ProfitTakingService,
     // Maker efficiency service
     MakerEfficiencyService,
     // Market state service
@@ -868,6 +888,7 @@ export class PerpKeeperModule implements OnModuleInit {
     @Optional() private readonly orderBookCollector?: OrderBookCollector,
     @Optional() private readonly perpKeeperService?: PerpKeeperService,
     @Optional() private readonly marketStateService?: MarketStateService,
+    @Optional() private readonly unifiedStateService?: UnifiedStateService,
   ) {}
 
   /**
@@ -922,6 +943,13 @@ export class PerpKeeperModule implements OnModuleInit {
       const adapters = this.perpKeeperService.getExchangeAdapters();
       this.marketStateService.initialize(adapters);
       this.logger.log('MarketStateService initialized with exchange adapters');
+    }
+
+    // Initialize UnifiedStateService if both are available
+    if (this.unifiedStateService && this.perpKeeperService) {
+      const adapters = this.perpKeeperService.getExchangeAdapters();
+      this.unifiedStateService.setAdapters(adapters);
+      this.logger.log('UnifiedStateService initialized with exchange adapters');
     }
   }
 }

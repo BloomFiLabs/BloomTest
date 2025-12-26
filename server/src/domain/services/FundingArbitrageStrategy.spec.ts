@@ -82,10 +82,19 @@ describe('FundingArbitrageStrategy', () => {
     } as any;
 
     const mockPortfolioOptimizer = {
-      calculateMaxPortfolioFor35APY: jest
+      calculateMaxPortfolioForTargetAPY: jest
+        .fn()
+        .mockResolvedValue(10000),
+      calculateMaxPortfolioWithLeverage: jest
         .fn()
         .mockResolvedValue({ maxPortfolio: 10000, breakEvenHours: 1 }),
-      calculateOptimalPortfolioAllocation: jest.fn().mockResolvedValue([]),
+      calculateOptimalAllocation: jest.fn().mockResolvedValue({
+        allocations: new Map(),
+        totalPortfolio: 0,
+        aggregateAPY: 0,
+        opportunityCount: 0,
+        dataQualityWarnings: [],
+      }),
     } as any;
 
     const mockOrderExecutor = {
@@ -515,7 +524,7 @@ describe('FundingArbitrageStrategy', () => {
 
         // Spread = 0.0001 - 0.0002 = -0.0001 (at threshold)
         expect(result.shouldKeep).toBe(false);
-        expect(result.reason).toContain('close threshold');
+        expect(result.reason).toContain('severely negative');
       });
 
       it('should replace position when new opportunity is significantly better', async () => {
