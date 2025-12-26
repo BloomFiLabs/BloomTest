@@ -1781,7 +1781,7 @@ export class OrderExecutor implements IOrderExecutor {
       // UNIFIED INTELLIGENT EXECUTION
       // ========================================================
       if (this.useSlicedExecution && this.unifiedExecutionService) {
-        this.logger.log(`🧠 Using UNIFIED INTELLIGENT execution for ${opportunity.symbol}`);
+        this.logger.log(`🧠 Using UNIFIED INTELLIGENT execution (SLICING ENABLED) for ${opportunity.symbol}`);
         
         const unifiedResult = await this.unifiedExecutionService.executeSmartHedge(
           longAdapter,
@@ -1876,12 +1876,12 @@ export class OrderExecutor implements IOrderExecutor {
             );
         }
       }
-      }
       
       // ========================================================
       // FALLBACK: Original all-at-once execution (if sliced disabled)
       // ========================================================
-      this.logger.warn(`⚠️ Using ALL-AT-ONCE execution for ${opportunity.symbol} (sliced disabled)`);
+      if (!this.useSlicedExecution || !this.unifiedExecutionService) {
+        this.logger.warn(`⚠️ Using ALL-AT-ONCE execution for ${opportunity.symbol} (sliced disabled or service unavailable)`);
 
       let longResponse: PerpOrderResponse;
       let shortResponse: PerpOrderResponse;
