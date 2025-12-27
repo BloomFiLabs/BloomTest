@@ -2320,10 +2320,6 @@ const releaseMutex = await this.acquireOrderMutex();
     try {
       await this.ensureInitialized();
 
-      // Lighter SDK limitation: The @reservoir0x/lighter-ts-sdk doesn't provide a method to query order status
-      // by order ID. We work around this by checking positions to see if the order filled.
-      // If no matching position exists, the order may be resting on the book or canceled.
-
       if (!symbol) {
         this.logger.warn(
           'getOrderStatus: Symbol required for Lighter order status check',
@@ -2341,48 +2337,122 @@ const releaseMutex = await this.acquireOrderMutex();
         );
       }
 
-      // Check positions to see if order filled
-      try {
-        const positions = await this.getPositions();
+      // STEP 1: Check WebSocket cache first (fastest, real-time)
+      // According to Lighter WebSocket docs: https://apidocs.lighter.xyz/docs/websocket-reference
+      // The account_all_orders channel provides real-time order status including status, filled_base_amount
+      if (this.wsProvider) {
+        const cachedOrders = this.wsProvider.getCachedOrders();
+        if (cachedOrders) {
+          const cachedOrder = cachedOrders.get(orderId);
+          if (cachedOrder) {
+            // Map Lighter status to our OrderStatus
+            // From WebSocket docs: status can be "filled", "open", "cancelled", etc.
+            let status: OrderStatus;
+            if (cachedOrder.status === 'filled' || cachedOrder.status === 'FILLED') {
+              status = OrderStatus.FILLED;
+            } else if (cachedOrder.status === 'cancelled' || cachedOrder.status === 'CANCELLED') {
+              status = OrderStatus.CANCELLED;
+            } else {
+              status = OrderStatus.SUBMITTED; // open, pending, etc.
+            }
 
-        // Try to infer order side from positions (if we have a position for this symbol)
-        // Note: This is imperfect but better than always returning SUBMITTED
+            this.logger.debug(
+              `📡 getOrderStatus (WebSocket): Order ${orderId} status=${cachedOrder.status}, ` +
+              `filled=${cachedOrder.filledSize}/${cachedOrder.size}`,
+            );
+
+            return new PerpOrderResponse(
+              orderId,
+              status,
+              symbol,
+              cachedOrder.side === 'buy' ? OrderSide.LONG : OrderSide.SHORT,
+              undefined,
+              cachedOrder.filledSize,
+              cachedOrder.price,
+              undefined,
+              cachedOrder.lastUpdated,
+            );
+          }
+        }
+      }
+
+      // STEP 2: Fallback to REST API (check open orders)
+      try {
+        const openOrders = await this.getOpenOrders();
+        const orderStillOpen = openOrders.find((o) => o.orderId === orderId);
+        
+        if (orderStillOpen) {
+          // Order is still open - return SUBMITTED with filled size
+          return new PerpOrderResponse(
+            orderId,
+            OrderStatus.SUBMITTED,
+            symbol,
+            orderStillOpen.side === 'buy' ? OrderSide.LONG : OrderSide.SHORT,
+            undefined,
+            orderStillOpen.filledSize || 0,
+            orderStillOpen.price,
+            undefined,
+            new Date(),
+          );
+        }
+
+        // STEP 3: Order not in open orders - check positions (likely filled)
+        const positions = await this.getPositions();
         const matchingPosition = positions.find(
           (p) => p.symbol === symbol && Math.abs(p.size) > 0.0001,
         );
 
         if (matchingPosition) {
-          // Position exists - order may have filled (but we can't be 100% sure it's this specific order)
-          // Return SUBMITTED to let waitForOrderFill continue checking
-          this.logger.debug(
-            `getOrderStatus: Found position for ${symbol} (${matchingPosition.side}, size: ${matchingPosition.size}), ` +
-              `but cannot confirm if order ${orderId} filled. Returning SUBMITTED.`,
+          // Order not in open orders + position exists = likely filled
+          this.logger.log(
+            `✅ getOrderStatus: Order ${orderId} not in open orders and position exists for ${symbol} ` +
+              `(${matchingPosition.side}, size: ${matchingPosition.size}). Returning FILLED.`,
+          );
+          return new PerpOrderResponse(
+            orderId,
+            OrderStatus.FILLED,
+            symbol,
+            matchingPosition.side === OrderSide.LONG ? OrderSide.LONG : OrderSide.SHORT,
+            undefined,
+            Math.abs(matchingPosition.size),
+            matchingPosition.entryPrice || matchingPosition.markPrice,
+            undefined,
+            new Date(),
           );
         } else {
-          // No position found - order may be resting on book or canceled
-          // We can't distinguish between these cases without querying open orders
+          // Order not in open orders + no position = likely cancelled
           this.logger.debug(
-            `getOrderStatus: No position found for ${symbol}. Order ${orderId} may be resting or canceled.`,
+            `getOrderStatus: Order ${orderId} not in open orders and no position for ${symbol}. May be cancelled.`,
+          );
+          return new PerpOrderResponse(
+            orderId,
+            OrderStatus.CANCELLED,
+            symbol,
+            OrderSide.LONG, // Default, actual side unknown
+            undefined,
+            0,
+            undefined,
+            undefined,
+            new Date(),
           );
         }
-      } catch (positionError: any) {
+      } catch (error: any) {
         this.logger.debug(
-          `Could not check positions for order status: ${positionError.message}`,
+          `Could not check order status: ${error.message}. Returning SUBMITTED.`,
+        );
+        // Fallback: return SUBMITTED if we can't determine status
+        return new PerpOrderResponse(
+          orderId,
+          OrderStatus.SUBMITTED,
+          symbol,
+          OrderSide.LONG, // Default, actual side unknown
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          new Date(),
         );
       }
-
-      // Return SUBMITTED - waitForOrderFill will continue checking positions
-      return new PerpOrderResponse(
-        orderId,
-        OrderStatus.SUBMITTED,
-        symbol,
-        OrderSide.LONG, // Default, actual side unknown without order data
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        new Date(),
-      );
     } catch (error: any) {
       this.logger.error(`Failed to get order status: ${error.message}`);
       throw new ExchangeError(

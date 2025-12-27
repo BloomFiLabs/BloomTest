@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional, Inject, forwardRef } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
@@ -7,6 +7,7 @@ import { OrderSide, OrderType, TimeInForce, PerpOrderRequest, OrderStatus } from
 import { DiagnosticsService } from '../../../infrastructure/services/DiagnosticsService';
 import { ExecutionLockService } from '../../../infrastructure/services/ExecutionLockService';
 import { PerpKeeperService } from '../../../application/services/PerpKeeperService';
+import { OrderGuardianService } from './OrderGuardianService';
 
 /**
  * PositionExpectation - What we expect a position to be
@@ -79,6 +80,7 @@ export class ReconciliationService implements OnModuleInit {
     @Optional() private readonly diagnosticsService?: DiagnosticsService,
     @Optional() private readonly executionLockService?: ExecutionLockService,
     @Optional() private readonly keeperService?: PerpKeeperService,
+    @Optional() @Inject(forwardRef(() => OrderGuardianService)) private readonly orderGuardian?: OrderGuardianService,
   ) {}
 
   onModuleInit() {
@@ -202,11 +204,32 @@ export class ReconciliationService implements OnModuleInit {
     if (!status) {
       status = { symbol, longExchange: pos.exchangeType, shortExchange: pos.exchangeType, longSize: 0, shortSize: 0, imbalance: 100, imbalancePercent: 100, isBalanced: false, lastReconciled: new Date(), firstImbalanceAt: new Date(), imbalanceCount: 1 };
       this.hedgePairs.set(symbol, status);
+      
+      // Try to open missing side immediately when first detected
+      if (this.orderGuardian) {
+        this.logger.log(`🛠️ Attempting to open missing side for ${symbol} ${pos.side} on ${pos.exchangeType}...`);
+        const opened = await this.orderGuardian.tryOpenMissingSide(pos);
+        if (opened) {
+          this.logger.log(`✅ Successfully initiated opening missing side for ${symbol}`);
+          return; // Give it time to fill before checking again
+        } else {
+          this.logger.warn(`⚠️ Failed to open missing side for ${symbol}, will retry next cycle`);
+        }
+      }
       return;
     }
 
     status.imbalanceCount++;
     const durationMin = (Date.now() - status.firstImbalanceAt!.getTime()) / 60000;
+
+    // Try to open missing side again if we haven't exceeded retries
+    if (this.orderGuardian && durationMin < this.NUCLEAR_TIMEOUT_MINUTES) {
+      const opened = await this.orderGuardian.tryOpenMissingSide(pos);
+      if (opened) {
+        this.logger.log(`✅ Retry: Successfully initiated opening missing side for ${symbol}`);
+        return; // Give it time to fill
+      }
+    }
 
     if (durationMin >= this.NUCLEAR_TIMEOUT_MINUTES) {
       this.logger.error(`☢️ NUCLEAR OPTION: Single leg ${symbol} persisted ${durationMin.toFixed(1)}m. Closing...`);
