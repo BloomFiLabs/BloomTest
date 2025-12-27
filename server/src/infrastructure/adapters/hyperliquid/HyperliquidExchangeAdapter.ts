@@ -2432,10 +2432,10 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
             try {
               book = await this.getBestBidAsk(symbol);
               if (book) {
-                this.logger.debug(`Using REST fallback for ${symbol} order book: bid=${book.bestBid.toFixed(4)}, ask=${book.bestAsk.toFixed(4)}`);
+                this.logger.log(`📡 REPRICE: Using REST fallback for ${symbol} order book: bid=${book.bestBid.toFixed(4)}, ask=${book.bestAsk.toFixed(4)}`);
               }
             } catch (e: any) {
-              this.logger.debug(`REST fallback failed for ${symbol}: ${e.message}`);
+              this.logger.warn(`⚠️ REPRICE: REST fallback failed for ${symbol}: ${e.message}`);
             }
           }
           
@@ -2462,12 +2462,19 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
           const priceDiff = Math.abs(ourOrder.price - targetPrice);
 
           if (priceDiff > tickSize * 0.5) {
-            this.logger.log(`🔄 Repricing ${symbol} ${isSellOrder ? 'SELL' : 'BUY'}: ${ourOrder.price} -> ${targetPrice}`);
+            const priceChangePct = ((targetPrice - ourOrder.price) / ourOrder.price * 100).toFixed(3);
+            this.logger.log(
+              `🔄 REPRICE ${symbol} ${isSellOrder ? 'SELL' : 'BUY'} on HYPERLIQUID: ` +
+              `${ourOrder.price.toFixed(4)} → ${targetPrice.toFixed(4)} ` +
+              `(${priceChangePct}%, diff: ${priceDiff.toFixed(6)}, size: ${expectedSize.toFixed(2)}) ` +
+              `[Book: bid=${book.bestBid.toFixed(4)}, ask=${book.bestAsk.toFixed(4)}]`
+            );
 
             try {
               await this.cancelOrder(String(ourOrder.orderId), symbol);
+              this.logger.debug(`✅ Canceled old order ${ourOrder.orderId} for repricing`);
             } catch (e: any) {
-              this.logger.debug(`Cancel during reprice failed: ${e.message}`);
+              this.logger.warn(`⚠️ Cancel during reprice failed (may already be filled): ${e.message}`);
               return;
             }
 
@@ -2485,11 +2492,16 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
               if (newResp.orderId) {
                 currentOrderId = newResp.orderId;
                 repriceCount++;
-                this.logger.log(`✅ Repriced order: ${currentOrderId} (reprice #${repriceCount})`);
+                this.logger.log(
+                  `✅ REPRICE SUCCESS ${symbol} on HYPERLIQUID: New order ${currentOrderId} ` +
+                  `@ ${targetPrice.toFixed(4)} (reprice #${repriceCount})`
+                );
               }
             } catch (e: any) {
-              this.logger.error(`Failed to place repriced order: ${e.message}`);
+              this.logger.error(`❌ REPRICE FAILED ${symbol} on HYPERLIQUID: Failed to place repriced order: ${e.message}`);
             }
+          } else {
+            this.logger.debug(`✓ Order ${symbol} still competitive (price: ${ourOrder.price.toFixed(4)}, target: ${targetPrice.toFixed(4)}, diff: ${priceDiff.toFixed(6)})`);
           }
         } catch (e: any) {
           this.logger.debug(`Reprice check error: ${e.message}`);

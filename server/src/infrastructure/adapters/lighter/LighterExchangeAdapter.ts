@@ -4521,10 +4521,10 @@ const releaseMutex = await this.acquireOrderMutex();
             try {
               book = await this.getBestBidAsk(symbol);
               if (book) {
-                this.logger.debug(`Using REST fallback for ${symbol} order book: bid=${book.bestBid.toFixed(4)}, ask=${book.bestAsk.toFixed(4)}`);
+                this.logger.log(`📡 REPRICE: Using REST fallback for ${symbol} order book: bid=${book.bestBid.toFixed(4)}, ask=${book.bestAsk.toFixed(4)}`);
               }
             } catch (e: any) {
-              this.logger.debug(`REST fallback failed for ${symbol}: ${e.message}`);
+              this.logger.warn(`⚠️ REPRICE: REST fallback failed for ${symbol}: ${e.message}`);
             }
           }
           
@@ -4555,13 +4555,20 @@ const releaseMutex = await this.acquireOrderMutex();
           
           if (priceDiff > tickSize * 0.5) {
             // We're not at top of book - reprice!
-            this.logger.log(`🔄 Repricing ${symbol} ${isSellOrder ? 'SELL' : 'BUY'}: ${ourOrder.price} -> ${targetPrice} (diff: ${priceDiff.toFixed(6)})`);
+            const priceChangePct = ((targetPrice - ourOrder.price) / ourOrder.price * 100).toFixed(3);
+            this.logger.log(
+              `🔄 REPRICE ${symbol} ${isSellOrder ? 'SELL' : 'BUY'} on LIGHTER: ` +
+              `${ourOrder.price.toFixed(4)} → ${targetPrice.toFixed(4)} ` +
+              `(${priceChangePct}%, diff: ${priceDiff.toFixed(6)}, size: ${expectedSize.toFixed(2)}) ` +
+              `[Book: bid=${book.bestBid.toFixed(4)}, ask=${book.bestAsk.toFixed(4)}]`
+            );
             
             // Cancel current order
             try {
               await this.cancelOrder(String(ourOrder.orderId), symbol);
+              this.logger.debug(`✅ Canceled old order ${ourOrder.orderId.substring(0, 16)}... for repricing`);
             } catch (e: any) {
-              this.logger.debug(`Cancel during reprice failed (may already be filled): ${e.message}`);
+              this.logger.warn(`⚠️ Cancel during reprice failed (may already be filled): ${e.message}`);
               return;
             }
             
@@ -4580,13 +4587,16 @@ const releaseMutex = await this.acquireOrderMutex();
               if (newResp.orderId) {
                 currentOrderId = newResp.orderId;
                 repriceCount++;
-                this.logger.log(`✅ Repriced order: ${currentOrderId} (reprice #${repriceCount})`);
+                this.logger.log(
+                  `✅ REPRICE SUCCESS ${symbol} on LIGHTER: New order ${currentOrderId.substring(0, 16)}... ` +
+                  `@ ${targetPrice.toFixed(4)} (reprice #${repriceCount})`
+                );
               }
             } catch (e: any) {
-              this.logger.error(`Failed to place repriced order: ${e.message}`);
+              this.logger.error(`❌ REPRICE FAILED ${symbol} on LIGHTER: Failed to place repriced order: ${e.message}`);
             }
           } else {
-            this.logger.debug(`Order ${symbol} still at top of book (price: ${ourOrder.price}, target: ${targetPrice})`);
+            this.logger.debug(`✓ Order ${symbol} still competitive (price: ${ourOrder.price.toFixed(4)}, target: ${targetPrice.toFixed(4)}, diff: ${priceDiff.toFixed(6)})`);
           }
         } catch (e: any) {
           this.logger.debug(`Reprice check error for ${symbol}: ${e.message}`);

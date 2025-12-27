@@ -337,23 +337,23 @@ export class MakerEfficiencyService implements OnModuleInit {
       }
     }
 
-    if (!bestBidAsk) {
-      // Try fallback to adapter's getBestBidAsk if WebSocket data unavailable
-      try {
-        // Check if adapter has getBestBidAsk method (not all adapters do)
-        if ('getBestBidAsk' in adapter && typeof (adapter as any).getBestBidAsk === 'function') {
-          bestBidAsk = await (adapter as any).getBestBidAsk(symbol);
-        }
         if (!bestBidAsk) {
-          this.logger.warn(`⚠️ No orderbook data available for ${symbol} on ${exchange} (order age: ${orderAgeSec.toFixed(0)}s)`);
-          return;
+          // Try fallback to adapter's getBestBidAsk if WebSocket data unavailable
+          try {
+            // Check if adapter has getBestBidAsk method (not all adapters do)
+            if ('getBestBidAsk' in adapter && typeof (adapter as any).getBestBidAsk === 'function') {
+              bestBidAsk = await (adapter as any).getBestBidAsk(symbol);
+            }
+            if (!bestBidAsk) {
+              this.logger.warn(`⚠️ REPRICE: No orderbook data available for ${symbol} on ${exchange} (order age: ${orderAgeSec.toFixed(0)}s)`);
+              return;
+            }
+            this.logger.log(`📡 REPRICE: Using REST fallback for orderbook data: ${symbol} on ${exchange} (bid=${bestBidAsk.bestBid.toFixed(4)}, ask=${bestBidAsk.bestAsk.toFixed(4)})`);
+          } catch (e: any) {
+            this.logger.warn(`⚠️ REPRICE: Failed to get orderbook data for ${symbol} on ${exchange}: ${e.message}`);
+            return;
+          }
         }
-        this.logger.debug(`Using REST fallback for orderbook data: ${symbol} on ${exchange}`);
-      } catch (e: any) {
-        this.logger.warn(`⚠️ Failed to get orderbook data for ${symbol} on ${exchange}: ${e.message}`);
-        return;
-      }
-    }
 
     const { bestBid, bestAsk } = bestBidAsk;
     const currentPrice = activeOrder.price || 0;
@@ -412,10 +412,12 @@ export class MakerEfficiencyService implements OnModuleInit {
       const distanceFromBook = activeOrder.side === 'LONG' 
         ? ((bestBid - currentPrice) / currentPrice * 100).toFixed(2)
         : ((currentPrice - bestAsk) / currentPrice * 100).toFixed(2);
+      const priceChangePct = ((targetPrice - currentPrice) / currentPrice * 100).toFixed(3);
       this.logger.log(
-        `${urgencyLabel} Repositioning ${activeOrder.side} ${symbol} on ${exchange}: ` +
-        `${currentPrice.toFixed(4)} -> ${targetPrice.toFixed(4)} ` +
-        `(Age: ${orderAgeSec.toFixed(0)}s, ${distanceFromBook}% from book)`
+        `${urgencyLabel} REPRICE ${activeOrder.side} ${symbol} on ${exchange}: ` +
+        `${currentPrice.toFixed(4)} → ${targetPrice.toFixed(4)} ` +
+        `(${priceChangePct}%, Age: ${orderAgeSec.toFixed(0)}s, ${distanceFromBook}% from book) ` +
+        `[Book: bid=${bestBid.toFixed(4)}, ask=${bestAsk.toFixed(4)}]`
       );
 
       try {
@@ -455,6 +457,10 @@ export class MakerEfficiencyService implements OnModuleInit {
             response.orderId,
             targetPrice,
             activeOrder.reduceOnly
+          );
+          this.logger.log(
+            `✅ REPRICE SUCCESS ${symbol} ${activeOrder.side} on ${exchange}: ` +
+            `New order ${response.orderId.substring(0, 16)}... @ ${targetPrice.toFixed(4)}`
           );
         }
       } catch (error: any) {
