@@ -2455,43 +2455,122 @@ const releaseMutex = await this.acquireOrderMutex();
           );
         }
 
-        // STEP 3: Order not in open orders - check positions (likely filled)
-        const positions = await this.getPositions();
-        const matchingPosition = positions.find(
-          (p) => p.symbol === symbol && Math.abs(p.size) > 0.0001,
-        );
-
-        if (matchingPosition) {
-          // Order not in open orders + position exists = likely filled
-          // Remove from pending tracking
-          this.pendingOrdersMap.delete(orderId);
+        // STEP 3: Order not in open orders - check if we have tracking info
+        const trackedOrder = this.pendingOrdersMap.get(orderId);
+        
+        // CRITICAL FIX: We can ONLY determine FILLED if:
+        // 1. We have tracking info for this order (we know what we placed)
+        // 2. The order is NOT in open orders (confirmed above)
+        // 3. AND we can verify the position INCREASED by the expected amount
+        // 
+        // Previously, we incorrectly assumed "position exists = filled" which caused
+        // massive imbalances when existing positions were mistaken for new fills.
+        
+        if (trackedOrder) {
+          const orderAge = Date.now() - trackedOrder.placedAt.getTime();
           
-          this.logger.log(
-            `✅ getOrderStatus: Order ${orderId.substring(0, 16)}... not in open orders and position exists for ${symbol} ` +
-              `(${matchingPosition.side}, size: ${matchingPosition.size}). Returning FILLED.`,
+          // If order is very new (< 5 seconds), give Lighter time to process it
+          // The order might not have appeared in open orders yet
+          if (orderAge < 5000) {
+            this.logger.debug(
+              `getOrderStatus: Order ${orderId.substring(0, 16)}... not found in open orders yet ` +
+              `(age: ${orderAge}ms, expected size: ${trackedOrder.size}). ` +
+              `Waiting for Lighter to process...`
+            );
+            return new PerpOrderResponse(
+              orderId,
+              OrderStatus.SUBMITTED,
+              symbol,
+              trackedOrder.side,
+              undefined,
+              0,
+              trackedOrder.price,
+              undefined,
+              new Date(),
+            );
+          }
+          
+          // Order is old enough - check if position changed
+          const positions = await this.getPositions();
+          const matchingPosition = positions.find(
+            (p) => p.symbol === symbol && 
+            p.side === trackedOrder.side &&
+            Math.abs(p.size) > 0.0001,
           );
-          return new PerpOrderResponse(
-            orderId,
-            OrderStatus.FILLED,
-            symbol,
-            matchingPosition.side === OrderSide.LONG ? OrderSide.LONG : OrderSide.SHORT,
-            undefined,
-            Math.abs(matchingPosition.size),
-            matchingPosition.entryPrice || matchingPosition.markPrice,
-            undefined,
-            new Date(),
-          );
-        } else {
-          // Order not in open orders + no position = check if we have tracking info
-          const trackedOrder = this.pendingOrdersMap.get(orderId);
-          if (trackedOrder) {
-            // We placed this order but it's not in open orders and no position
-            // This could mean: (a) still processing, (b) cancelled, (c) filled but position closed
-            // Give it more time if recently placed
-            const age = Date.now() - trackedOrder.placedAt.getTime();
-            if (age < 10000) { // Less than 10 seconds old
+          
+          if (matchingPosition) {
+            // CRITICAL: We need to verify the position size makes sense
+            // If the position size is LESS than what we tried to place, the order didn't fully fill
+            // If the position size is roughly equal to what we placed, it likely filled
+            const positionSize = Math.abs(matchingPosition.size);
+            
+            // NOTE: We can't reliably determine if THIS specific order filled
+            // without comparing to the position size BEFORE the order was placed.
+            // The UnifiedExecutionService tracks initialPositionSize for this reason.
+            // Here, we can only return a "best guess" status.
+            
+            // If order is older than 30 seconds and not in open orders, assume it either:
+            // - Filled (position exists)
+            // - Cancelled (but we can't distinguish from filled here)
+            if (orderAge > 30000) {
+              this.pendingOrdersMap.delete(orderId);
+              this.logger.log(
+                `⚠️ getOrderStatus: Order ${orderId.substring(0, 16)}... not in open orders after ${Math.round(orderAge/1000)}s. ` +
+                `Position exists for ${symbol} (${matchingPosition.side}, size: ${positionSize}). ` +
+                `Assuming FILLED but UnifiedExecutionService should verify via position delta.`
+              );
+              return new PerpOrderResponse(
+                orderId,
+                OrderStatus.FILLED,
+                symbol,
+                matchingPosition.side === OrderSide.LONG ? OrderSide.LONG : OrderSide.SHORT,
+                undefined,
+                Math.abs(matchingPosition.size), // This might be wrong - caller must verify!
+                matchingPosition.entryPrice || matchingPosition.markPrice,
+                undefined,
+                new Date(),
+              );
+            } else {
+              // Order is between 5-30 seconds old - keep waiting
               this.logger.debug(
-                `getOrderStatus: Order ${orderId.substring(0, 16)}... not found yet (age: ${age}ms). Returning SUBMITTED.`,
+                `getOrderStatus: Order ${orderId.substring(0, 16)}... not in open orders ` +
+                `(age: ${orderAge}ms). Position exists but still waiting for confirmation.`
+              );
+              return new PerpOrderResponse(
+                orderId,
+                OrderStatus.SUBMITTED,
+                symbol,
+                trackedOrder.side,
+                undefined,
+                0,
+                trackedOrder.price,
+                undefined,
+                new Date(),
+              );
+            }
+          } else {
+            // No matching position - order might have been cancelled or still processing
+            if (orderAge > 30000) {
+              this.pendingOrdersMap.delete(orderId);
+              this.logger.debug(
+                `getOrderStatus: Order ${orderId.substring(0, 16)}... not in open orders after ${Math.round(orderAge/1000)}s ` +
+                `and no position for ${symbol}. Assuming CANCELLED.`
+              );
+              return new PerpOrderResponse(
+                orderId,
+                OrderStatus.CANCELLED,
+                symbol,
+                trackedOrder.side,
+                undefined,
+                0,
+                trackedOrder.price,
+                undefined,
+                new Date(),
+              );
+            } else {
+              // Still waiting
+              this.logger.debug(
+                `getOrderStatus: Order ${orderId.substring(0, 16)}... not found yet (age: ${orderAge}ms). Returning SUBMITTED.`
               );
               return new PerpOrderResponse(
                 orderId,
@@ -2506,9 +2585,38 @@ const releaseMutex = await this.acquireOrderMutex();
               );
             }
           }
-          
+        }
+        
+        // No tracking info - we don't know what this order was
+        // Check if position exists as a last resort
+        const positions = await this.getPositions();
+        const matchingPosition = positions.find(
+          (p) => p.symbol === symbol && Math.abs(p.size) > 0.0001,
+        );
+
+        if (matchingPosition) {
+          // Position exists but we have no tracking info
+          // This is ambiguous - could be from a different order
+          this.logger.warn(
+            `⚠️ getOrderStatus: Order ${orderId.substring(0, 16)}... has no tracking info. ` +
+            `Position exists for ${symbol} (${matchingPosition.side}, size: ${matchingPosition.size}) ` +
+            `but cannot confirm this order filled. Returning SUBMITTED to force position delta check.`
+          );
+          // Return SUBMITTED instead of FILLED to force the caller to verify via position delta
+          return new PerpOrderResponse(
+            orderId,
+            OrderStatus.SUBMITTED,
+            symbol,
+            matchingPosition.side === OrderSide.LONG ? OrderSide.LONG : OrderSide.SHORT,
+            undefined,
+            0, // Don't report filled size - we don't know!
+            matchingPosition.entryPrice || matchingPosition.markPrice,
+            undefined,
+            new Date(),
+          );
+        } else {
+          // No position exists and no tracking info
           // Order not in open orders + no position = likely cancelled
-          this.pendingOrdersMap.delete(orderId);
           this.logger.debug(
             `getOrderStatus: Order ${orderId.substring(0, 16)}... not in open orders and no position for ${symbol}. May be cancelled.`,
           );

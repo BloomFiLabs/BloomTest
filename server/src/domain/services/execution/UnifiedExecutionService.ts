@@ -362,6 +362,13 @@ export class UnifiedExecutionService {
         
         if (secondFill.filledSize === 0) {
            result.error = `Leg B failed to fill. Rolling back Leg A.`;
+           
+           // CRITICAL: Cancel the unfilled Leg B order FIRST to prevent orphaned orders
+           this.logger.warn(`🗑️ Cancelling unfilled Leg B order ${secondResp.orderId} before rollback`);
+           await secondAdapter.cancelOrder(secondResp.orderId!, symbol).catch((cancelErr) => {
+             this.logger.warn(`⚠️ Failed to cancel Leg B order (may have already been cancelled): ${cancelErr.message}`);
+           });
+           
            try {
              await this.rollback(firstAdapter, symbol, firstFill.filledSize, firstSide);
              if (firstIsLong) result.longFilledSize = 0; else result.shortFilledSize = 0;
@@ -411,50 +418,70 @@ export class UnifiedExecutionService {
         // We must verify the SPECIFIC ORDER filled, not just that a position exists
         const status = await adapter.getOrderStatus(orderId, symbol);
         
-        // CRITICAL: If there was an initial position, calculate the DELTA
-        // getOrderStatus returns total position size, but we need the fill size
-        if (initialPositionSize > 0 && status.status === OrderStatus.FILLED) {
-          // Order is filled - check current position to get actual fill size
+        // CRITICAL: Always verify fills via position delta when we have initial position
+        // getOrderStatus can be unreliable (especially for Lighter with tx hash vs order index)
+        // The ONLY reliable way to confirm a fill is to check if the position actually increased
+        
+        if (status.status === OrderStatus.FILLED) {
+          // Order claims to be filled - VERIFY via position delta
           try {
             const positions = await adapter.getPositions();
             const currentPosition = positions.find(
               (p) => p.symbol === symbol && Math.abs(p.size) > 0.0001
             );
+            
             if (currentPosition) {
               const currentPositionSize = Math.abs(currentPosition.size);
               const fillDelta = Math.abs(currentPositionSize - initialPositionSize);
               
-              if (fillDelta > 0) {
-                // Position increased - this is the actual fill size
+              // CRITICAL: Position must have increased by at least 50% of expected size
+              // This prevents false positives from existing positions
+              const minExpectedDelta = expectedSize * 0.5;
+              
+              if (fillDelta >= minExpectedDelta) {
+                // Position increased significantly - this is a real fill
                 this.logger.log(
-                  `✅ Fill detected via position delta: ${symbol} ` +
+                  `✅ Fill VERIFIED via position delta: ${symbol} ` +
                   `initial=${initialPositionSize.toFixed(4)}, ` +
                   `current=${currentPositionSize.toFixed(4)}, ` +
-                  `filled=${fillDelta.toFixed(4)}`
+                  `filled=${fillDelta.toFixed(4)}, expected=${expectedSize.toFixed(4)}`
+                );
+                return { filled: true, filledSize: fillDelta };
+              } else if (fillDelta > 0) {
+                // Partial fill - position increased but not by expected amount
+                this.logger.warn(
+                  `⚠️ Partial fill detected: ${symbol} ` +
+                  `initial=${initialPositionSize.toFixed(4)}, ` +
+                  `current=${currentPositionSize.toFixed(4)}, ` +
+                  `filled=${fillDelta.toFixed(4)}, expected=${expectedSize.toFixed(4)}`
                 );
                 return { filled: true, filledSize: fillDelta };
               } else {
-                // Position didn't increase - might be a different order or position closed
-                // Fall back to status.filledSize
-                currentFilled = status.filledSize || 0;
+                // Position didn't increase - getOrderStatus returned FALSE POSITIVE
+                // The order is NOT actually filled yet!
+                this.logger.warn(
+                  `⚠️ FALSE POSITIVE: getOrderStatus returned FILLED but position delta is ${fillDelta.toFixed(4)}. ` +
+                  `Initial=${initialPositionSize.toFixed(4)}, current=${currentPositionSize.toFixed(4)}. ` +
+                  `Order may still be processing - continuing to wait...`
+                );
+                // DON'T return filled - keep waiting
+                currentFilled = 0;
+              }
+            } else if (initialPositionSize === 0) {
+              // No position exists and no initial position - order might have filled then closed
+              // This is unusual, but we should check status.filledSize
+              currentFilled = status.filledSize || 0;
+              if (currentFilled > 0) {
+                return { filled: true, filledSize: currentFilled };
               }
             }
           } catch (posError: any) {
-            this.logger.debug(`Could not get position for delta calculation: ${posError.message}`);
-            // Fall back to status.filledSize
-            currentFilled = status.filledSize || 0;
+            this.logger.debug(`Could not verify fill via position delta: ${posError.message}`);
+            // If we can't verify, DON'T assume filled - keep waiting
           }
         } else {
-          // No initial position or order not filled yet - use status.filledSize
+          // Order not filled yet - use status.filledSize for partial fill tracking
           currentFilled = status.filledSize || 0;
-        }
-        
-        if (status.status === OrderStatus.FILLED) {
-          // If we didn't calculate delta above, use the status filledSize
-          if (currentFilled === 0) {
-            currentFilled = status.filledSize || expectedSize; // Fallback to expectedSize if status doesn't have it
-          }
-          return { filled: true, filledSize: currentFilled };
         }
         
         // CRITICAL: If order status is CANCELLED, check if it's because it filled instantly
