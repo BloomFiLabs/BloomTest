@@ -38,7 +38,21 @@ If you ever need to set up a new repository, ensure these **Actions Secrets** ar
 ## 📂 Important File Locations
 - **Environment Variables:** `/opt/bloom-keeper/server/.env`
 - **Persistent Diagnostics (APY History):** `/opt/bloom-keeper/server/data/diagnostics-state.json`
+- **Trade Database (SQLite):** `/opt/bloom-keeper/server/data/keeper.db`
 - **Build Output:** `/opt/bloom-keeper/server/dist/`
+
+## 🗄️ Database Setup (Prisma SQLite)
+The bot now uses a local SQLite database to log every trade decision.
+
+### Initial Setup on Droplet:
+If you are setting up the Droplet for the first time or after a "Deep Clean", run:
+```bash
+cd /opt/bloom-keeper/server
+npx prisma generate
+npx prisma db push
+```
+
+*Note: `db push` is used instead of `migrate` for local development/single-server SQLite setups to keep things simple.*
 
 ## 🔄 Updating the Bot Manually
 If you ever need to update the bot without using GitHub Actions:

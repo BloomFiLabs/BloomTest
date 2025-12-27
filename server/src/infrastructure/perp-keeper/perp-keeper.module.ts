@@ -84,6 +84,7 @@ import {
   ReplenishmentRateAnalyzer,
   SlippageModelCalibrator,
 } from '../../domain/services/twap';
+import { TradeLoggingService } from '../services/TradeLoggingService';
 import type { IEventBus } from '../../domain/events/DomainEvent';
 import type { IHistoricalFundingRateService } from '../../domain/ports/IHistoricalFundingRateService';
 import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTracker';
@@ -836,6 +837,7 @@ import { PredictionAutoCalibrator } from '../../domain/services/prediction/Predi
     PerpKeeperOrchestrator,
     RealFundingPaymentsService,
     OptimalLeverageService,
+    TradeLoggingService,
     DiagnosticsService,
     MarketQualityFilter,
     CircuitBreakerService,
@@ -846,6 +848,7 @@ import { PredictionAutoCalibrator } from '../../domain/services/prediction/Predi
     KeeperStrategyEventListener,
     WithdrawalFulfiller,
     NAVReporter,
+    TradeLoggingService,
     // Order guardian service
     OrderGuardianService,
     // Unified state service

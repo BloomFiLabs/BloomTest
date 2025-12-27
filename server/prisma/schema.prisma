@@ -6,7 +6,29 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
+  url      = "file:./data/keeper.db"
+}
+
+model TradeDecision {
+  id                String   @id @default(uuid())
+  timestamp         DateTime @default(now())
+  symbol            String
+  longExchange      String
+  shortExchange     String
+  longFundingRate   Float
+  shortFundingRate  Float
+  spread            Float
+  decision          String   // EXECUTED, SKIPPED, REJECTED
+  reason            String
+  expectedReturnUsd Float?
+  actualReturnUsd   Float?
+  positionValueUsd  Float?
+  executionTimeMs   Int?
+  
+  @@index([timestamp])
+  @@index([symbol])
+  @@map("trade_decisions")
 }
 
 model BotState {

@@ -56,6 +56,7 @@ import {
   StrategyExecutionCompletedEvent,
 } from '../events/ArbitrageEvents';
 import { DiagnosticsService } from '../../infrastructure/services/DiagnosticsService';
+import { TradeLoggingService } from '../../infrastructure/services/TradeLoggingService';
 import { Percentage } from '../value-objects/Percentage';
 import type { IFundingRatePredictionService } from '../ports/IFundingRatePredictor';
 
@@ -180,6 +181,7 @@ export class FundingArbitrageStrategy {
     @Optional()
     @Inject('IFundingRatePredictionService')
     private readonly predictionService?: IFundingRatePredictionService,
+    @Optional() private readonly tradeLoggingService?: TradeLoggingService,
   ) {
     // Use leverage from StrategyConfig
     // Leverage improves net returns: 2x leverage = 2x funding returns, but fees stay same %
@@ -951,7 +953,23 @@ export class FundingArbitrageStrategy {
         if (!long || !short) {
           const orphan = long || short;
           if (orphan && Math.abs(orphan.size) > 0.001) {
-            this.logger.error(`🛑 CIRCUIT BREAKER: Single-leg position detected for ${symbol} ($${orphan.getPositionValue().toFixed(2)}). Aborting new strategy execution until reconciled.`);
+            const msg = `🛑 CIRCUIT BREAKER: Single-leg position detected for ${symbol} ($${orphan.getPositionValue().toFixed(2)}). Aborting new strategy execution until reconciled.`;
+            this.logger.error(msg);
+            
+            // Log decision to database
+            if (this.tradeLoggingService) {
+              await this.tradeLoggingService.logDecision({
+                symbol,
+                longExchange: ExchangeType.HYPERLIQUID, // Approximation
+                shortExchange: ExchangeType.LIGHTER,
+                longFundingRate: 0,
+                shortFundingRate: 0,
+                spread: 0,
+                decision: 'REJECTED',
+                reason: `Circuit Breaker: Single-leg position detected ($${orphan.getPositionValue().toFixed(2)})`
+              });
+            }
+
             result.errors.push(`Existing single-leg position for ${symbol}`);
             return result;
           }
@@ -1425,7 +1443,7 @@ export class FundingArbitrageStrategy {
           }
 
           // Enrich opportunity with prediction-based break-even data
-          const totalCosts = plan
+          const currentTotalCosts = plan
             ? (plan.estimatedCosts?.total ?? 0)
             : this.estimateTotalCosts(opportunity, positionValueUsd);
 
@@ -1433,8 +1451,25 @@ export class FundingArbitrageStrategy {
             await this.opportunityEvaluator.enrichOpportunityWithPredictions(
               opportunity,
               positionValueUsd,
-              totalCosts,
+              currentTotalCosts,
             );
+
+          // Log the decision
+          if (this.tradeLoggingService) {
+            await this.tradeLoggingService.logDecision({
+              symbol: opportunity.symbol,
+              longExchange: opportunity.longExchange,
+              shortExchange: opportunity.shortExchange || opportunity.longExchange, // Fallback for perp-spot
+              longFundingRate: opportunity.longRate.toDecimal(),
+              shortFundingRate: opportunity.shortRate.toDecimal(),
+              spread: opportunity.spread.toDecimal(),
+              decision: plan ? 'EXECUTED' : 'SKIPPED',
+              reason: plan ? 'Meets profitability criteria' : 'Unprofitable or insufficient capital',
+              expectedReturnUsd: netReturn > -Infinity ? netReturn : undefined,
+              positionValueUsd: positionValueUsd,
+              executionTimeMs: Date.now() - now
+            });
+          }
 
           // Use predicted break-even if available and more conservative
           const effectiveBreakEvenHours = this.selectEffectiveBreakEven(
