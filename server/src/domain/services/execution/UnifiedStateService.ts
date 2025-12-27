@@ -62,6 +62,13 @@ export class UnifiedStateService implements OnModuleInit {
   async onModuleInit() {
     this.setupWebSocketListeners();
     this.logger.log('🌐 UnifiedStateService initialized');
+    
+    // Perform initial refresh after a short delay to allow adapters to initialize
+    setTimeout(() => {
+      this.refreshPositions().catch(e => 
+        this.logger.error(`Initial position refresh failed: ${e.message}`)
+      );
+    }, 5000);
   }
 
   setAdapters(adapters: Map<ExchangeType, IPerpExchangeAdapter>) {
@@ -72,13 +79,67 @@ export class UnifiedStateService implements OnModuleInit {
 
   private setupWebSocketListeners() {
     // WebSocket providers handle position/price updates internally via subscriptions
-    // We'll use the refresh() method to poll cached data periodically
-    // TODO: Add direct WebSocket message handlers if real-time updates are needed
     if (this.hyperliquidWs) {
       this.hyperliquidWs.subscribeToPositionUpdates();
+      
+      // Reactive position refresh on order updates
+      this.hyperliquidWs.on('order_update', (update) => {
+        this.logger.log(`⚡ Hyperliquid order update received, triggering reactive position refresh`);
+        this.refreshExchangePositions(ExchangeType.HYPERLIQUID);
+      });
+
+      // Reactive position refresh on position updates
+      this.hyperliquidWs.on('positions_update', (positions) => {
+        this.logger.log(`⚡ Hyperliquid position update received, triggering reactive position refresh`);
+        this.refreshExchangePositions(ExchangeType.HYPERLIQUID);
+      });
     }
+    
     if (this.lighterWs) {
       this.lighterWs.subscribeToPositionUpdates();
+      
+      // Reactive position refresh on order updates
+      this.lighterWs.on('order_update', (update) => {
+        this.logger.log(`⚡ Lighter order update received, triggering reactive position refresh`);
+        this.refreshExchangePositions(ExchangeType.LIGHTER);
+      });
+
+      // Reactive position refresh on position updates
+      this.lighterWs.on('positions_update', (positions) => {
+        this.logger.log(`⚡ Lighter position update received, triggering reactive position refresh`);
+        this.refreshExchangePositions(ExchangeType.LIGHTER);
+      });
+    }
+  }
+
+  /**
+   * Refresh positions for a single exchange
+   */
+  private async refreshExchangePositions(type: ExchangeType) {
+    const adapter = this.adapters.get(type);
+    if (!adapter) return;
+
+    try {
+      const freshPositions = await adapter.getPositions();
+      
+      const currentExchangeKeys = Array.from(this.positions.keys())
+        .filter(key => key.startsWith(`${type}-`));
+        
+      const freshKeys = new Set<string>();
+      
+      for (const pos of freshPositions) {
+        const key = this.updateCachedPosition(pos);
+        if (key) freshKeys.add(key);
+      }
+      
+      for (const oldKey of currentExchangeKeys) {
+        if (!freshKeys.has(oldKey)) {
+          this.logger.log(`🗑️ Reactive clearing of stale position ${oldKey}`);
+          this.positions.delete(oldKey);
+        }
+      }
+    } catch (e) {
+      this.logger.error(`Error in reactive refresh for ${type}: ${e.message}`);
     }
   }
 
@@ -96,12 +157,27 @@ export class UnifiedStateService implements OnModuleInit {
           (adapter as any).clearBalanceCache();
         }
         
-        const positions = await adapter.getPositions();
-        this.logger.debug(`Fetched ${positions.length} positions from ${type} via REST`);
+        const freshPositions = await adapter.getPositions();
+        this.logger.debug(`Fetched ${freshPositions.length} positions from ${type} via REST`);
+        
+        // CRITICAL: Get current cached keys for THIS exchange only
+        const currentExchangeKeys = Array.from(this.positions.keys())
+          .filter(key => key.startsWith(`${type}-`));
+          
+        const freshKeys = new Set<string>();
         
         // Update cache
-        for (const pos of positions) {
-          this.updateCachedPosition(pos);
+        for (const pos of freshPositions) {
+          const key = this.updateCachedPosition(pos);
+          if (key) freshKeys.add(key);
+        }
+        
+        // Delete any keys for this exchange that are NOT in the fresh list
+        for (const oldKey of currentExchangeKeys) {
+          if (!freshKeys.has(oldKey)) {
+            this.logger.debug(`🗑️ Clearing stale position ${oldKey} during force refresh`);
+            this.positions.delete(oldKey);
+          }
         }
         
         return true;
@@ -135,12 +211,9 @@ export class UnifiedStateService implements OnModuleInit {
   }
 
   private async refreshPositions() {
-    const promises = Array.from(this.adapters.entries()).map(async ([type, adapter]) => {
-      try {
-        const pos = await adapter.getPositions();
-        pos.forEach(p => this.updateCachedPosition(p));
-      } catch (e) {}
-    });
+    const promises = Array.from(this.adapters.keys()).map(type => 
+      this.refreshExchangePositions(type)
+    );
     await Promise.all(promises);
     this.lastPositionRefresh = Date.now();
   }
@@ -201,12 +274,14 @@ export class UnifiedStateService implements OnModuleInit {
   }
 
   // Internal Helpers
-  private updateCachedPosition(pos: PerpPosition) {
+  private updateCachedPosition(pos: PerpPosition): string {
     const key = `${pos.exchangeType}-${this.normalizeSymbol(pos.symbol)}-${pos.side}`;
     if (Math.abs(pos.size) < 0.0001) {
       this.positions.delete(key);
+      return '';
     } else {
       this.positions.set(key, pos);
+      return key;
     }
   }
 

@@ -266,6 +266,14 @@ export class ReconciliationService implements OnModuleInit {
     const adapter = this.adapters.get(pos.exchangeType);
     if (!adapter) return;
 
+    // CRITICAL: Cancel all open orders for this symbol first to avoid orphan fills
+    try {
+      this.logger.warn(`☢️ NUCLEAR OPTION: Cancelling all open orders for ${pos.symbol} on ${pos.exchangeType} before closing position`);
+      await adapter.cancelAllOrders(pos.symbol);
+    } catch (e: any) {
+      this.logger.error(`Error cancelling orders during nuclear close for ${pos.symbol}: ${e.message}`);
+    }
+
     const closeSide = pos.side === OrderSide.LONG ? OrderSide.SHORT : OrderSide.LONG;
     const closeOrder = new PerpOrderRequest(pos.symbol, closeSide, OrderType.MARKET, Math.abs(pos.size), undefined, TimeInForce.IOC, true);
     

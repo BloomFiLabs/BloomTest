@@ -394,6 +394,9 @@ export class HyperLiquidWebSocketProvider
       }
       
       this.logger.debug(`📊 Updated clearinghouseState: ${posCount} positions, $${this.clearinghouseCache.marginSummary.accountValue.toFixed(2)} account value`);
+      
+      // REACTIVE: Emit position update event
+      this.emit('positions_update', this.getCachedPositions());
     } catch (error: any) {
       this.logger.error(`Failed to parse clearinghouseState: ${error.message}`);
     }

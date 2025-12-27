@@ -963,6 +963,9 @@ export class LighterWebSocketProvider
     }
     
     this.logger.debug(`📊 Updated ${Object.keys(positions).length} positions from WebSocket`);
+    
+    // REACTIVE: Emit position update event
+    this.emit('positions_update', Array.from(this.positionCache.values()));
   }
 
   /**
