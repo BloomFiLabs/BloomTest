@@ -2509,10 +2509,10 @@ const releaseMutex = await this.acquireOrderMutex();
             // The UnifiedExecutionService tracks initialPositionSize for this reason.
             // Here, we can only return a "best guess" status.
             
-            // If order is older than 30 seconds and not in open orders, assume it either:
+            // If order is older than 5 minutes and not in open orders, assume it either:
             // - Filled (position exists)
             // - Cancelled (but we can't distinguish from filled here)
-            if (orderAge > 30000) {
+            if (orderAge >= 300000) {
               this.pendingOrdersMap.delete(orderId);
               this.logger.log(
                 `⚠️ getOrderStatus: Order ${orderId.substring(0, 16)}... not in open orders after ${Math.round(orderAge/1000)}s. ` +
@@ -2550,7 +2550,7 @@ const releaseMutex = await this.acquireOrderMutex();
             }
           } else {
             // No matching position - order might have been cancelled or still processing
-            if (orderAge > 30000) {
+            if (orderAge >= 300000) {
               this.pendingOrdersMap.delete(orderId);
               this.logger.debug(
                 `getOrderStatus: Order ${orderId.substring(0, 16)}... not in open orders after ${Math.round(orderAge/1000)}s ` +
@@ -4412,5 +4412,119 @@ const releaseMutex = await this.acquireOrderMutex();
         error,
       );
     }
+  }
+
+  /**
+   * Wait for an order to fill using a combination of WebSocket events and REST polling.
+   */
+  async waitForOrderFill(
+    orderId: string, 
+    symbol: string, 
+    timeoutMs: number,
+    expectedSize: number
+  ): Promise<PerpOrderResponse> {
+    const start = Date.now();
+    this.logger.log(`⏳ Waiting for Lighter order ${orderId} fill (timeout: ${timeoutMs/1000}s)...`);
+
+    if (!this.wsProvider) {
+      this.logger.warn('WebSocket provider not available, falling back to pure polling for waitForOrderFill');
+    }
+
+    return new Promise(async (resolve) => {
+      let isResolved = false;
+      let checkInterval: NodeJS.Timeout | null = null;
+      let wsHandler: any = null;
+
+      const cleanup = () => {
+        isResolved = true;
+        if (checkInterval) clearInterval(checkInterval);
+        if (wsHandler && this.wsProvider) {
+          this.wsProvider.removeListener('order_update', wsHandler);
+        }
+      };
+
+      // 1. WebSocket Listener (fastest)
+      if (this.wsProvider) {
+        wsHandler = (update: any) => {
+          if (isResolved) return;
+          
+          // Lighter orderUpdate has orderId directly
+          if (String(update.orderId) === String(orderId)) {
+            if (update.status === 'filled') {
+              this.logger.log(`✅ Order ${orderId} filled via WebSocket event`);
+              cleanup();
+              resolve(new PerpOrderResponse(
+                orderId,
+                OrderStatus.FILLED,
+                symbol,
+                update.side === 'bid' ? OrderSide.LONG : OrderSide.SHORT,
+                undefined,
+                parseFloat(update.filledSize),
+                parseFloat(update.price),
+                undefined,
+                new Date()
+              ));
+            } else if (update.status === 'canceled') {
+              this.logger.warn(`❌ Order ${orderId} canceled via WebSocket event`);
+              cleanup();
+              resolve(new PerpOrderResponse(
+                orderId,
+                OrderStatus.CANCELLED,
+                symbol,
+                update.side === 'bid' ? OrderSide.LONG : OrderSide.SHORT,
+                undefined,
+                0,
+                undefined,
+                undefined,
+                new Date()
+              ));
+            }
+          }
+        };
+        this.wsProvider.on('order_update', wsHandler);
+      }
+
+      // 2. Slow REST Poll (safety)
+      const safetyPoll = async () => {
+        if (isResolved) return;
+        try {
+          const status = await this.getOrderStatus(orderId, symbol);
+          if (status.status === OrderStatus.FILLED || status.status === OrderStatus.CANCELLED || status.status === OrderStatus.REJECTED) {
+            this.logger.log(`✅ Order ${orderId} reached terminal state ${status.status} via safety poll`);
+            cleanup();
+            resolve(status);
+          }
+        } catch (e: any) {
+          this.logger.debug(`Safety poll error for ${orderId}: ${e.message}`);
+        }
+      };
+
+      checkInterval = setInterval(safetyPoll, 15000); // Every 15 seconds
+      
+      // 3. Timeout
+      setTimeout(() => {
+        if (isResolved) return;
+        this.logger.warn(`⏰ Timeout waiting for Lighter order ${orderId} fill after ${timeoutMs/1000}s`);
+        cleanup();
+        
+        // Final attempt to get status
+        this.getOrderStatus(orderId, symbol)
+          .then(resolve)
+          .catch(() => resolve(new PerpOrderResponse(
+            orderId,
+            OrderStatus.SUBMITTED,
+            symbol,
+            OrderSide.LONG, // side unknown but mandatory
+            undefined,
+            0,
+            undefined,
+            'TIMEOUT',
+            new Date()
+          )));
+      }, timeoutMs);
+
+      // Perform initial check immediately
+      await safetyPoll();
+    });
   }
 }

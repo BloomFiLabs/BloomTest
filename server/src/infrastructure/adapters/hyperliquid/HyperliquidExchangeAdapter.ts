@@ -2327,4 +2327,118 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
       });
     });
   }
+
+  /**
+   * Wait for an order to fill using a combination of WebSocket events and REST polling.
+   */
+  async waitForOrderFill(
+    orderId: string, 
+    symbol: string, 
+    timeoutMs: number,
+    expectedSize: number
+  ): Promise<PerpOrderResponse> {
+    const start = Date.now();
+    this.logger.log(`⏳ Waiting for Hyperliquid order ${orderId} fill (timeout: ${timeoutMs/1000}s)...`);
+
+    if (!this.wsProvider) {
+      this.logger.warn('WebSocket provider not available, falling back to pure polling for waitForOrderFill');
+    }
+
+    return new Promise(async (resolve) => {
+      let isResolved = false;
+      let checkInterval: NodeJS.Timeout | null = null;
+      let wsHandler: any = null;
+
+      const cleanup = () => {
+        isResolved = true;
+        if (checkInterval) clearInterval(checkInterval);
+        if (wsHandler && this.wsProvider) {
+          this.wsProvider.removeListener('order_update', wsHandler);
+        }
+      };
+
+      // 1. WebSocket Listener (fastest)
+      if (this.wsProvider) {
+        wsHandler = (update: any) => {
+          if (isResolved) return;
+          
+          const order = update.order;
+          if (order && String(order.oid) === String(orderId)) {
+            if (order.status === 'filled') {
+              this.logger.log(`✅ Order ${orderId} filled via WebSocket event`);
+              cleanup();
+              resolve(new PerpOrderResponse(
+                orderId,
+                OrderStatus.FILLED,
+                symbol,
+                order.side === 'B' ? OrderSide.LONG : OrderSide.SHORT,
+                undefined,
+                parseFloat(order.sz),
+                order.px ? parseFloat(order.px) : undefined,
+                undefined,
+                new Date()
+              ));
+            } else if (order.status === 'canceled') {
+              this.logger.warn(`❌ Order ${orderId} canceled via WebSocket event`);
+              cleanup();
+              resolve(new PerpOrderResponse(
+                orderId,
+                OrderStatus.CANCELLED,
+                symbol,
+                order.side === 'B' ? OrderSide.LONG : OrderSide.SHORT,
+                undefined,
+                0,
+                undefined,
+                undefined,
+                new Date()
+              ));
+            }
+          }
+        };
+        this.wsProvider.on('order_update', wsHandler);
+      }
+
+      // 2. Slow REST Poll (safety)
+      const safetyPoll = async () => {
+        if (isResolved) return;
+        try {
+          const status = await this.getOrderStatus(orderId, symbol);
+          if (status.status === OrderStatus.FILLED || status.status === OrderStatus.CANCELLED || status.status === OrderStatus.REJECTED) {
+            this.logger.log(`✅ Order ${orderId} reached terminal state ${status.status} via safety poll`);
+            cleanup();
+            resolve(status);
+          }
+        } catch (e: any) {
+          this.logger.debug(`Safety poll error for ${orderId}: ${e.message}`);
+        }
+      };
+
+      checkInterval = setInterval(safetyPoll, 15000); // Every 15 seconds
+      
+      // 3. Timeout
+      setTimeout(() => {
+        if (isResolved) return;
+        this.logger.warn(`⏰ Timeout waiting for Hyperliquid order ${orderId} fill after ${timeoutMs/1000}s`);
+        cleanup();
+        
+        // Final attempt to get status
+        this.getOrderStatus(orderId, symbol)
+          .then(resolve)
+          .catch(() => resolve(new PerpOrderResponse(
+            orderId,
+            OrderStatus.SUBMITTED,
+            symbol,
+            OrderSide.LONG, // side unknown but mandatory
+            undefined,
+            0,
+            undefined,
+            'TIMEOUT',
+            new Date()
+          )));
+      }, timeoutMs);
+
+      // Perform initial check immediately
+      await safetyPoll();
+    });
+  }
 }

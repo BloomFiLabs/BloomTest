@@ -254,6 +254,23 @@ export interface IPerpExchangeAdapter {
    * @returns True if supported
    */
   supportsSymbol(symbol: string): boolean | Promise<boolean>;
+
+  /**
+   * Wait for an order to fill using a combination of WebSocket events and REST polling.
+   * This is much more robust than simple polling and prevents false positives.
+   * 
+   * @param orderId Exchange-provided order ID or transaction hash
+   * @param symbol Trading symbol
+   * @param timeoutMs Maximum time to wait in milliseconds
+   * @param expectedSize Total size of the order (for partial fill calculation)
+   * @returns Order response with terminal status (FILLED, CANCELLED, etc.)
+   */
+  waitForOrderFill?(
+    orderId: string, 
+    symbol: string, 
+    timeoutMs: number,
+    expectedSize: number
+  ): Promise<PerpOrderResponse>;
 }
 
 /**

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import WebSocket from 'ws';
+import { EventEmitter } from 'events';
 
 interface WsActiveAssetCtx {
   coin: string;
@@ -90,6 +91,7 @@ interface WsMessage {
  */
 @Injectable()
 export class HyperLiquidWebSocketProvider
+  extends EventEmitter
   implements OnModuleInit, OnModuleDestroy
 {
   private readonly logger = new Logger(HyperLiquidWebSocketProvider.name);
@@ -174,6 +176,7 @@ export class HyperLiquidWebSocketProvider
   private isOpenOrdersSubscribed = false;
 
   constructor(private readonly configService?: ConfigService) {
+    super();
     // Try to get wallet address for user subscriptions
     if (configService) {
       const privateKey = configService.get<string>('PRIVATE_KEY') ||
@@ -462,6 +465,17 @@ export class HyperLiquidWebSocketProvider
    * Emit fill event to all registered callbacks
    */
   private emitFillEvent(fill: HyperliquidFillEvent): void {
+    // Emit event for reactive waitForOrderFill
+    this.emit('order_update', { 
+      order: { 
+        coin: fill.coin, 
+        oid: parseInt(fill.oid), 
+        status: 'filled', 
+        sz: fill.sz,
+        side: fill.side
+      } 
+    });
+
     if (this.fillCallbacks.length === 0) return;
 
     this.logger.log(
@@ -482,6 +496,9 @@ export class HyperLiquidWebSocketProvider
    * Emit order update to all registered callbacks
    */
   private emitOrderUpdate(update: HyperliquidOrderUpdate): void {
+    // Emit event for reactive waitForOrderFill
+    this.emit('order_update', update);
+
     if (this.orderUpdateCallbacks.length === 0) return;
 
     const order = update.order;

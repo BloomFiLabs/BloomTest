@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import WebSocket from 'ws';
+import { EventEmitter } from 'events';
 
 interface MarketStatsMessage {
   channel: string;
@@ -98,7 +99,9 @@ interface WsMessage {
  * Docs: https://apidocs.lighter.xyz/docs/websocket-reference#market-stats
  */
 @Injectable()
-export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
+export class LighterWebSocketProvider 
+  extends EventEmitter
+  implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(LighterWebSocketProvider.name);
   private readonly WS_URL = 'wss://mainnet.zklighter.elliot.ai/stream';
 
@@ -171,6 +174,7 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
   private isOrdersSubscribed = false;
 
   constructor(private readonly configService?: ConfigService) {
+    super();
     // Try to get account address for user subscriptions
     if (configService) {
       const privateKey = configService.get<string>('PRIVATE_KEY') ||
@@ -772,6 +776,9 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
       price: data.price?.toString() || '0',
     };
 
+    // Emit event for reactive waitForOrderFill
+    this.emit('order_update', orderUpdate);
+
     // Emit order update
     for (const callback of this.orderUpdateCallbacks) {
       try {
@@ -975,16 +982,29 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
         const orderId = order.order_id?.toString() || order.order_index?.toString();
         if (!orderId) continue;
         
-        this.orderCache.set(orderId, {
+        const orderUpdate = {
           orderId,
           marketIndex: parseInt(marketIdStr),
-          side: order.is_ask ? 'sell' : 'buy',
+          side: order.is_ask ? 'sell' : 'buy' as 'buy' | 'sell',
           price: parseFloat(order.price || '0'),
           size: parseFloat(order.initial_base_amount || '0'),
           filledSize: parseFloat(order.filled_base_amount || '0'),
           status: order.status || 'open',
           reduceOnly: order.reduce_only || false,
           lastUpdated: new Date(),
+        };
+
+        this.orderCache.set(orderId, orderUpdate);
+
+        // Emit event for reactive waitForOrderFill
+        this.emit('order_update', {
+          orderId,
+          marketIndex: orderUpdate.marketIndex,
+          side: orderUpdate.side === 'buy' ? 'bid' : 'ask',
+          status: this.mapOrderStatus(orderUpdate.status),
+          size: orderUpdate.size.toString(),
+          filledSize: orderUpdate.filledSize.toString(),
+          price: orderUpdate.price.toString()
         });
       }
     }

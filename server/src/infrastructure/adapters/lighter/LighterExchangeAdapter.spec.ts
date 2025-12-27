@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { LighterExchangeAdapter } from './LighterExchangeAdapter';
 import { DiagnosticsService } from '../../services/DiagnosticsService';
 import { RateLimiterService } from '../../services/RateLimiterService';
+import { LighterWebSocketProvider } from './LighterWebSocketProvider';
 import {
   OrderSide,
   OrderType,
@@ -43,9 +44,18 @@ describe('LighterExchangeAdapter Nonce Handling', () => {
   let mockConfigService: jest.Mocked<ConfigService>;
   let mockDiagnosticsService: jest.Mocked<DiagnosticsService>;
   let mockRateLimiter: jest.Mocked<RateLimiterService>;
+  let mockWsProvider: jest.Mocked<LighterWebSocketProvider>;
 
   beforeEach(async () => {
     jest.useFakeTimers();
+
+    mockWsProvider = {
+      subscribeToPositionUpdates: jest.fn(),
+      getCachedOrders: jest.fn(),
+      hasOrderData: jest.fn().mockReturnValue(false),
+      on: jest.fn(),
+      removeListener: jest.fn(),
+    } as any;
 
     mockConfigService = {
       get: jest.fn((key: string, defaultValue?: any) => {
@@ -86,11 +96,15 @@ describe('LighterExchangeAdapter Nonce Handling', () => {
             new LighterExchangeAdapter(
               mockConfigService,
               mockRateLimiter,
+              mockDiagnosticsService,
+              undefined,
+              mockWsProvider,
             ),
         },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: DiagnosticsService, useValue: mockDiagnosticsService },
         { provide: RateLimiterService, useValue: mockRateLimiter },
+        { provide: LighterWebSocketProvider, useValue: mockWsProvider },
       ],
     }).compile();
 
@@ -181,8 +195,17 @@ describe('LighterExchangeAdapter ReduceOnly Validation', () => {
   let mockConfigService: jest.Mocked<ConfigService>;
   let mockDiagnosticsService: jest.Mocked<DiagnosticsService>;
   let mockRateLimiter: jest.Mocked<RateLimiterService>;
+  let mockWsProvider: jest.Mocked<LighterWebSocketProvider>;
 
   beforeEach(async () => {
+    mockWsProvider = {
+      subscribeToPositionUpdates: jest.fn(),
+      getCachedOrders: jest.fn(),
+      hasOrderData: jest.fn().mockReturnValue(false),
+      on: jest.fn(),
+      removeListener: jest.fn(),
+    } as any;
+
     mockConfigService = {
       get: jest.fn((key: string, defaultValue?: any) => {
         const config: Record<string, any> = {
@@ -222,11 +245,15 @@ describe('LighterExchangeAdapter ReduceOnly Validation', () => {
             new LighterExchangeAdapter(
               mockConfigService,
               mockRateLimiter,
+              mockDiagnosticsService,
+              undefined,
+              mockWsProvider,
             ),
         },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: DiagnosticsService, useValue: mockDiagnosticsService },
         { provide: RateLimiterService, useValue: mockRateLimiter },
+        { provide: LighterWebSocketProvider, useValue: mockWsProvider },
       ],
     }).compile();
 
@@ -527,8 +554,23 @@ describe('LighterExchangeAdapter Order ID Matching (Critical Bug Prevention)', (
   let adapter: LighterExchangeAdapter;
   let mockConfigService: jest.Mocked<ConfigService>;
   let mockRateLimiter: jest.Mocked<RateLimiterService>;
+  let mockDiagnosticsService: jest.Mocked<DiagnosticsService>;
+  let mockWsProvider: jest.Mocked<LighterWebSocketProvider>;
 
   beforeEach(async () => {
+    mockWsProvider = {
+      subscribeToPositionUpdates: jest.fn(),
+      getCachedOrders: jest.fn(),
+      hasOrderData: jest.fn().mockReturnValue(false),
+      on: jest.fn(),
+      removeListener: jest.fn(),
+    } as any;
+
+    mockDiagnosticsService = {
+      recordError: jest.fn(),
+      recordOrder: jest.fn(),
+    } as any;
+
     mockConfigService = {
       get: jest.fn((key: string, defaultValue?: any) => {
         const config: Record<string, any> = {
@@ -564,10 +606,15 @@ describe('LighterExchangeAdapter Order ID Matching (Critical Bug Prevention)', (
             new LighterExchangeAdapter(
               mockConfigService,
               mockRateLimiter,
+              mockDiagnosticsService,
+              undefined,
+              mockWsProvider,
             ),
         },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: DiagnosticsService, useValue: mockDiagnosticsService },
         { provide: RateLimiterService, useValue: mockRateLimiter },
+        { provide: LighterWebSocketProvider, useValue: mockWsProvider },
       ],
     }).compile();
 
@@ -679,7 +726,7 @@ describe('LighterExchangeAdapter Order ID Matching (Critical Bug Prevention)', (
         side: OrderSide.SHORT,
         size: 217,
         price: 0.38281,
-        placedAt: new Date(),
+        placedAt: new Date(Date.now() - 300000), // 5 minutes ago
       });
 
       // Mock getOpenOrders to return NO matching order (it filled!)
@@ -743,7 +790,7 @@ describe('LighterExchangeAdapter Order ID Matching (Critical Bug Prevention)', (
         side: OrderSide.LONG,
         size: 50,
         price: 2.0,
-        placedAt: new Date(Date.now() - 30000), // 30 seconds ago
+        placedAt: new Date(Date.now() - 300000), // 5 minutes ago
       });
 
       // Mock getOpenOrders to return empty
@@ -799,7 +846,7 @@ describe('LighterExchangeAdapter Order ID Matching (Critical Bug Prevention)', (
         side: OrderSide.SHORT,
         size: 217,
         price: 0.38281,
-        placedAt: new Date(Date.now() - 30000), // 30 seconds ago
+        placedAt: new Date(Date.now() - 300000), // 5 minutes ago
       });
 
       // Mock getOpenOrders with DIFFERENT symbol
@@ -831,7 +878,7 @@ describe('LighterExchangeAdapter Order ID Matching (Critical Bug Prevention)', (
         side: OrderSide.SHORT, // We placed a SHORT
         size: 217,
         price: 0.38281,
-        placedAt: new Date(Date.now() - 30000),
+        placedAt: new Date(Date.now() - 300000),
       });
 
       // Mock getOpenOrders with DIFFERENT side

@@ -71,6 +71,9 @@ describe('UnifiedExecutionService', () => {
     }).compile();
 
     service = module.get<UnifiedExecutionService>(UnifiedExecutionService);
+    
+    // Mock calculateMinimumTimeToFunding to return 1 hour to avoid time pressure reduction in tests
+    jest.spyOn(service as any, 'calculateMinimumTimeToFunding').mockReturnValue(3600000);
   });
 
   // ============================================
@@ -386,7 +389,8 @@ describe('UnifiedExecutionService', () => {
         ExchangeType.HYPERLIQUID,
         {
           minSlices: 3, // Force at least 3 slices
-          maxSlices: 20
+          maxSlices: 20,
+          sliceFillTimeoutMs: 10000 // Use smaller timeout to avoid time pressure reduction in tests
         }
       );
 

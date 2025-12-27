@@ -66,7 +66,7 @@ export class OrderExecutor implements IOrderExecutor {
   private unifiedExecutionConfig: Partial<UnifiedExecutionConfig> = {
     minSlices: 2,
     maxSlices: 10,
-    sliceFillTimeoutMs: 20000, // 20 seconds per slice
+    sliceFillTimeoutMs: 300000, // 5 minutes per slice
     maxImbalancePercent: 5, // Abort if > 5% imbalance
     fundingBufferMs: 3 * 60 * 1000, // 3 minute buffer before funding
     maxPortfolioPctPerSlice: 0.05, // 5% of portfolio max
