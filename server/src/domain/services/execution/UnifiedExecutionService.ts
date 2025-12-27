@@ -413,76 +413,60 @@ export class UnifiedExecutionService {
 
     while (Date.now() - start < cfg.sliceFillTimeoutMs) {
       try {
-        // CRITICAL: Check order status FIRST, not position delta
-        // Position delta can be misleading if there are existing positions from previous slices
-        // We must verify the SPECIFIC ORDER filled, not just that a position exists
-        const status = await adapter.getOrderStatus(orderId, symbol);
-        
-        // CRITICAL: Always verify fills via position delta when we have initial position
+        // CRITICAL: Check position delta FIRST - this is the most reliable way to detect fills
         // getOrderStatus can be unreliable (especially for Lighter with tx hash vs order index)
         // The ONLY reliable way to confirm a fill is to check if the position actually increased
         
-        if (status.status === OrderStatus.FILLED) {
-          // Order claims to be filled - VERIFY via position delta
-          try {
-            const positions = await adapter.getPositions();
-            const currentPosition = positions.find(
-              (p) => p.symbol === symbol && Math.abs(p.size) > 0.0001
-            );
+        try {
+          const positions = await adapter.getPositions();
+          const currentPosition = positions.find(
+            (p) => p.symbol === symbol && Math.abs(p.size) > 0.0001
+          );
+          
+          if (currentPosition) {
+            const currentPositionSize = Math.abs(currentPosition.size);
+            const fillDelta = Math.abs(currentPositionSize - initialPositionSize);
             
-            if (currentPosition) {
-              const currentPositionSize = Math.abs(currentPosition.size);
-              const fillDelta = Math.abs(currentPositionSize - initialPositionSize);
-              
-              // CRITICAL: Position must have increased by at least 50% of expected size
-              // This prevents false positives from existing positions
-              const minExpectedDelta = expectedSize * 0.5;
-              
-              if (fillDelta >= minExpectedDelta) {
-                // Position increased significantly - this is a real fill
-                this.logger.log(
-                  `✅ Fill VERIFIED via position delta: ${symbol} ` +
-                  `initial=${initialPositionSize.toFixed(4)}, ` +
-                  `current=${currentPositionSize.toFixed(4)}, ` +
-                  `filled=${fillDelta.toFixed(4)}, expected=${expectedSize.toFixed(4)}`
-                );
-                return { filled: true, filledSize: fillDelta };
-              } else if (fillDelta > 0) {
-                // Partial fill - position increased but not by expected amount
-                this.logger.warn(
-                  `⚠️ Partial fill detected: ${symbol} ` +
-                  `initial=${initialPositionSize.toFixed(4)}, ` +
-                  `current=${currentPositionSize.toFixed(4)}, ` +
-                  `filled=${fillDelta.toFixed(4)}, expected=${expectedSize.toFixed(4)}`
-                );
-                return { filled: true, filledSize: fillDelta };
-              } else {
-                // Position didn't increase - getOrderStatus returned FALSE POSITIVE
-                // The order is NOT actually filled yet!
-                this.logger.warn(
-                  `⚠️ FALSE POSITIVE: getOrderStatus returned FILLED but position delta is ${fillDelta.toFixed(4)}. ` +
-                  `Initial=${initialPositionSize.toFixed(4)}, current=${currentPositionSize.toFixed(4)}. ` +
-                  `Order may still be processing - continuing to wait...`
-                );
-                // DON'T return filled - keep waiting
-                currentFilled = 0;
-              }
-            } else if (initialPositionSize === 0) {
-              // No position exists and no initial position - order might have filled then closed
-              // This is unusual, but we should check status.filledSize
-              currentFilled = status.filledSize || 0;
-              if (currentFilled > 0) {
-                return { filled: true, filledSize: currentFilled };
-              }
+            // CRITICAL: Position must have increased by at least 50% of expected size
+            // This prevents false positives from existing positions
+            const minExpectedDelta = expectedSize * 0.5;
+            
+            if (fillDelta >= minExpectedDelta) {
+              // Position increased significantly - this is a real fill!
+              this.logger.log(
+                `✅ Fill VERIFIED via position delta: ${symbol} ` +
+                `initial=${initialPositionSize.toFixed(4)}, ` +
+                `current=${currentPositionSize.toFixed(4)}, ` +
+                `filled=${fillDelta.toFixed(4)}, expected=${expectedSize.toFixed(4)}`
+              );
+              return { filled: true, filledSize: fillDelta };
+            } else if (fillDelta > expectedSize * 0.1) {
+              // Partial fill - position increased but not by expected amount
+              // Only report if at least 10% filled
+              this.logger.warn(
+                `⚠️ Partial fill detected: ${symbol} ` +
+                `initial=${initialPositionSize.toFixed(4)}, ` +
+                `current=${currentPositionSize.toFixed(4)}, ` +
+                `filled=${fillDelta.toFixed(4)}, expected=${expectedSize.toFixed(4)}`
+              );
+              return { filled: true, filledSize: fillDelta };
             }
-          } catch (posError: any) {
-            this.logger.debug(`Could not verify fill via position delta: ${posError.message}`);
-            // If we can't verify, DON'T assume filled - keep waiting
+            // Position didn't increase enough - keep waiting
+          } else if (initialPositionSize === 0) {
+            // No position exists yet - check order status as fallback
+            const status = await adapter.getOrderStatus(orderId, symbol);
+            if (status.status === OrderStatus.FILLED && status.filledSize && status.filledSize > 0) {
+              this.logger.log(`✅ Fill detected via order status (no existing position): ${symbol} filled=${status.filledSize}`);
+              return { filled: true, filledSize: status.filledSize };
+            }
           }
-        } else {
-          // Order not filled yet - use status.filledSize for partial fill tracking
-          currentFilled = status.filledSize || 0;
+        } catch (posError: any) {
+          this.logger.debug(`Could not check position for fill detection: ${posError.message}`);
         }
+        
+        // Also check order status for REJECTED or CANCELLED
+        const status = await adapter.getOrderStatus(orderId, symbol);
+        currentFilled = status.filledSize || 0;
         
         // CRITICAL: If order status is CANCELLED, check if it's because it filled instantly
         // But ONLY if we can verify the order actually filled (not just that a position exists)

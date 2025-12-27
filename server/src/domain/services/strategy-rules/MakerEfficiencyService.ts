@@ -340,7 +340,10 @@ export class MakerEfficiencyService implements OnModuleInit {
     if (!bestBidAsk) {
       // Try fallback to adapter's getBestBidAsk if WebSocket data unavailable
       try {
-        bestBidAsk = await adapter.getBestBidAsk(symbol);
+        // Check if adapter has getBestBidAsk method (not all adapters do)
+        if ('getBestBidAsk' in adapter && typeof (adapter as any).getBestBidAsk === 'function') {
+          bestBidAsk = await (adapter as any).getBestBidAsk(symbol);
+        }
         if (!bestBidAsk) {
           this.logger.warn(`⚠️ No orderbook data available for ${symbol} on ${exchange} (order age: ${orderAgeSec.toFixed(0)}s)`);
           return;

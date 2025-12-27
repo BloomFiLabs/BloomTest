@@ -3884,20 +3884,24 @@ export class FundingArbitrageStrategy {
           );
         }
       } else {
-        // Perp-perp plan
+        // Perp-perp plan - use OrderExecutor to ensure unified execution with slicing
         const perpPerpPlan = worstCase.plan;
-        const longResponse = await longAdapter.placeOrder(
-          perpPerpPlan.longOrder,
-        );
-        const shortResponse = await shortAdapter.placeOrder(
-          perpPerpPlan.shortOrder,
+        const executionResult = await this.orderExecutor.executeSinglePosition(
+          {
+            plan: perpPerpPlan,
+            opportunity: worstCase.opportunity,
+          },
+          adapters,
+          result,
         );
 
-        if (longResponse.isSuccess() && shortResponse.isSuccess()) {
+        if (executionResult.isSuccess) {
           result.opportunitiesExecuted = 1;
           result.ordersPlaced = 2;
         } else {
-          result.errors.push(`Failed to execute worst-case opportunity orders`);
+          result.errors.push(
+            `Failed to execute worst-case opportunity: ${executionResult.error.message}`,
+          );
         }
       }
     } catch (error: any) {

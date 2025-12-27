@@ -2394,15 +2394,203 @@ export class OrderExecutor implements IOrderExecutor {
                   : ''),
             );
 
-            // Use placeOrderPair which handles sequential vs parallel execution
-            const [longResponse, shortResponse] = await this.placeOrderPair(
-              longAdapter!,
-              shortAdapter!,
-              longOrder,
-              shortOrder,
-              opportunity.longExchange,
-              opportunity.shortExchange!,
+            // ========================================================
+            // UNIFIED INTELLIGENT EXECUTION (SLICING)
+            // ========================================================
+            if (this.useSlicedExecution && this.unifiedExecutionService) {
+              this.logger.log(`🧠 Using UNIFIED INTELLIGENT execution (SLICING ENABLED) for ${opportunity.symbol}`);
+              
+              const unifiedResult = await this.unifiedExecutionService.executeSmartHedge(
+                longAdapter!,
+                shortAdapter!,
+                opportunity.symbol,
+                actualPositionBaseAsset, // Total size
+                longOrder.price || 0,
+                shortOrder.price || 0,
+                opportunity.longExchange,
+                opportunity.shortExchange!,
+                this.unifiedExecutionConfig,
+              );
+
+              if (unifiedResult.success) {
+                // Success! Both sides filled across all slices
+                this.logger.log(
+                  `✅ Unified execution SUCCESS for ${opportunity.symbol}: ` +
+                  `${unifiedResult.completedSlices}/${unifiedResult.totalSlices} slices, ` +
+                  `LONG: ${unifiedResult.totalLongFilled.toFixed(4)}, SHORT: ${unifiedResult.totalShortFilled.toFixed(4)}`
+                );
+                
+                // Create mock responses for compatibility with existing code
+                const finalLongResponse = new PerpOrderResponse(
+                  'unified-long',
+                  OrderStatus.FILLED,
+                  opportunity.symbol,
+                  OrderSide.LONG,
+                  undefined,
+                  unifiedResult.totalLongFilled,
+                  longOrder.price,
+                  undefined,
+                  new Date(),
+                );
+                const finalShortResponse = new PerpOrderResponse(
+                  'unified-short',
+                  OrderStatus.FILLED,
+                  opportunity.symbol,
+                  OrderSide.SHORT,
+                  undefined,
+                  unifiedResult.totalShortFilled,
+                  shortOrder.price,
+                  undefined,
+                  new Date(),
+                );
+
+                // Check if both orders succeeded (they did, since unifiedResult.success is true)
+                const longIsGTC =
+                  perpPerpPlan.longOrder.timeInForce === TimeInForce.GTC;
+                const shortIsGTC =
+                  perpPerpPlan.shortOrder.timeInForce === TimeInForce.GTC;
+
+                // Both filled successfully - continue to next opportunity
+                if (finalLongResponse.isFilled() && finalShortResponse.isFilled()) {
+                  result.opportunitiesExecuted++;
+                  result.ordersPlaced += unifiedResult.completedSlices * 2;
+                  result.totalExpectedReturn +=
+                    (item.plan.expectedNetReturn || 0) *
+                    (unifiedResult.completedSlices / unifiedResult.totalSlices);
+                  continue; // Success - move to next opportunity
+                }
+              } else {
+                // Execution failed or partial - handle based on what happened
+                const imbalance = Math.abs(unifiedResult.totalLongFilled - unifiedResult.totalShortFilled);
+                const imbalanceUsd = imbalance * avgPrice;
+                
+                if (imbalanceUsd > 10) {
+                  // More than $10 imbalance - treat as failure
+                  this.logger.error(
+                    `🚨 Unified execution FAILED with imbalance for ${opportunity.symbol}: ` +
+                    `LONG: ${unifiedResult.totalLongFilled.toFixed(4)}, SHORT: ${unifiedResult.totalShortFilled.toFixed(4)} ` +
+                    `(imbalance: $${imbalanceUsd.toFixed(2)}). Reason: ${unifiedResult.abortReason}`
+                  );
+                  
+                  result.errors.push(`Unified execution failed: ${unifiedResult.abortReason}`);
+                  
+                  // Record the single-leg failure
+                  if (this.diagnosticsService) {
+                    const longIsLarger = unifiedResult.totalLongFilled > unifiedResult.totalShortFilled;
+                    this.diagnosticsService.recordSingleLegFailure({
+                      id: `unified-${opportunity.symbol}-${Date.now()}`,
+                      symbol: opportunity.symbol,
+                      timestamp: new Date(),
+                      failedLeg: longIsLarger ? 'short' : 'long',
+                      failedExchange: longIsLarger ? opportunity.shortExchange! : opportunity.longExchange,
+                      successfulExchange: longIsLarger ? opportunity.longExchange : opportunity.shortExchange!,
+                      failureReason: 'exchange_error',
+                      failureMessage: unifiedResult.abortReason || 'Unified execution imbalance',
+                      timeBetweenLegsMs: 0,
+                      attemptedSize: actualPositionBaseAsset,
+                      filledSize: Math.min(unifiedResult.totalLongFilled, unifiedResult.totalShortFilled),
+                    });
+                  }
+                  
+                  // Break to retry this opportunity
+                  break;
+                } else if (unifiedResult.completedSlices > 0) {
+                  // Partial success - some slices completed
+                  this.logger.warn(
+                    `⚠️ Unified execution PARTIAL for ${opportunity.symbol}: ` +
+                    `${unifiedResult.completedSlices}/${unifiedResult.totalSlices} slices completed. ` +
+                    `LONG: ${unifiedResult.totalLongFilled.toFixed(4)}, SHORT: ${unifiedResult.totalShortFilled.toFixed(4)}`
+                  );
+                  
+                  result.opportunitiesExecuted++;
+                  result.ordersPlaced += unifiedResult.completedSlices * 2;
+                  result.totalExpectedReturn +=
+                    (item.plan.expectedNetReturn || 0) *
+                    (unifiedResult.completedSlices / unifiedResult.totalSlices);
+                  continue; // Partial success - move to next opportunity
+                } else {
+                  // Complete failure - break to retry
+                  this.logger.error(
+                    `❌ Unified execution COMPLETE FAILURE for ${opportunity.symbol}: ${unifiedResult.abortReason}`
+                  );
+                  result.errors.push(`Unified execution failed: ${unifiedResult.abortReason}`);
+                  break; // Break to retry this opportunity
+                }
+              }
+            }
+
+            // ========================================================
+            // FALLBACK: Original all-at-once execution (if sliced disabled)
+            // ========================================================
+            this.logger.warn(
+              `⚠️ Using ALL-AT-ONCE execution for ${opportunity.symbol} (sliced disabled or service unavailable)`,
             );
+
+            let longResponse: PerpOrderResponse;
+            let shortResponse: PerpOrderResponse;
+            let longError: any = null;
+            let shortError: any = null;
+
+            try {
+              // Use placeOrderPair which handles sequential vs parallel execution
+              [longResponse, shortResponse] = await this.placeOrderPair(
+                longAdapter!,
+                shortAdapter!,
+                longOrder,
+                shortOrder,
+                opportunity.longExchange,
+                opportunity.shortExchange!,
+              );
+            } catch (err: any) {
+              // If placeOrderPair throws, we need to determine which order failed
+              const errorMsg = err?.message || String(err);
+              
+              if (err.longResponse) {
+                longResponse = err.longResponse;
+                shortError = err;
+                this.logger.error(
+                  `❌ Failed to place SHORT order on ${opportunity.shortExchange}: ${errorMsg}`,
+                );
+                shortResponse = new PerpOrderResponse(
+                  'error',
+                  OrderStatus.REJECTED,
+                  opportunity.symbol,
+                  OrderSide.SHORT,
+                  undefined,
+                  undefined,
+                  undefined,
+                  errorMsg,
+                  new Date(),
+                );
+              } else {
+                longError = err;
+                this.logger.error(
+                  `❌ Failed to place LONG order on ${opportunity.longExchange}: ${errorMsg}`,
+                );
+                longResponse = new PerpOrderResponse(
+                  'error',
+                  OrderStatus.REJECTED,
+                  opportunity.symbol,
+                  OrderSide.LONG,
+                  undefined,
+                  undefined,
+                  undefined,
+                  errorMsg,
+                  new Date(),
+                );
+                shortResponse = new PerpOrderResponse(
+                  'error',
+                  OrderStatus.REJECTED,
+                  opportunity.symbol,
+                  OrderSide.SHORT,
+                  undefined,
+                  undefined,
+                  undefined,
+                  'Long order failed, short not placed',
+                  new Date(),
+                );
+              }
+            }
 
             // Wait for orders to fill if they're not immediately filled
             // CRITICAL: For Lighter orders, always check status even if marked as SUBMITTED,
