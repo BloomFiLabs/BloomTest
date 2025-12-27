@@ -127,18 +127,44 @@ export class UnifiedExecutionService {
     const slicesForPortfolio = Math.ceil(totalUsd / maxSliceSizeUsd);
     
     // c) Combine and clamp
+    // CRITICAL: Safety (portfolio constraint) ALWAYS takes priority over time constraints
     let numberOfSlices = Math.max(cfg.minSlices, slicesForPortfolio);
     
     // If we have time constraints, we might have to reduce slices, 
-    // but never below minSlices unless we really have no time.
-    if (slicesForTime < numberOfSlices && slicesForTime >= cfg.minSlices) {
+    // but NEVER reduce below what's needed for safety (portfolio constraint)
+    if (slicesForTime < numberOfSlices && slicesForTime >= slicesForPortfolio) {
       this.logger.warn(`Time pressure detected: Reducing slices from ${numberOfSlices} to ${slicesForTime}`);
       numberOfSlices = slicesForTime;
+    } else if (slicesForTime < slicesForPortfolio) {
+      // Time constraint would violate safety - prioritize safety
+      this.logger.warn(
+        `⚠️ Time constraint (${slicesForTime} slices) would violate safety (need ${slicesForPortfolio} slices). ` +
+        `Prioritizing safety - execution may not complete before funding.`
+      );
+      // Keep slicesForPortfolio to maintain safety
+      numberOfSlices = slicesForPortfolio;
     }
     
     numberOfSlices = Math.min(numberOfSlices, cfg.maxSlices);
-    const sliceSize = totalSize / numberOfSlices;
-    const sliceUsd = sliceSize * avgPrice;
+    let sliceSize = totalSize / numberOfSlices;
+    let sliceUsd = sliceSize * avgPrice;
+    
+    // FINAL SAFETY CHECK: Ensure calculated slice size doesn't exceed limits
+    // This catches any edge cases where rounding or time constraints caused issues
+    if (sliceUsd > maxSliceSizeUsd * 1.05) { // 5% tolerance for rounding
+      const requiredSlices = Math.ceil(totalUsd / maxSliceSizeUsd);
+      this.logger.warn(
+        `⚠️ Calculated slice size ($${sliceUsd.toFixed(2)}) exceeds safety limit ($${maxSliceSizeUsd.toFixed(2)}). ` +
+        `Recalculating: ${numberOfSlices} -> ${requiredSlices} slices`
+      );
+      numberOfSlices = Math.max(requiredSlices, cfg.minSlices);
+      // Recalculate slice size
+      sliceSize = totalSize / numberOfSlices;
+      sliceUsd = sliceSize * avgPrice;
+      this.logger.log(
+        `✅ Recalculated: ${numberOfSlices} slices x $${sliceUsd.toFixed(2)} = $${totalUsd.toFixed(2)}`
+      );
+    }
 
     this.logger.log(
       `🚀 Unified Execution Plan for ${symbol}:\n` +
