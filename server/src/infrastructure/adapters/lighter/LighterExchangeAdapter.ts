@@ -68,6 +68,14 @@ export class LighterExchangeAdapter
 
   // Track consecutive nonce errors for debugging
   private consecutiveNonceErrors = 0;
+
+  // ==================== ROBUST NONCE MANAGEMENT ====================
+  // Local nonce tracking to handle stale API responses
+  private localNonce: number | null = null;
+  private lastSuccessfulNonce: number | null = null;
+  private lastFailedNonce: number | null = null;
+  private failedNonceAttempts: Map<number, number> = new Map(); // Track how many times we've tried each nonce
+  private readonly MAX_NONCE_RETRIES = 2; // Max times to retry same nonce before bumping
   private lastSuccessfulOrderTime: Date | null = null;
 
   // Rate limit weights (from Lighter docs)
@@ -258,9 +266,40 @@ export class LighterExchangeAdapter
 
   /**
    * Explicitly get a fresh nonce from the Lighter API
-   * This is called before every transaction to ensure we're in sync with the sequencer
+   * ROBUST VERSION: Tracks nonce locally and auto-bumps on stale API responses
+   * 
+   * Strategy:
+   * 1. On first call or reset: fetch from API
+   * 2. Subsequent calls: increment local nonce
+   * 3. If API returns stale nonce (same as last failed): auto-bump
+   * 4. Sync with API periodically or on errors
    */
   private async getFreshNonce(): Promise<number | null> {
+    // If we have a local nonce and it's been successfully used, increment it
+    if (this.localNonce !== null && this.lastSuccessfulNonce !== null) {
+      // Check if API is returning stale data (same nonce we've already tried and failed)
+      if (this.lastFailedNonce !== null && this.lastFailedNonce === this.localNonce) {
+        const attempts = this.failedNonceAttempts.get(this.localNonce) || 0;
+        if (attempts >= this.MAX_NONCE_RETRIES) {
+          // API is stuck returning stale nonce - bump it locally
+          this.localNonce++;
+          this.logger.warn(
+            `⚠️ API returned stale nonce ${this.lastFailedNonce} ${attempts} times. ` +
+            `Auto-bumping to ${this.localNonce}`
+          );
+          this.failedNonceAttempts.delete(this.lastFailedNonce);
+          this.lastFailedNonce = null;
+          return this.localNonce;
+        }
+      }
+      
+      // Normal case: increment local nonce
+      this.localNonce++;
+      this.logger.debug(`📡 Using locally incremented nonce: ${this.localNonce} (last successful: ${this.lastSuccessfulNonce})`);
+      return this.localNonce;
+    }
+
+    // First call or after reset - fetch from API
     try {
       const response = await this.callApi(this.WEIGHT_INFO, () => axios.get(
         `${this.config.baseUrl}/api/v1/nextNonce`,
@@ -273,51 +312,82 @@ export class LighterExchangeAdapter
         },
       ));
 
-      let nonce: number | null = null;
+      let apiNonce: number | null = null;
       if (response.data && typeof response.data === 'object') {
         if (response.data.nonce !== undefined) {
-          nonce = Number(response.data.nonce);
+          apiNonce = Number(response.data.nonce);
         }
       } else if (typeof response.data === 'number') {
-        nonce = response.data;
+        apiNonce = response.data;
       }
 
-      if (nonce !== null && !isNaN(nonce)) {
+      if (apiNonce !== null && !isNaN(apiNonce)) {
         this.lastNonceSyncTime = Date.now();
-        this.logger.debug(`📡 Fetched fresh nonce from API: ${nonce}`);
+        
+        // If we have a local nonce that's ahead of API, use local (API might be stale)
+        if (this.localNonce !== null && this.localNonce >= apiNonce) {
+          this.logger.warn(
+            `⚠️ API returned nonce ${apiNonce} but local is ${this.localNonce}. ` +
+            `API may be stale, using local + 1: ${this.localNonce + 1}`
+          );
+          this.localNonce++;
+          return this.localNonce;
+        }
+        
+        // Sync to API nonce
+        this.localNonce = apiNonce;
+        this.logger.debug(`📡 Fetched fresh nonce from API: ${apiNonce}`);
         
         // Also try to update the SDK's internal counter if possible to keep it in sync
         if (this.signerClient) {
           try {
             // Some versions of the SDK allow syncing the nonce manager
             if ((this.signerClient as any).nonceManager?.setNonce) {
-              (this.signerClient as any).nonceManager.setNonce(nonce);
+              (this.signerClient as any).nonceManager.setNonce(apiNonce);
             }
           } catch (e) {
             // Non-critical
           }
         }
         
-        return nonce;
+        return apiNonce;
       }
       
       // Fallback to SDK method if API fails
       if (this.signerClient) {
         const sdkNonce = await (this.signerClient as any).getNextNonce();
-        return (typeof sdkNonce === 'object' && sdkNonce !== null) ? sdkNonce.nonce : sdkNonce;
+        const nonce = (typeof sdkNonce === 'object' && sdkNonce !== null) ? sdkNonce.nonce : sdkNonce;
+        if (nonce !== null && !isNaN(nonce)) {
+          this.localNonce = Number(nonce);
+          return this.localNonce;
+        }
       }
       
-      return null;
+      return this.localNonce; // Return local if available, even if API failed
     } catch (e: any) {
-      this.logger.warn(`Failed to get fresh nonce from API: ${e.message}. Falling back to SDK.`);
+      this.logger.warn(`Failed to get fresh nonce from API: ${e.message}. Using local or SDK fallback.`);
+      
+      // If we have a local nonce, increment and use it
+      if (this.localNonce !== null) {
+        this.localNonce++;
+        this.logger.debug(`📡 API failed, using local nonce: ${this.localNonce}`);
+        return this.localNonce;
+      }
+      
+      // Last resort: try SDK
       if (this.signerClient) {
         try {
           const sdkNonce = await (this.signerClient as any).getNextNonce();
-          return (typeof sdkNonce === 'object' && sdkNonce !== null) ? sdkNonce.nonce : sdkNonce;
+          const nonce = (typeof sdkNonce === 'object' && sdkNonce !== null) ? sdkNonce.nonce : sdkNonce;
+          if (nonce !== null && !isNaN(nonce)) {
+            this.localNonce = Number(nonce);
+            return this.localNonce;
+          }
         } catch (sdkError) {
-          return null;
+          // Ignore
         }
       }
+      
       return null;
     }
   }
@@ -453,6 +523,12 @@ export class LighterExchangeAdapter
       // Step 2: Clear ALL client state to ensure fresh start
       this.signerClient = null;
       this.orderApi = null;
+      
+      // Reset local nonce tracking to force fresh sync from API
+      this.localNonce = null;
+      this.lastSuccessfulNonce = null;
+      this.lastFailedNonce = null;
+      this.failedNonceAttempts.clear();
 
       // Step 3: Wait for server state to settle
       // The delay increases with consecutive errors (1s base + 500ms per error, max 5s)
@@ -488,6 +564,22 @@ export class LighterExchangeAdapter
    */
   isNonceResetInProgress(): boolean {
     return this.nonceResetInProgress;
+  }
+
+  /**
+   * Force resync nonce from API
+   * Useful after manual trades on Lighter UI or when nonce gets out of sync
+   * This resets local tracking and fetches fresh nonce from server
+   */
+  async forceNonceResync(): Promise<number | null> {
+    this.logger.log('🔄 Force resyncing nonce from Lighter API...');
+    this.localNonce = null;
+    this.lastSuccessfulNonce = null;
+    this.lastFailedNonce = null;
+    this.failedNonceAttempts.clear();
+    const nonce = await this.getFreshNonce();
+    this.logger.log(`✅ Nonce resynced: ${nonce}`);
+    return nonce;
   }
 
   private async getMarketHelper(marketIndex: number): Promise<MarketHelper> {
@@ -854,6 +946,7 @@ export class LighterExchangeAdapter
       // Acquire mutex ONLY for the critical section (nonce + submission)
       const releaseMutex = await this.acquireOrderMutex();
       
+      let nonce: number | null = null;
       try {
         this.logger.debug(
           `Initializing Lighter adapter for order placement (attempt ${attempt + 1})...`,
@@ -861,7 +954,7 @@ export class LighterExchangeAdapter
         await this.ensureInitialized();
         
         // Fetch a fresh nonce explicitly before each order attempt
-        const nonce = await this.getFreshNonce();
+        nonce = await this.getFreshNonce();
         this.logger.debug(`Using fresh nonce for ${request.symbol}: ${nonce}`);
 
         const marketIndex = await this.getMarketIndex(request.symbol);
@@ -877,6 +970,13 @@ export class LighterExchangeAdapter
           orderResponse = await this.executeLighterLimitOrder(request, marketIndex, market, nonce);
         }
 
+        // Order succeeded - track the nonce as successful
+        if (nonce !== null) {
+          this.lastSuccessfulNonce = nonce;
+          this.failedNonceAttempts.delete(nonce); // Clear any failure tracking
+          this.lastFailedNonce = null;
+        }
+        
         this.consecutiveNonceErrors = 0;
         this.lastSuccessfulOrderTime = new Date();
         return orderResponse;
@@ -884,6 +984,13 @@ export class LighterExchangeAdapter
       } catch (error: any) {
         lastError = error;
         const errorMessage = error.message || String(error);
+
+        // Track failed nonce for intelligent retry logic
+        if (nonce !== null) {
+          this.lastFailedNonce = nonce;
+          const attempts = (this.failedNonceAttempts.get(nonce) || 0) + 1;
+          this.failedNonceAttempts.set(nonce, attempts);
+        }
 
         if (
           errorMessage.includes('invalid nonce') ||
@@ -895,10 +1002,21 @@ export class LighterExchangeAdapter
             `❌ Lighter nonce error (attempt ${attempt + 1}/${maxRetries}): ${errorMessage}`,
           );
           
+          // Reset local nonce to force re-sync from API on nonce errors
           if (this.consecutiveNonceErrors >= 2) {
-            this.logger.warn(`🔄 Multiple nonce errors, clearing signer client...`);
+            this.logger.warn(`🔄 Multiple nonce errors, resetting local nonce and clearing signer client...`);
+            this.localNonce = null;
+            this.lastSuccessfulNonce = null;
             this.signerClient = null;
           }
+        } else if (errorMessage.includes('invalid signature')) {
+          // "invalid signature" often means nonce was already used (ghost success)
+          // Track it but don't reset local nonce - let getFreshNonce handle auto-bump
+          this.consecutiveNonceErrors++;
+          this.logger.warn(
+            `⚠️ Invalid signature error (attempt ${attempt + 1}/${maxRetries}): ${errorMessage}. ` +
+            `Nonce ${nonce} may have been used. Will auto-bump on next attempt.`
+          );
         } else {
           this.logger.error(
             `❌ Lighter order error (attempt ${attempt + 1}/${maxRetries}): ${errorMessage}`,
@@ -1530,10 +1648,11 @@ export class LighterExchangeAdapter
 
     try {
       // Retry loop with nonce error handling
+      let nonce: number | null = null;
       for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
           // Fetch a fresh nonce explicitly before each modify attempt
-          const nonce = await this.getFreshNonce();
+          nonce = await this.getFreshNonce();
           
           this.logger.debug(
             `🔄 Modifying order ${orderIndex} on Lighter: ${request.symbol} @ ${request.price} ` +
@@ -1557,6 +1676,13 @@ export class LighterExchangeAdapter
         throw new Error(error);
       }
 
+        // Order modification succeeded - track the nonce as successful
+        if (nonce !== null) {
+          this.lastSuccessfulNonce = nonce;
+          this.failedNonceAttempts.delete(nonce);
+          this.lastFailedNonce = null;
+        }
+        
         // Reset consecutive nonce errors on success
         this.consecutiveNonceErrors = 0;
 
@@ -1582,6 +1708,13 @@ export class LighterExchangeAdapter
       );
     } catch (error: any) {
         const errorMsg = error.message || String(error);
+        
+        // Track failed nonce
+        if (nonce !== null) {
+          this.lastFailedNonce = nonce;
+          const attempts = (this.failedNonceAttempts.get(nonce) || 0) + 1;
+          this.failedNonceAttempts.set(nonce, attempts);
+        }
         
         // Check if this is a nonce error
         const isNonceError = this.isNonceError(error);
