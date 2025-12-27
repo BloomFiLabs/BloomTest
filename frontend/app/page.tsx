@@ -37,8 +37,8 @@ ChartJS.register(
   Filler
 );
 
-const DIAGNOSTICS_URL = 'https://keeper-q2n9z.ondigitalocean.app/keeper/diagnostics';
-const RESET_URL = 'https://keeper-q2n9z.ondigitalocean.app/keeper/reset-metrics';
+const DIAGNOSTICS_URL = 'http://146.190.7.44:3000/keeper/diagnostics';
+const RESET_URL = 'http://146.190.7.44:3000/keeper/reset-metrics';
 
 export default function Dashboard() {
   const [data, setData] = useState<any>(null);
