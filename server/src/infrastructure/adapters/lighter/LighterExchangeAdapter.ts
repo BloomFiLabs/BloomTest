@@ -1011,12 +1011,28 @@ export class LighterExchangeAdapter
           }
         } else if (errorMessage.includes('invalid signature')) {
           // "invalid signature" often means nonce was already used (ghost success)
-          // Track it but don't reset local nonce - let getFreshNonce handle auto-bump
+          // Immediately bump the nonce to avoid retrying with the same one
           this.consecutiveNonceErrors++;
-          this.logger.warn(
-            `⚠️ Invalid signature error (attempt ${attempt + 1}/${maxRetries}): ${errorMessage}. ` +
-            `Nonce ${nonce} may have been used. Will auto-bump on next attempt.`
-          );
+          if (nonce !== null && this.localNonce !== null) {
+            // Bump local nonce immediately - this nonce was likely already used
+            this.localNonce = Math.max(this.localNonce, nonce + 1);
+            this.logger.warn(
+              `⚠️ Invalid signature error (attempt ${attempt + 1}/${maxRetries}): ${errorMessage}. ` +
+              `Nonce ${nonce} likely already used. Bumped local nonce to ${this.localNonce}.`
+            );
+          } else {
+            this.logger.warn(
+              `⚠️ Invalid signature error (attempt ${attempt + 1}/${maxRetries}): ${errorMessage}. ` +
+              `Nonce ${nonce} may have been used. Will auto-bump on next attempt.`
+            );
+          }
+          
+          // If we get multiple invalid signature errors, reset to force re-sync
+          if (this.consecutiveNonceErrors >= 3) {
+            this.logger.warn(`🔄 Multiple invalid signature errors, resetting local nonce...`);
+            this.localNonce = null;
+            this.lastSuccessfulNonce = null;
+          }
         } else {
           this.logger.error(
             `❌ Lighter order error (attempt ${attempt + 1}/${maxRetries}): ${errorMessage}`,

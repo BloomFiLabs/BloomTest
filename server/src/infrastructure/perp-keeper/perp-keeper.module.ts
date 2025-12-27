@@ -62,6 +62,7 @@ import { DomainModule } from '../../domain/domain.module';
 import { GarchService } from '../../domain/services/GarchService';
 import { PortfolioOptimizer } from '../../domain/services/strategy-rules/PortfolioOptimizer';
 import { OrderExecutor } from '../../domain/services/strategy-rules/OrderExecutor';
+import { IOrderExecutor } from '../../domain/services/strategy-rules/IOrderExecutor';
 import { PositionManager } from '../../domain/services/strategy-rules/PositionManager';
 import { BalanceManager } from '../../domain/services/strategy-rules/BalanceManager';
 import { OpportunityEvaluator } from '../../domain/services/strategy-rules/OpportunityEvaluator';
@@ -501,14 +502,16 @@ import { PredictionAutoCalibrator } from '../../domain/services/prediction/Predi
         config: StrategyConfig,
         executionPlanBuilder: ExecutionPlanBuilder,
         costCalculator: CostCalculator,
+        orderExecutor: IOrderExecutor,
       ) => {
         return new IdleFundsManager(
           config,
           executionPlanBuilder,
           costCalculator,
+          orderExecutor,
         );
       },
-      inject: [StrategyConfig, ExecutionPlanBuilder, CostCalculator],
+      inject: [StrategyConfig, ExecutionPlanBuilder, CostCalculator, 'IOrderExecutor'],
     },
     {
       provide: 'IIdleFundsManager',

@@ -694,7 +694,39 @@ export class OrderExecutor implements IOrderExecutor {
             firstResponse.error,
         );
 
-          // 2. Place SECOND leg (reliable exchange)
+          // CRITICAL: Check if first order succeeded before placing second leg
+          if (!firstResponse.isSuccess()) {
+            const errorMsg = `First leg (${firstSide} on ${firstExchange}) failed: ${firstResponse.error || 'Unknown error'}`;
+            this.logger.error(`🚨 ${errorMsg} - Aborting second leg placement`);
+            
+            // Clean up registry
+            if (this.executionLockService) {
+              this.executionLockService.forceClearOrder(
+                firstExchange,
+                firstOrder.symbol,
+                firstSide,
+              );
+            }
+            
+            // Return failed responses - don't place second leg
+            const failedSecondResponse = new PerpOrderResponse(
+              'aborted',
+              OrderStatus.REJECTED,
+              secondOrder.symbol,
+              secondSide === 'LONG' ? OrderSide.LONG : OrderSide.SHORT,
+              undefined,
+              undefined,
+              undefined,
+              `Aborted: ${errorMsg}`,
+              new Date(),
+            );
+            
+            const longResponse = firstSide === 'LONG' ? firstResponse : failedSecondResponse;
+            const shortResponse = firstSide === 'SHORT' ? firstResponse : failedSecondResponse;
+            return [longResponse, shortResponse];
+          }
+
+          // 2. Place SECOND leg (reliable exchange) - only if first leg succeeded
           const secondStartTime = Date.now();
           secondResponse = await this.executeWithRetry(
           async () => {

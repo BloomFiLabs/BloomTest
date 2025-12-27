@@ -24,6 +24,9 @@ import {
 } from '../../value-objects/PerpOrder';
 import { ExecutionPlanBuilder } from './ExecutionPlanBuilder';
 import { CostCalculator } from './CostCalculator';
+import type { IOrderExecutor } from './IOrderExecutor';
+import { Inject, Optional, forwardRef } from '@nestjs/common';
+import { ArbitrageExecutionResult } from '../FundingArbitrageStrategy';
 
 /**
  * IdleFundsManager - Manages idle funds and reallocates them to best opportunities
@@ -44,6 +47,9 @@ export class IdleFundsManager implements IIdleFundsManager {
     private readonly config: StrategyConfig,
     private readonly executionPlanBuilder: ExecutionPlanBuilder,
     private readonly costCalculator: CostCalculator,
+    @Optional()
+    @Inject(forwardRef(() => 'IOrderExecutor'))
+    private readonly orderExecutor?: IOrderExecutor,
   ) {}
 
   async detectIdleFunds(
@@ -492,56 +498,94 @@ export class IdleFundsManager implements IIdleFundsManager {
 
         const plan = planResult.value;
 
-        // Calculate position size from allocation amount
-        const markPrice =
-          opportunity.longMarkPrice || opportunity.shortMarkPrice || 0;
-        if (markPrice <= 0) {
-          this.logger.warn(
-            `Invalid mark price for ${opportunity.symbol}, skipping allocation`,
+        // Use OrderExecutor to place BOTH legs safely with sliced execution
+        // This ensures we get proper hedging and safety checks
+        if (this.orderExecutor) {
+          const executionResult = await this.orderExecutor.executeSinglePosition(
+            {
+              plan,
+              opportunity,
+            },
+            adapters,
+            {
+              opportunitiesEvaluated: 0,
+              opportunitiesExecuted: 0,
+              ordersPlaced: 0,
+              totalExpectedReturn: 0,
+              errors: [],
+              success: true,
+              timestamp: new Date(),
+            },
           );
-          continue;
-        }
 
-        // Position size = allocation * leverage / markPrice
-        const positionSize = (amount * this.config.leverage) / markPrice;
-
-        // Determine which side to allocate to
-        const isLongSide = source.exchange === opportunity.longExchange;
-        const orderSide = isLongSide ? OrderSide.LONG : OrderSide.SHORT;
-        const orderSymbol = opportunity.symbol;
-        const orderPrice = isLongSide
-          ? plan.longOrder.price || markPrice
-          : plan.shortOrder.price || markPrice;
-
-        // Place order to utilize idle funds
-        const adapter = adapters.get(source.exchange);
-        if (!adapter) {
-          this.logger.warn(`No adapter found for ${source.exchange}`);
-          continue;
-        }
-
-        const orderRequest = new PerpOrderRequest(
-          orderSymbol,
-          orderSide,
-          OrderType.LIMIT,
-          positionSize,
-          orderPrice,
-          TimeInForce.GTC,
-        );
-
-        const orderResponse = await adapter.placeOrder(orderRequest);
-
-        if (orderResponse.isSuccess()) {
-          totalAllocated += amount;
-          successfulAllocations++;
-          this.logger.log(
-            `✅ Allocated $${amount.toFixed(2)} idle funds from ${source.exchange} ` +
-              `to ${opportunity.symbol} ${orderSide} (${reason})`,
-          );
+          if (executionResult.isSuccess) {
+            totalAllocated += amount;
+            successfulAllocations++;
+            this.logger.log(
+              `✅ Allocated $${amount.toFixed(2)} idle funds to ${opportunity.symbol} ` +
+                `(hedged pair via OrderExecutor, ${reason})`,
+            );
+          } else {
+            this.logger.warn(
+              `Failed to execute idle funds allocation via OrderExecutor: ${executionResult.error.message}`,
+            );
+          }
         } else {
+          // Fallback: Direct order placement (not recommended, but better than nothing)
           this.logger.warn(
-            `Failed to place order for idle funds allocation: ${orderResponse.orderId || 'unknown error'}`,
+            `⚠️ OrderExecutor not available - using direct order placement (no sliced execution or safety checks)`,
           );
+
+          const markPrice =
+            opportunity.longMarkPrice || opportunity.shortMarkPrice || 0;
+          if (markPrice <= 0) {
+            this.logger.warn(
+              `Invalid mark price for ${opportunity.symbol}, skipping allocation`,
+            );
+            continue;
+          }
+
+          // Position size = allocation * leverage / markPrice
+          const positionSize = (amount * this.config.leverage) / markPrice;
+
+          // Determine which side to allocate to
+          const isLongSide = source.exchange === opportunity.longExchange;
+          const orderSide = isLongSide ? OrderSide.LONG : OrderSide.SHORT;
+          const orderSymbol = opportunity.symbol;
+          const orderPrice = isLongSide
+            ? plan.longOrder.price || markPrice
+            : plan.shortOrder.price || markPrice;
+
+          // Place order to utilize idle funds
+          const adapter = adapters.get(source.exchange);
+          if (!adapter) {
+            this.logger.warn(`No adapter found for ${source.exchange}`);
+            continue;
+          }
+
+          const orderRequest = new PerpOrderRequest(
+            orderSymbol,
+            orderSide,
+            OrderType.LIMIT,
+            positionSize,
+            orderPrice,
+            TimeInForce.GTC,
+          );
+
+          const orderResponse = await adapter.placeOrder(orderRequest);
+
+          if (orderResponse.isSuccess()) {
+            totalAllocated += amount;
+            successfulAllocations++;
+            this.logger.log(
+              `✅ Allocated $${amount.toFixed(2)} idle funds from ${source.exchange} ` +
+                `to ${opportunity.symbol} ${orderSide} (${reason})`,
+            );
+          } else {
+            this.logger.warn(
+              `Failed to place order for idle funds allocation: ${orderResponse.orderId || 'unknown error'}`,
+            );
+          }
         }
       } catch (error: any) {
         this.logger.error(
