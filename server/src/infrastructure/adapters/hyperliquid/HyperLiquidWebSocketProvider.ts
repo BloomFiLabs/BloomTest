@@ -724,6 +724,23 @@ export class HyperLiquidWebSocketProvider
   }
 
   /**
+   * Get cached 24h volume for an asset
+   */
+  get24hVolume(asset: string): number | null {
+    const normalizedAsset = asset.toUpperCase();
+    const ctx = this.assetCtxCache.get(normalizedAsset);
+
+    if (!ctx) {
+      if (!this.subscribedAssets.has(normalizedAsset)) {
+        this.subscribeToAsset(normalizedAsset);
+      }
+      return null;
+    }
+
+    return parseFloat(ctx.dayNtlVlm.toString());
+  }
+
+  /**
    * Check if we have data for an asset
    */
   hasData(asset: string): boolean {

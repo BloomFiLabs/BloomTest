@@ -132,10 +132,20 @@ export class HyperLiquidDataProvider
 
   /**
    * Get open interest for an asset
+   * Uses WebSocket cache if available, falls back to REST API
    * @param asset Asset symbol
    * @returns Open interest in USD
    */
   async getOpenInterest(asset: string): Promise<number> {
+    // Try WebSocket first - this is the preferred path to avoid rate limits
+    if (this.wsProvider.isWsConnected()) {
+      const wsOI = this.wsProvider.getOpenInterest(asset);
+      if (wsOI !== null) {
+        return wsOI;
+      }
+    }
+
+    // Fallback to REST API only if WebSocket unavailable
     try {
       const data = await this.fetchMetaAndAssetCtxs();
       const index = await this.getAssetIndex(asset, data.meta);
@@ -254,8 +264,18 @@ export class HyperLiquidDataProvider
 
   /**
    * Get 24-hour trading volume in USD
+   * Uses WebSocket cache if available, falls back to REST API
    */
   async get24hVolume(asset: string): Promise<number> {
+    // Try WebSocket first - this is the preferred path to avoid rate limits
+    if (this.wsProvider.isWsConnected()) {
+      const wsVolume = this.wsProvider.get24hVolume(asset);
+      if (wsVolume !== null) {
+        return wsVolume;
+      }
+    }
+
+    // Fallback to REST API only if WebSocket unavailable
     const data = await this.fetchMetaAndAssetCtxs();
     const index = await this.getAssetIndex(asset, data.meta);
 

@@ -108,8 +108,8 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
   private readonly MAX_RECONNECT_ATTEMPTS = 10;
   private readonly RECONNECT_DELAY = 5000; // 5 seconds
   
-  // Lighter has a limit of ~50-100 subscriptions per connection
-  private readonly MAX_MARKET_STATS_SUBSCRIPTIONS = 50;
+  // Use market_stats/all instead of individual subscriptions to avoid rate limits
+  private isSubscribedToAllMarkets = false;
 
   // Cache for market stats data (key: marketIndex, value: { openInterest: number, markPrice: number, volume24h: number })
   private marketStatsCache: Map<
@@ -240,11 +240,11 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
             } else {
               // Check again after a delay in case markets are discovered late
               setTimeout(() => {
-                if (this.subscribedMarkets.size > 0 && this.actuallySubscribedMarkets.size === 0) {
+                if (!this.isSubscribedToAllMarkets) {
                   this.logger.log(
-                    `Markets discovered late - subscribing to up to ${this.MAX_MARKET_STATS_SUBSCRIPTIONS} Lighter markets...`,
+                    `Markets discovered late - subscribing to Lighter market_stats/all...`,
                   );
-                  this.resubscribeAll();
+                  this.subscribeToAllMarkets();
                 }
               }, 2000);
             }
@@ -343,10 +343,51 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // Handle market_stats updates - check for market_stats field first (more reliable)
+    // Handle market_stats updates - supports both single market and "all" subscription formats
     if (message.market_stats) {
-      // ... existing logic for market_stats ...
       const marketStats = message.market_stats;
+      
+      // Check if this is a market_stats/all response (object keyed by market index)
+      // vs single market response (has market_id directly)
+      if (message.channel === 'market_stats:all' || (typeof marketStats === 'object' && !marketStats.market_id)) {
+        // Handle market_stats/all format: { "1": {...}, "2": {...}, ... }
+        for (const [indexStr, stats] of Object.entries(marketStats)) {
+          const marketIndex = parseInt(indexStr);
+          if (isNaN(marketIndex)) continue;
+          
+          const statsData = stats as any;
+          try {
+            const openInterestRaw = statsData.open_interest || '0';
+            const markPriceRaw = statsData.mark_price || '0';
+            const volume24hRaw = statsData.daily_quote_token_volume || 0;
+            const openInterest = parseFloat(openInterestRaw);
+            const markPrice = parseFloat(markPriceRaw);
+            const volume24h =
+              typeof volume24hRaw === 'string'
+                ? parseFloat(volume24hRaw)
+                : volume24hRaw;
+
+            if (markPrice > 0) {
+              this.marketStatsCache.set(marketIndex, {
+                openInterest: openInterest,
+                markPrice: markPrice,
+                volume24h: isNaN(volume24h) ? 0 : volume24h,
+              });
+
+              if (!this.hasInitialData.has(marketIndex)) {
+                this.hasInitialData.add(marketIndex);
+              }
+            }
+          } catch (error: any) {
+            this.logger.error(
+              `Failed to parse market_stats for market ${marketIndex}: ${error.message}`,
+            );
+          }
+        }
+        return;
+      }
+      
+      // Handle single market format (has market_id directly)
       const marketIndex = marketStats.market_id;
 
       if (marketIndex === undefined) {
@@ -535,130 +576,64 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Subscribe to market_stats for a specific market
+   * Now just tracks the market and ensures market_stats/all is subscribed
    */
   subscribeToMarket(
     marketIndex: number,
     forceResubscribe: boolean = false,
   ): void {
-    // Always track the subscription, even if WebSocket isn't connected yet
+    // Track the market
     this.subscribedMarkets.add(marketIndex);
-
-    if (!this.isConnected || !this.ws) {
-      return;
-    }
-
-    // Already sent subscription for this market? Skip unless forcing
-    if (this.actuallySubscribedMarkets.has(marketIndex) && !forceResubscribe) {
-      return;
-    }
-
-    // Check subscription limit
-    if (this.actuallySubscribedMarkets.size >= this.MAX_MARKET_STATS_SUBSCRIPTIONS && !this.actuallySubscribedMarkets.has(marketIndex)) {
-      return; // At limit, can't subscribe to more
-    }
-
-    // If we already have data for this market, skip
-    if (!forceResubscribe && this.hasMarketData(marketIndex)) {
-      return;
-    }
-
-    // Subscribe to the market
-    try {
-      const subscribeMessage = {
-        type: 'subscribe',
-        channel: `market_stats/${marketIndex}`,
-      };
-
-      if (!this.ws) {
-        return;
-      }
-
-      this.ws.send(JSON.stringify(subscribeMessage));
-      this.actuallySubscribedMarkets.add(marketIndex);
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to subscribe to market ${marketIndex}: ${error.message}`,
-      );
-    }
+    
+    // Use market_stats/all for efficiency
+    this.subscribeToAllMarkets();
   }
 
   /**
-   * Subscribe to multiple markets at once (with throttling to avoid rate limits)
+   * Subscribe to multiple markets at once
+   * Now uses market_stats/all for efficiency - just tracks markets and ensures subscription
    */
   subscribeToMarkets(marketIndexes: number[]): void {
-    // Track all markets but only actually subscribe to top ones
+    // Track all markets
     marketIndexes.forEach((index) => this.subscribedMarkets.add(index));
 
-    if (!this.isConnected || !this.ws || this.ws.readyState !== 1) {
-      return;
-    }
-
-    // Filter to markets we haven't subscribed to yet and limit to remaining capacity
-    const remainingCapacity = this.MAX_MARKET_STATS_SUBSCRIPTIONS - this.actuallySubscribedMarkets.size;
-    if (remainingCapacity <= 0) {
-      return; // Already at max subscriptions
-    }
-
-    const marketsToSubscribe = marketIndexes
-      .filter((index) => !this.actuallySubscribedMarkets.has(index))
-      .slice(0, remainingCapacity);
-
-    if (marketsToSubscribe.length > 0) {
-      // Throttle subscriptions to avoid "Too Many Websocket Messages!" error
-      const BATCH_SIZE = 3;
-      const BATCH_DELAY_MS = 300;
-
-      this.logger.log(`📡 Subscribing to ${marketsToSubscribe.length} Lighter markets (limit: ${this.MAX_MARKET_STATS_SUBSCRIPTIONS})...`);
-
-      for (let i = 0; i < marketsToSubscribe.length; i += BATCH_SIZE) {
-        const batch = marketsToSubscribe.slice(i, i + BATCH_SIZE);
-        const delay = Math.floor(i / BATCH_SIZE) * BATCH_DELAY_MS;
-
-        setTimeout(() => {
-          batch.forEach((index) => this.subscribeToMarket(index, false));
-        }, delay);
-      }
-    }
+    // Use market_stats/all instead of individual subscriptions
+    this.subscribeToAllMarkets();
   }
 
   /**
    * Ensure all tracked markets are subscribed (useful when markets are discovered after connection)
-   * Now respects subscription limits
+   * Now uses market_stats/all for efficiency
    */
   ensureAllMarketsSubscribed(): void {
-    if (!this.isConnected || !this.ws) {
+    // Just subscribe to market_stats/all - it covers all markets
+    this.subscribeToAllMarkets();
+  }
+
+  /**
+   * Subscribe to market_stats/all - gets ALL market data in one subscription
+   * This is much more efficient than subscribing to individual markets
+   */
+  private subscribeToAllMarkets(): void {
+    if (!this.isConnected || !this.ws || this.ws.readyState !== 1) {
       return;
     }
 
-    if (this.subscribedMarkets.size === 0) {
+    if (this.isSubscribedToAllMarkets) {
       return;
     }
 
-    // Filter to markets not yet actually subscribed and respect limit
-    const remainingCapacity = this.MAX_MARKET_STATS_SUBSCRIPTIONS - this.actuallySubscribedMarkets.size;
-    if (remainingCapacity <= 0) {
-      return;
-    }
+    try {
+      const subscribeMessage = {
+        type: 'subscribe',
+        channel: 'market_stats/all',
+      };
 
-    const marketsToSubscribe = Array.from(this.subscribedMarkets)
-      .filter((index) => !this.actuallySubscribedMarkets.has(index))
-      .slice(0, remainingCapacity);
-
-    if (marketsToSubscribe.length > 0) {
-      this.logger.log(
-        `Ensuring ${marketsToSubscribe.length} Lighter markets are subscribed...`,
-      );
-      const BATCH_SIZE = 3;
-      const BATCH_DELAY_MS = 300;
-
-      for (let i = 0; i < marketsToSubscribe.length; i += BATCH_SIZE) {
-        const batch = marketsToSubscribe.slice(i, i + BATCH_SIZE);
-        const delay = Math.floor(i / BATCH_SIZE) * BATCH_DELAY_MS;
-
-        setTimeout(() => {
-          batch.forEach((index) => this.subscribeToMarket(index, false));
-        }, delay);
-      }
+      this.ws.send(JSON.stringify(subscribeMessage));
+      this.isSubscribedToAllMarkets = true;
+      this.logger.log('📡 Subscribed to Lighter market_stats/all - receiving all markets in one stream');
+    } catch (error: any) {
+      this.logger.error(`Failed to subscribe to market_stats/all: ${error.message}`);
     }
   }
 
@@ -669,26 +644,10 @@ export class LighterWebSocketProvider implements OnModuleInit, OnModuleDestroy {
   private resubscribeAll(): void {
     // Clear tracking on reconnect - server doesn't remember our subscriptions
     this.actuallySubscribedMarkets.clear();
+    this.isSubscribedToAllMarkets = false;
     
-    const BATCH_SIZE = 3;
-    const BATCH_DELAY_MS = 300;
-
-    // Resubscribe to market stats (limited)
-    const marketsToSubscribe = Array.from(this.subscribedMarkets).slice(0, this.MAX_MARKET_STATS_SUBSCRIPTIONS);
-    if (marketsToSubscribe.length > 0) {
-      this.logger.log(
-        `Resubscribing to ${marketsToSubscribe.length} Lighter market stats (limit: ${this.MAX_MARKET_STATS_SUBSCRIPTIONS})...`,
-      );
-
-      for (let i = 0; i < marketsToSubscribe.length; i += BATCH_SIZE) {
-        const batch = marketsToSubscribe.slice(i, i + BATCH_SIZE);
-        const delay = Math.floor(i / BATCH_SIZE) * BATCH_DELAY_MS;
-
-        setTimeout(() => {
-          batch.forEach((index) => this.subscribeToMarket(index, false));
-        }, delay);
-      }
-    }
+    // Use market_stats/all instead of individual subscriptions - much more efficient
+    this.subscribeToAllMarkets();
 
     // DON'T resubscribe to orderbooks automatically - too expensive
     // Orderbook subscriptions will happen on-demand when needed
