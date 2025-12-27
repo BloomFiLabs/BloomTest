@@ -409,36 +409,9 @@ export class UnifiedExecutionService {
 
     while (Date.now() - start < cfg.sliceFillTimeoutMs) {
       try {
-        // ALWAYS check position delta first if we have initial position
-        // This catches instant fills even if getOrderStatus hasn't updated yet
-        if (initialPositionSize > 0) {
-          try {
-            const positions = await adapter.getPositions();
-            const currentPosition = positions.find(
-              (p) => p.symbol === symbol && Math.abs(p.size) > 0.0001
-            );
-            if (currentPosition) {
-              const currentPositionSize = Math.abs(currentPosition.size);
-              const fillDelta = Math.abs(currentPositionSize - initialPositionSize);
-              
-              // If position increased significantly (at least 50% of expected), consider it filled
-              // This handles cases where order filled instantly but getOrderStatus hasn't updated
-              if (fillDelta >= (expectedSize * 0.5)) {
-                this.logger.log(
-                  `✅ Fill detected via position delta: ${symbol} ` +
-                  `initial=${initialPositionSize.toFixed(4)}, ` +
-                  `current=${currentPositionSize.toFixed(4)}, ` +
-                  `filled=${fillDelta.toFixed(4)} (expected=${expectedSize.toFixed(4)})`
-                );
-                return { filled: true, filledSize: fillDelta };
-              }
-            }
-          } catch (posError: any) {
-            this.logger.debug(`Could not get position for delta check: ${posError.message}`);
-          }
-        }
-
-        // Now check order status
+        // CRITICAL: Check order status FIRST, not position delta
+        // Position delta can be misleading if there are existing positions from previous slices
+        // We must verify the SPECIFIC ORDER filled, not just that a position exists
         const status = await adapter.getOrderStatus(orderId, symbol);
         
         // CRITICAL: If there was an initial position, calculate the DELTA
@@ -487,30 +460,46 @@ export class UnifiedExecutionService {
           return { filled: true, filledSize: currentFilled };
         }
         
-        // CRITICAL: If order status is CANCELLED but position increased, it likely filled instantly
-        // This handles the case where order fills so fast it's removed from open orders before status check
-        if (status.status === OrderStatus.CANCELLED && initialPositionSize > 0) {
-          try {
-            const positions = await adapter.getPositions();
-            const currentPosition = positions.find(
-              (p) => p.symbol === symbol && Math.abs(p.size) > 0.0001
-            );
-            if (currentPosition) {
-              const currentPositionSize = Math.abs(currentPosition.size);
-              const fillDelta = Math.abs(currentPositionSize - initialPositionSize);
-              
-              // If position increased significantly, treat as filled (order filled instantly)
-              if (fillDelta >= (expectedSize * 0.5)) {
-                this.logger.log(
-                  `✅ Fill detected: Order marked CANCELLED but position increased ` +
-                  `(${symbol} initial=${initialPositionSize.toFixed(4)}, ` +
-                  `current=${currentPositionSize.toFixed(4)}, filled=${fillDelta.toFixed(4)})`
-                );
-                return { filled: true, filledSize: fillDelta };
+        // CRITICAL: If order status is CANCELLED, check if it's because it filled instantly
+        // But ONLY if we can verify the order actually filled (not just that a position exists)
+        if (status.status === OrderStatus.CANCELLED) {
+          // For CANCELLED orders, we need to be more careful
+          // Check if the order is NOT in open orders (which would indicate it filled)
+          // But we can't rely on position delta alone - there might be existing positions
+          // So we only treat as filled if:
+          // 1. Order is not in open orders (confirmed via getOrderStatus)
+          // 2. AND we have initial position to compare
+          // 3. AND position increased by at least the expected size
+          if (initialPositionSize > 0) {
+            try {
+              const positions = await adapter.getPositions();
+              const currentPosition = positions.find(
+                (p) => p.symbol === symbol && Math.abs(p.size) > 0.0001
+              );
+              if (currentPosition) {
+                const currentPositionSize = Math.abs(currentPosition.size);
+                const fillDelta = currentPositionSize - initialPositionSize;
+                
+                // Position must have increased by at least 90% of expected size
+                // This ensures we're detecting the NEW order fill, not an existing position
+                if (fillDelta >= (expectedSize * 0.9)) {
+                  this.logger.log(
+                    `✅ Fill detected: Order marked CANCELLED but position increased significantly ` +
+                    `(${symbol} initial=${initialPositionSize.toFixed(4)}, ` +
+                    `current=${currentPositionSize.toFixed(4)}, filled=${fillDelta.toFixed(4)}, expected=${expectedSize.toFixed(4)})`
+                  );
+                  return { filled: true, filledSize: fillDelta };
+                } else {
+                  // Position didn't increase enough - might be existing position, not our order
+                  this.logger.debug(
+                    `Order CANCELLED but position delta too small: ${fillDelta.toFixed(4)} < ${(expectedSize * 0.9).toFixed(4)}. ` +
+                    `May be existing position, not our order fill.`
+                  );
+                }
               }
+            } catch (posError: any) {
+              this.logger.debug(`Could not verify position after CANCELLED status: ${posError.message}`);
             }
-          } catch (posError: any) {
-            this.logger.debug(`Could not verify position after CANCELLED status: ${posError.message}`);
           }
         }
         
