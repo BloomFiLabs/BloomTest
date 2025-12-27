@@ -276,8 +276,7 @@ export class UnifiedExecutionService {
       try {
         const positions = await firstAdapter.getPositions();
         const existingPosition = positions.find(
-          (p) => p.symbol === symbol && 
-          ((firstIsLong && p.side === OrderSide.LONG) || (!firstIsLong && p.side === OrderSide.SHORT))
+          (p) => p.symbol === symbol && p.side === firstSide
         );
         if (existingPosition) {
           initialPositionSize = Math.abs(existingPosition.size);
@@ -306,7 +305,8 @@ export class UnifiedExecutionService {
         symbol, 
         sliceSize, 
         cfg,
-        initialPositionSize // Pass initial position to calculate delta
+        initialPositionSize, // Pass initial position to calculate delta
+        firstSide // Pass side to find correct position in subsequent slices
       );
       
       if (firstIsLong) {
@@ -325,6 +325,25 @@ export class UnifiedExecutionService {
 
       // --- STEP 3: Place Leg B (Matching actual fill of Leg A) ---
       const matchedSize = firstFill.filledSize;
+      
+      // Get initial position size for Leg B BEFORE placing order
+      let initialPositionSizeB = 0;
+      try {
+        const positionsB = await secondAdapter.getPositions();
+        const existingPositionB = positionsB.find(
+          (p) => p.symbol === symbol && p.side === secondSide
+        );
+        if (existingPositionB) {
+          initialPositionSizeB = Math.abs(existingPositionB.size);
+          this.logger.debug(
+            `📊 Initial position for ${symbol} ${secondSide}: ${initialPositionSizeB.toFixed(4)} ` +
+            `(will track delta after Leg B fills)`
+          );
+        }
+      } catch (error: any) {
+        this.logger.debug(`Could not get initial position for Leg B: ${error.message}`);
+      }
+      
       const secondOrder = new PerpOrderRequest(symbol, secondSide, OrderType.LIMIT, matchedSize, secondPrice, TimeInForce.GTC);
       const secondResp = await secondAdapter.placeOrder(secondOrder);
 
@@ -343,7 +362,15 @@ export class UnifiedExecutionService {
       }
 
       // --- STEP 4: Wait for Leg B Fill ---
-      const secondFill = await this.waitForFill(secondAdapter, secondResp.orderId!, symbol, matchedSize, cfg);
+      const secondFill = await this.waitForFill(
+        secondAdapter, 
+        secondResp.orderId!, 
+        symbol, 
+        matchedSize, 
+        cfg,
+        initialPositionSizeB, // Pass initial position for Leg B
+        secondSide // Pass side to find correct position
+      );
       
       if (firstIsLong) {
         result.shortFilledSize = secondFill.filledSize;
@@ -401,7 +428,8 @@ export class UnifiedExecutionService {
     symbol: string, 
     expectedSize: number, 
     cfg: UnifiedExecutionConfig,
-    initialPositionSize: number = 0 // Position size BEFORE order was placed
+    initialPositionSize: number = 0, // Position size BEFORE order was placed
+    side?: OrderSide // Which side we're tracking (LONG or SHORT)
   ): Promise<{ filled: boolean, filledSize: number }> {
     // CRITICAL: Use the new reactive wait mechanism if available
     if (typeof adapter.waitForOrderFill === 'function') {
@@ -411,8 +439,12 @@ export class UnifiedExecutionService {
       // This is especially useful for Lighter where order IDs can be tricky
       try {
         const positions = await adapter.getPositions();
+        // CRITICAL FIX: Filter by side to find the correct position
+        // Without this, we might find the opposite side's position in subsequent slices
         const currentPosition = positions.find(
-          (p) => p.symbol === symbol && Math.abs(p.size) > 0.0001
+          (p) => p.symbol === symbol && 
+                 Math.abs(p.size) > 0.0001 &&
+                 (!side || p.side === side) // Filter by side if provided
         );
         
         if (currentPosition) {
@@ -421,7 +453,7 @@ export class UnifiedExecutionService {
           
           // If terminal status says filled but delta is 0, we might have a false positive from exchange status
           if (terminalStatus.status === OrderStatus.FILLED && fillDelta < expectedSize * 0.1) {
-            this.logger.warn(`⚠️ Exchange reported FILLED for ${orderId} but position delta is too small (${fillDelta.toFixed(4)}).`);
+            this.logger.warn(`⚠️ Exchange reported FILLED for ${orderId} but position delta is too small (${fillDelta.toFixed(4)}). Side=${side}, Initial=${initialPositionSize.toFixed(4)}, Current=${currentPositionSize.toFixed(4)}`);
           }
           
           // Trust the terminal status mostly, but use delta for more accurate filled size
@@ -430,7 +462,7 @@ export class UnifiedExecutionService {
             filledSize: terminalStatus.filledSize || fillDelta 
           };
         }
-      } catch (e) {
+      } catch (e: any) {
         this.logger.debug(`Could not verify position after reactive wait: ${e.message}`);
       }
 

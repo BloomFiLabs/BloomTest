@@ -4416,6 +4416,7 @@ const releaseMutex = await this.acquireOrderMutex();
 
   /**
    * Wait for an order to fill using a combination of WebSocket events and REST polling.
+   * CRITICAL: Also actively reprices the order to stay at top of book!
    */
   async waitForOrderFill(
     orderId: string, 
@@ -4424,20 +4425,31 @@ const releaseMutex = await this.acquireOrderMutex();
     expectedSize: number
   ): Promise<PerpOrderResponse> {
     const start = Date.now();
-    this.logger.log(`⏳ Waiting for Lighter order ${orderId} fill (timeout: ${timeoutMs/1000}s)...`);
+    this.logger.log(`⏳ Waiting for Lighter order ${orderId} fill (timeout: ${timeoutMs/1000}s, size: ${expectedSize})...`);
 
     if (!this.wsProvider) {
       this.logger.warn('WebSocket provider not available, falling back to pure polling for waitForOrderFill');
     }
 
+    // Get order details from pending orders map
+    const pendingOrder = this.pendingOrdersMap.get(orderId);
+    const orderSide = pendingOrder?.side;
+    const originalPrice = pendingOrder?.price;
+
     return new Promise(async (resolve) => {
       let isResolved = false;
       let checkInterval: NodeJS.Timeout | null = null;
+      let repriceInterval: NodeJS.Timeout | null = null;
       let wsHandler: any = null;
+      let currentOrderId = orderId; // Track current order ID (may change after reprice)
+      let repriceCount = 0;
+      const MAX_REPRICES = 20; // Max reprices before giving up
+      const REPRICE_INTERVAL_MS = 15000; // Reprice every 15 seconds
 
       const cleanup = () => {
         isResolved = true;
         if (checkInterval) clearInterval(checkInterval);
+        if (repriceInterval) clearInterval(repriceInterval);
         if (wsHandler && this.wsProvider) {
           this.wsProvider.removeListener('order_update', wsHandler);
         }
@@ -4448,13 +4460,13 @@ const releaseMutex = await this.acquireOrderMutex();
         wsHandler = (update: any) => {
           if (isResolved) return;
           
-          // Lighter orderUpdate has orderId directly
-          if (String(update.orderId) === String(orderId)) {
+          // Check if this is our order (by current ID or original ID)
+          if (String(update.orderId) === String(currentOrderId) || String(update.orderId) === String(orderId)) {
             if (update.status === 'filled') {
-              this.logger.log(`✅ Order ${orderId} filled via WebSocket event`);
+              this.logger.log(`✅ Order ${update.orderId} filled via WebSocket event`);
               cleanup();
               resolve(new PerpOrderResponse(
-                orderId,
+                update.orderId,
                 OrderStatus.FILLED,
                 symbol,
                 update.side === 'bid' ? OrderSide.LONG : OrderSide.SHORT,
@@ -4465,53 +4477,137 @@ const releaseMutex = await this.acquireOrderMutex();
                 new Date()
               ));
             } else if (update.status === 'canceled') {
-              this.logger.warn(`❌ Order ${orderId} canceled via WebSocket event`);
-              cleanup();
-              resolve(new PerpOrderResponse(
-                orderId,
-                OrderStatus.CANCELLED,
-                symbol,
-                update.side === 'bid' ? OrderSide.LONG : OrderSide.SHORT,
-                undefined,
-                0,
-                undefined,
-                undefined,
-                new Date()
-              ));
+              // Only treat as cancelled if we didn't reprice it ourselves
+              if (repriceCount === 0) {
+                this.logger.warn(`❌ Order ${update.orderId} canceled via WebSocket event`);
+                cleanup();
+                resolve(new PerpOrderResponse(
+                  update.orderId,
+                  OrderStatus.CANCELLED,
+                  symbol,
+                  update.side === 'bid' ? OrderSide.LONG : OrderSide.SHORT,
+                  undefined,
+                  0,
+                  undefined,
+                  undefined,
+                  new Date()
+                ));
+              }
             }
           }
         };
         this.wsProvider.on('order_update', wsHandler);
       }
 
-      // 2. Slow REST Poll (safety)
+      // 2. Active Repricing Loop - stays at top of book
+      const doReprice = async () => {
+        if (isResolved || !orderSide || repriceCount >= MAX_REPRICES) return;
+
+        try {
+          // Get current best bid/ask from WebSocket
+          const marketIndex = await this.getMarketIndex(symbol);
+          const book = this.wsProvider?.getBestBidAsk(marketIndex);
+          
+          if (!book) {
+            this.logger.debug(`No order book data for repricing ${symbol}`);
+            return;
+          }
+
+          const isSellOrder = orderSide === OrderSide.SHORT;
+          const targetPrice = isSellOrder ? book.bestAsk : book.bestBid;
+          
+          // Get current order status to check if still open
+          const currentOpenOrders = await this.getOpenOrders().catch(() => []);
+          const ourOrder = currentOpenOrders.find(o => 
+            o.symbol.toUpperCase() === symbol.toUpperCase() && 
+            ((isSellOrder && o.side === 'sell') || (!isSellOrder && o.side === 'buy'))
+          );
+
+          if (!ourOrder) {
+            // Order might have filled while we were checking - verify via position
+            this.logger.debug(`Order no longer in open orders list, might have filled`);
+            return;
+          }
+
+          // Check if we're at top of book (within a small tolerance)
+          const tickSize = await this.getTickSize(symbol).catch(() => 0.0001);
+          const priceDiff = Math.abs(ourOrder.price - targetPrice);
+          
+          if (priceDiff > tickSize * 0.5) {
+            // We're not at top of book - reprice!
+            this.logger.log(`🔄 Repricing ${symbol} ${isSellOrder ? 'SELL' : 'BUY'}: ${ourOrder.price} -> ${targetPrice} (diff: ${priceDiff.toFixed(6)})`);
+            
+            // Cancel current order
+            try {
+              await this.cancelOrder(String(ourOrder.orderId), symbol);
+            } catch (e: any) {
+              this.logger.debug(`Cancel during reprice failed (may already be filled): ${e.message}`);
+              return;
+            }
+            
+            // Place new order at better price
+            const newOrder = new PerpOrderRequest(
+              symbol,
+              orderSide,
+              OrderType.LIMIT,
+              expectedSize,
+              targetPrice,
+              TimeInForce.GTC
+            );
+            
+            try {
+              const newResp = await this.placeOrder(newOrder);
+              if (newResp.orderId) {
+                currentOrderId = newResp.orderId;
+                repriceCount++;
+                this.logger.log(`✅ Repriced order: ${currentOrderId} (reprice #${repriceCount})`);
+              }
+            } catch (e: any) {
+              this.logger.error(`Failed to place repriced order: ${e.message}`);
+            }
+          } else {
+            this.logger.debug(`Order ${symbol} still at top of book (price: ${ourOrder.price}, target: ${targetPrice})`);
+          }
+        } catch (e: any) {
+          this.logger.debug(`Reprice check error for ${symbol}: ${e.message}`);
+        }
+      };
+
+      // Start repricing loop after a short delay
+      setTimeout(() => {
+        if (!isResolved) {
+          repriceInterval = setInterval(doReprice, REPRICE_INTERVAL_MS);
+        }
+      }, 5000); // Start repricing after 5 seconds
+
+      // 3. Slow REST Poll (safety)
       const safetyPoll = async () => {
         if (isResolved) return;
         try {
-          const status = await this.getOrderStatus(orderId, symbol);
+          const status = await this.getOrderStatus(currentOrderId, symbol);
           if (status.status === OrderStatus.FILLED || status.status === OrderStatus.CANCELLED || status.status === OrderStatus.REJECTED) {
-            this.logger.log(`✅ Order ${orderId} reached terminal state ${status.status} via safety poll`);
+            this.logger.log(`✅ Order ${currentOrderId} reached terminal state ${status.status} via safety poll`);
             cleanup();
             resolve(status);
           }
         } catch (e: any) {
-          this.logger.debug(`Safety poll error for ${orderId}: ${e.message}`);
+          this.logger.debug(`Safety poll error for ${currentOrderId}: ${e.message}`);
         }
       };
 
-      checkInterval = setInterval(safetyPoll, 15000); // Every 15 seconds
+      checkInterval = setInterval(safetyPoll, 30000); // Every 30 seconds
       
-      // 3. Timeout
+      // 4. Timeout
       setTimeout(() => {
         if (isResolved) return;
-        this.logger.warn(`⏰ Timeout waiting for Lighter order ${orderId} fill after ${timeoutMs/1000}s`);
+        this.logger.warn(`⏰ Timeout waiting for Lighter order ${currentOrderId} fill after ${timeoutMs/1000}s (repriced ${repriceCount} times)`);
         cleanup();
         
         // Final attempt to get status
-        this.getOrderStatus(orderId, symbol)
+        this.getOrderStatus(currentOrderId, symbol)
           .then(resolve)
           .catch(() => resolve(new PerpOrderResponse(
-            orderId,
+            currentOrderId,
             OrderStatus.SUBMITTED,
             symbol,
             OrderSide.LONG, // side unknown but mandatory

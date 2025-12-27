@@ -2338,20 +2338,38 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
     expectedSize: number
   ): Promise<PerpOrderResponse> {
     const start = Date.now();
-    this.logger.log(`⏳ Waiting for Hyperliquid order ${orderId} fill (timeout: ${timeoutMs/1000}s)...`);
+    this.logger.log(`⏳ Waiting for Hyperliquid order ${orderId} fill (timeout: ${timeoutMs/1000}s, size: ${expectedSize})...`);
 
     if (!this.wsProvider) {
       this.logger.warn('WebSocket provider not available, falling back to pure polling for waitForOrderFill');
     }
 
+    // Determine order side from open orders
+    let orderSide: OrderSide | null = null;
+    try {
+      const openOrders = await this.getOpenOrders();
+      const ourOrder = openOrders?.find(o => String(o.orderId) === String(orderId));
+      if (ourOrder) {
+        orderSide = ourOrder.side === 'buy' ? OrderSide.LONG : OrderSide.SHORT;
+      }
+    } catch (e: any) {
+      this.logger.debug(`Could not determine order side: ${e.message}`);
+    }
+
     return new Promise(async (resolve) => {
       let isResolved = false;
       let checkInterval: NodeJS.Timeout | null = null;
+      let repriceInterval: NodeJS.Timeout | null = null;
       let wsHandler: any = null;
+      let currentOrderId = orderId;
+      let repriceCount = 0;
+      const MAX_REPRICES = 20;
+      const REPRICE_INTERVAL_MS = 15000;
 
       const cleanup = () => {
         isResolved = true;
         if (checkInterval) clearInterval(checkInterval);
+        if (repriceInterval) clearInterval(repriceInterval);
         if (wsHandler && this.wsProvider) {
           this.wsProvider.removeListener('order_update', wsHandler);
         }
@@ -2363,12 +2381,12 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
           if (isResolved) return;
           
           const order = update.order;
-          if (order && String(order.oid) === String(orderId)) {
+          if (order && (String(order.oid) === String(currentOrderId) || String(order.oid) === String(orderId))) {
             if (order.status === 'filled') {
-              this.logger.log(`✅ Order ${orderId} filled via WebSocket event`);
+              this.logger.log(`✅ Order ${order.oid} filled via WebSocket event`);
               cleanup();
               resolve(new PerpOrderResponse(
-                orderId,
+                String(order.oid),
                 OrderStatus.FILLED,
                 symbol,
                 order.side === 'B' ? OrderSide.LONG : OrderSide.SHORT,
@@ -2379,56 +2397,127 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
                 new Date()
               ));
             } else if (order.status === 'canceled') {
-              this.logger.warn(`❌ Order ${orderId} canceled via WebSocket event`);
-              cleanup();
-              resolve(new PerpOrderResponse(
-                orderId,
-                OrderStatus.CANCELLED,
-                symbol,
-                order.side === 'B' ? OrderSide.LONG : OrderSide.SHORT,
-                undefined,
-                0,
-                undefined,
-                undefined,
-                new Date()
-              ));
+              // Only treat as cancelled if we didn't reprice it
+              if (repriceCount === 0) {
+                this.logger.warn(`❌ Order ${order.oid} canceled via WebSocket event`);
+                cleanup();
+                resolve(new PerpOrderResponse(
+                  String(order.oid),
+                  OrderStatus.CANCELLED,
+                  symbol,
+                  order.side === 'B' ? OrderSide.LONG : OrderSide.SHORT,
+                  undefined,
+                  0,
+                  undefined,
+                  undefined,
+                  new Date()
+                ));
+              }
             }
           }
         };
         this.wsProvider.on('order_update', wsHandler);
       }
 
-      // 2. Slow REST Poll (safety)
+      // 2. Active Repricing Loop
+      const doReprice = async () => {
+        if (isResolved || !orderSide || repriceCount >= MAX_REPRICES) return;
+
+        try {
+          const book = this.wsProvider?.getBestBidAsk(symbol);
+          if (!book) {
+            this.logger.debug(`No order book data for repricing ${symbol}`);
+            return;
+          }
+
+          const isSellOrder = orderSide === OrderSide.SHORT;
+          const targetPrice = isSellOrder ? book.bestAsk : book.bestBid;
+
+          const openOrders = await this.getOpenOrders();
+          const ourOrder = openOrders?.find(o => 
+            o.symbol.toUpperCase() === symbol.toUpperCase() &&
+            ((isSellOrder && o.side === 'sell') || (!isSellOrder && o.side === 'buy'))
+          );
+
+          if (!ourOrder) {
+            this.logger.debug(`Order no longer in open orders, might have filled`);
+            return;
+          }
+
+          const tickSize = await this.getTickSize(symbol).catch(() => 0.0001);
+          const priceDiff = Math.abs(ourOrder.price - targetPrice);
+
+          if (priceDiff > tickSize * 0.5) {
+            this.logger.log(`🔄 Repricing ${symbol} ${isSellOrder ? 'SELL' : 'BUY'}: ${ourOrder.price} -> ${targetPrice}`);
+
+            try {
+              await this.cancelOrder(String(ourOrder.orderId), symbol);
+            } catch (e: any) {
+              this.logger.debug(`Cancel during reprice failed: ${e.message}`);
+              return;
+            }
+
+            const newOrder = new PerpOrderRequest(
+              symbol,
+              orderSide,
+              OrderType.LIMIT,
+              expectedSize,
+              targetPrice,
+              TimeInForce.GTC
+            );
+
+            try {
+              const newResp = await this.placeOrder(newOrder);
+              if (newResp.orderId) {
+                currentOrderId = newResp.orderId;
+                repriceCount++;
+                this.logger.log(`✅ Repriced order: ${currentOrderId} (reprice #${repriceCount})`);
+              }
+            } catch (e: any) {
+              this.logger.error(`Failed to place repriced order: ${e.message}`);
+            }
+          }
+        } catch (e: any) {
+          this.logger.debug(`Reprice check error: ${e.message}`);
+        }
+      };
+
+      setTimeout(() => {
+        if (!isResolved) {
+          repriceInterval = setInterval(doReprice, REPRICE_INTERVAL_MS);
+        }
+      }, 5000);
+
+      // 3. Slow REST Poll (safety)
       const safetyPoll = async () => {
         if (isResolved) return;
         try {
-          const status = await this.getOrderStatus(orderId, symbol);
+          const status = await this.getOrderStatus(currentOrderId, symbol);
           if (status.status === OrderStatus.FILLED || status.status === OrderStatus.CANCELLED || status.status === OrderStatus.REJECTED) {
-            this.logger.log(`✅ Order ${orderId} reached terminal state ${status.status} via safety poll`);
+            this.logger.log(`✅ Order ${currentOrderId} reached terminal state ${status.status} via safety poll`);
             cleanup();
             resolve(status);
           }
         } catch (e: any) {
-          this.logger.debug(`Safety poll error for ${orderId}: ${e.message}`);
+          this.logger.debug(`Safety poll error for ${currentOrderId}: ${e.message}`);
         }
       };
 
-      checkInterval = setInterval(safetyPoll, 15000); // Every 15 seconds
+      checkInterval = setInterval(safetyPoll, 30000);
       
-      // 3. Timeout
+      // 4. Timeout
       setTimeout(() => {
         if (isResolved) return;
-        this.logger.warn(`⏰ Timeout waiting for Hyperliquid order ${orderId} fill after ${timeoutMs/1000}s`);
+        this.logger.warn(`⏰ Timeout waiting for Hyperliquid order ${currentOrderId} fill after ${timeoutMs/1000}s (repriced ${repriceCount} times)`);
         cleanup();
         
-        // Final attempt to get status
-        this.getOrderStatus(orderId, symbol)
+        this.getOrderStatus(currentOrderId, symbol)
           .then(resolve)
           .catch(() => resolve(new PerpOrderResponse(
-            orderId,
+            currentOrderId,
             OrderStatus.SUBMITTED,
             symbol,
-            OrderSide.LONG, // side unknown but mandatory
+            OrderSide.LONG,
             undefined,
             0,
             undefined,
@@ -2437,7 +2526,6 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
           )));
       }, timeoutMs);
 
-      // Perform initial check immediately
       await safetyPoll();
     });
   }
