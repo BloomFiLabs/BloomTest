@@ -215,6 +215,7 @@ import { PredictionAutoCalibrator } from '../../domain/services/prediction/Predi
         rateLimiter: RateLimiterService,
         wsProvider: HyperLiquidWebSocketProvider,
         diagnosticsService: DiagnosticsService,
+        executionLockService: ExecutionLockService,
       ) => {
         try {
           return new HyperliquidExchangeAdapter(
@@ -223,6 +224,8 @@ import { PredictionAutoCalibrator } from '../../domain/services/prediction/Predi
             rateLimiter,
             wsProvider,
             diagnosticsService,
+            undefined, // marketQualityFilter
+            executionLockService,
           );
         } catch (error: any) {
           const logger = new Logger('PerpKeeperModule');
@@ -237,6 +240,7 @@ import { PredictionAutoCalibrator } from '../../domain/services/prediction/Predi
         RateLimiterService,
         HyperLiquidWebSocketProvider,
         DiagnosticsService,
+        ExecutionLockService,
       ],
     },
     {
@@ -247,6 +251,7 @@ import { PredictionAutoCalibrator } from '../../domain/services/prediction/Predi
         rateLimiter: RateLimiterService,
         wsProvider: HyperLiquidWebSocketProvider,
         diagnosticsService: DiagnosticsService,
+        executionLockService: ExecutionLockService,
       ) => {
         try {
           return new HyperliquidExchangeAdapter(
@@ -255,6 +260,8 @@ import { PredictionAutoCalibrator } from '../../domain/services/prediction/Predi
             rateLimiter,
             wsProvider,
             diagnosticsService,
+            undefined,
+            executionLockService,
           );
         } catch (error: any) {
           return null;
@@ -266,6 +273,7 @@ import { PredictionAutoCalibrator } from '../../domain/services/prediction/Predi
         RateLimiterService,
         HyperLiquidWebSocketProvider,
         DiagnosticsService,
+        ExecutionLockService,
       ],
     },
     {

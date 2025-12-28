@@ -4562,7 +4562,7 @@ const releaseMutex = await this.acquireOrderMutex();
               
               if (position && Math.abs(position.size) >= expectedSize * 0.95) {
                 // Position exists with expected size - order likely filled!
-                this.logger.log(`✅ Order ${currentOrderId.substring(0, 16)}... appears to have FILLED (position: ${position.size.toFixed(2)})`);
+                this.logger.log(`✅ Order ${currentOrderId.substring(0, 16)}... filled (detected via position existence: ${position.size.toFixed(2)})`);
                 cleanup();
                 resolve(new PerpOrderResponse(
                   currentOrderId,
@@ -4570,7 +4570,7 @@ const releaseMutex = await this.acquireOrderMutex();
                   symbol,
                   orderSide!,
                   undefined,
-                  Math.abs(position.size),
+                  expectedSize, // CRITICAL: Return expected size, not total position size!
                   originalPrice || 0,
                   undefined,
                   new Date()

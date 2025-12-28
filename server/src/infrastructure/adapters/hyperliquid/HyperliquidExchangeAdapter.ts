@@ -30,6 +30,7 @@ import { HyperLiquidDataProvider } from './HyperLiquidDataProvider';
 import { DiagnosticsService } from '../../services/DiagnosticsService';
 import { MarketQualityFilter } from '../../../domain/services/MarketQualityFilter';
 import { RateLimiterService, RateLimitPriority } from '../../services/RateLimiterService';
+import { ExecutionLockService } from '../../services/ExecutionLockService';
 
 import { HyperLiquidWebSocketProvider } from './HyperLiquidWebSocketProvider';
 
@@ -92,6 +93,7 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
     @Optional() private readonly wsProvider?: HyperLiquidWebSocketProvider,
     @Optional() private readonly diagnosticsService?: DiagnosticsService,
     @Optional() private readonly marketQualityFilter?: MarketQualityFilter,
+    @Optional() private readonly executionLockService?: ExecutionLockService,
   ) {
     const privateKey =
       this.configService.get<string>('PRIVATE_KEY') ||
@@ -2359,17 +2361,20 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
     return new Promise(async (resolve) => {
       let isResolved = false;
       let checkInterval: NodeJS.Timeout | null = null;
-      let repriceInterval: NodeJS.Timeout | null = null;
       let wsHandler: any = null;
       let currentOrderId = orderId;
-      let repriceCount = 0;
-      const MAX_REPRICES = 20;
-      const REPRICE_INTERVAL_MS = 15000;
+      
+      // Track initial position to detect fills via delta
+      let initialPositionSize = 0;
+      try {
+        const positions = await this.getPositions();
+        const pos = positions.find(p => p.symbol === symbol && (orderSide ? p.side === orderSide : true));
+        initialPositionSize = pos ? Math.abs(pos.size) : 0;
+      } catch (e) {}
 
       const cleanup = () => {
         isResolved = true;
         if (checkInterval) clearInterval(checkInterval);
-        if (repriceInterval) clearInterval(repriceInterval);
         if (wsHandler && this.wsProvider) {
           this.wsProvider.removeListener('order_update', wsHandler);
         }
@@ -2381,7 +2386,14 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
           if (isResolved) return;
           
           const order = update.order;
-          if (order && (String(order.oid) === String(currentOrderId) || String(order.oid) === String(orderId))) {
+          if (!order) return;
+
+          // Match by current order ID OR symbol/side if it was repriced
+          const isOurOrder = String(order.oid) === String(currentOrderId) || 
+                            String(order.oid) === String(orderId) ||
+                            (order.coin === symbol && (orderSide === (order.side === 'B' ? OrderSide.LONG : OrderSide.SHORT)));
+
+          if (isOurOrder) {
             if (order.status === 'filled') {
               this.logger.log(`✅ Order ${order.oid} filled via WebSocket event`);
               cleanup();
@@ -2396,163 +2408,81 @@ export class HyperliquidExchangeAdapter implements IPerpExchangeAdapter {
                 undefined,
                 new Date()
               ));
-            } else if (order.status === 'canceled') {
-              // Only treat as cancelled if we didn't reprice it
-              if (repriceCount === 0) {
-                this.logger.warn(`❌ Order ${order.oid} canceled via WebSocket event`);
-                cleanup();
-                resolve(new PerpOrderResponse(
-                  String(order.oid),
-                  OrderStatus.CANCELLED,
-                  symbol,
-                  order.side === 'B' ? OrderSide.LONG : OrderSide.SHORT,
-                  undefined,
-                  0,
-                  undefined,
-                  undefined,
-                  new Date()
-                ));
-              }
             }
           }
         };
         this.wsProvider.on('order_update', wsHandler);
       }
 
-      // 2. Active Repricing Loop
-      const doReprice = async () => {
-        if (isResolved || !orderSide || repriceCount >= MAX_REPRICES) return;
-
-        try {
-          // Try WebSocket first, then REST fallback
-          let book: { bestBid: number; bestAsk: number } | null = this.wsProvider?.getBestBidAsk(symbol) || null;
-          
-          // CRITICAL: Fall back to REST if WebSocket has no data
-          if (!book) {
-            try {
-              book = await this.getBestBidAsk(symbol);
-              if (book) {
-                this.logger.log(`📡 REPRICE: Using REST fallback for ${symbol} order book: bid=${book.bestBid.toFixed(4)}, ask=${book.bestAsk.toFixed(4)}`);
-              }
-            } catch (e: any) {
-              this.logger.warn(`⚠️ REPRICE: REST fallback failed for ${symbol}: ${e.message}`);
-            }
-          }
-          
-          if (!book) {
-            this.logger.debug(`No order book data for repricing ${symbol} (tried WS + REST)`);
-            return;
-          }
-
-          const isSellOrder = orderSide === OrderSide.SHORT;
-          const targetPrice = isSellOrder ? book.bestAsk : book.bestBid;
-
-          const openOrders = await this.getOpenOrders();
-          const ourOrder = openOrders?.find(o => 
-            o.symbol.toUpperCase() === symbol.toUpperCase() &&
-            ((isSellOrder && o.side === 'sell') || (!isSellOrder && o.side === 'buy'))
-          );
-
-          if (!ourOrder) {
-            this.logger.debug(`Order no longer in open orders, might have filled`);
-            return;
-          }
-
-          const tickSize = await this.getTickSize(symbol).catch(() => 0.0001);
-          const priceDiff = Math.abs(ourOrder.price - targetPrice);
-
-          if (priceDiff > tickSize * 0.5) {
-            const priceChangePct = ((targetPrice - ourOrder.price) / ourOrder.price * 100).toFixed(3);
-            this.logger.log(
-              `🔄 REPRICE ${symbol} ${isSellOrder ? 'SELL' : 'BUY'} on HYPERLIQUID: ` +
-              `${ourOrder.price.toFixed(4)} → ${targetPrice.toFixed(4)} ` +
-              `(${priceChangePct}%, diff: ${priceDiff.toFixed(6)}, size: ${expectedSize.toFixed(2)}) ` +
-              `[Book: bid=${book.bestBid.toFixed(4)}, ask=${book.bestAsk.toFixed(4)}]`
-            );
-
-            try {
-              await this.cancelOrder(String(ourOrder.orderId), symbol);
-              this.logger.debug(`✅ Canceled old order ${ourOrder.orderId} for repricing`);
-            } catch (e: any) {
-              this.logger.warn(`⚠️ Cancel during reprice failed (may already be filled): ${e.message}`);
-              return;
-            }
-
-            const newOrder = new PerpOrderRequest(
-              symbol,
-              orderSide,
-              OrderType.LIMIT,
-              expectedSize,
-              targetPrice,
-              TimeInForce.GTC
-            );
-
-            try {
-              const newResp = await this.placeOrder(newOrder);
-              if (newResp.orderId) {
-                currentOrderId = newResp.orderId;
-                repriceCount++;
-                this.logger.log(
-                  `✅ REPRICE SUCCESS ${symbol} on HYPERLIQUID: New order ${currentOrderId} ` +
-                  `@ ${targetPrice.toFixed(4)} (reprice #${repriceCount})`
-                );
-              }
-            } catch (e: any) {
-              this.logger.error(`❌ REPRICE FAILED ${symbol} on HYPERLIQUID: Failed to place repriced order: ${e.message}`);
-            }
-          } else {
-            this.logger.debug(`✓ Order ${symbol} still competitive (price: ${ourOrder.price.toFixed(4)}, target: ${targetPrice.toFixed(4)}, diff: ${priceDiff.toFixed(6)})`);
-          }
-        } catch (e: any) {
-          this.logger.debug(`Reprice check error: ${e.message}`);
-        }
-      };
-
-      setTimeout(() => {
-        if (!isResolved) {
-          repriceInterval = setInterval(doReprice, REPRICE_INTERVAL_MS);
-        }
-      }, 5000);
-
-      // 3. Slow REST Poll (safety)
-      const safetyPoll = async () => {
+      // 2. Safety Polling Loop (Checks for fills even if WS missed)
+      checkInterval = setInterval(async () => {
         if (isResolved) return;
+
+        // If time is up, timeout
+        if (Date.now() - start > timeoutMs) {
+          this.logger.warn(`Timeout waiting for order ${orderId} fill`);
+          cleanup();
+          resolve(new PerpOrderResponse(orderId, OrderStatus.SUBMITTED, symbol, orderSide || OrderSide.LONG));
+          return;
+        }
+
         try {
-          const status = await this.getOrderStatus(currentOrderId, symbol);
-          if (status.status === OrderStatus.FILLED || status.status === OrderStatus.CANCELLED || status.status === OrderStatus.REJECTED) {
-            this.logger.log(`✅ Order ${currentOrderId} reached terminal state ${status.status} via safety poll`);
+          // Check if order exists in ExecutionLockService (might have been repriced)
+          if (this.executionLockService) {
+            const activeOrder = this.executionLockService.getActiveOrder(ExchangeType.HYPERLIQUID, symbol, orderSide === OrderSide.LONG ? 'LONG' : 'SHORT');
+            if (activeOrder && activeOrder.orderId && activeOrder.orderId !== currentOrderId) {
+              this.logger.debug(`📍 waitForOrderFill: Following repriced order ${currentOrderId} -> ${activeOrder.orderId}`);
+              currentOrderId = activeOrder.orderId;
+            }
+          }
+
+          // Check current position delta
+          const positions = await this.getPositions();
+          const pos = positions.find(p => p.symbol === symbol && (orderSide ? p.side === orderSide : true));
+          const currentSize = pos ? Math.abs(pos.size) : 0;
+          const delta = Math.abs(currentSize - initialPositionSize);
+
+          if (delta >= expectedSize * 0.98) {
+            this.logger.log(`✅ Leg filled detected via position delta: ${delta.toFixed(4)} (Expected: ${expectedSize})`);
             cleanup();
-            resolve(status);
+            resolve(new PerpOrderResponse(
+              currentOrderId,
+              OrderStatus.FILLED,
+              symbol,
+              orderSide || OrderSide.LONG,
+              undefined,
+              expectedSize, // Report expected size to avoid compounding drift
+              undefined,
+              undefined,
+              new Date()
+            ));
+            return;
           }
-        } catch (e: any) {
-          this.logger.debug(`Safety poll error for ${currentOrderId}: ${e.message}`);
+
+          // Check if order is still in open orders
+          const openOrders = await this.getOpenOrders();
+          const stillOpen = openOrders.find(o => String(o.orderId) === String(currentOrderId));
+          
+          if (!stillOpen && delta > 0) {
+            // Not in open orders and we have a partial fill
+            this.logger.log(`✅ Order ${currentOrderId} completed with partial fill: ${delta.toFixed(4)}`);
+            cleanup();
+            resolve(new PerpOrderResponse(
+              currentOrderId,
+              OrderStatus.FILLED,
+              symbol,
+              orderSide || OrderSide.LONG,
+              undefined,
+              delta,
+              undefined,
+              undefined,
+              new Date()
+            ));
+          }
+        } catch (e) {
+          this.logger.debug(`Error in safety poll: ${e.message}`);
         }
-      };
-
-      checkInterval = setInterval(safetyPoll, 30000);
-      
-      // 4. Timeout
-      setTimeout(() => {
-        if (isResolved) return;
-        this.logger.warn(`⏰ Timeout waiting for Hyperliquid order ${currentOrderId} fill after ${timeoutMs/1000}s (repriced ${repriceCount} times)`);
-        cleanup();
-        
-        this.getOrderStatus(currentOrderId, symbol)
-          .then(resolve)
-          .catch(() => resolve(new PerpOrderResponse(
-            currentOrderId,
-            OrderStatus.SUBMITTED,
-            symbol,
-            OrderSide.LONG,
-            undefined,
-            0,
-            undefined,
-            'TIMEOUT',
-            new Date()
-          )));
-      }, timeoutMs);
-
-      await safetyPoll();
+      }, 3000);
     });
   }
 }
