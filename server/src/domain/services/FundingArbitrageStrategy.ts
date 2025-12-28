@@ -973,6 +973,34 @@ export class FundingArbitrageStrategy {
             result.errors.push(`Existing single-leg position for ${symbol}`);
             return result;
           }
+        } else {
+          // Both legs exist - check for severe imbalance
+          const longSize = Math.abs(long.size);
+          const shortSize = Math.abs(short.size);
+          const imbalancePercent = Math.abs(longSize - shortSize) / Math.max(longSize, shortSize);
+          
+          if (imbalancePercent > 0.2) { // 20% imbalance threshold
+            const msg = `🛑 CIRCUIT BREAKER: Severe imbalance detected for ${symbol} (${(imbalancePercent * 100).toFixed(1)}%). ` +
+                        `Long: ${longSize.toFixed(2)} on ${long.exchangeType}, Short: ${shortSize.toFixed(2)} on ${short.exchangeType}. ` +
+                        `Aborting new strategy execution until reconciled.`;
+            this.logger.error(msg);
+            
+            if (this.tradeLoggingService) {
+              await this.tradeLoggingService.logDecision({
+                symbol,
+                longExchange: long.exchangeType,
+                shortExchange: short.exchangeType,
+                longFundingRate: 0,
+                shortFundingRate: 0,
+                spread: 0,
+                decision: 'REJECTED',
+                reason: `Circuit Breaker: Severe imbalance detected (${(imbalancePercent * 100).toFixed(1)}%)`
+              });
+            }
+            
+            result.errors.push(`Severe imbalance for ${symbol}: ${(imbalancePercent * 100).toFixed(1)}%`);
+            return result;
+          }
         }
       }
       // --------------------------------------

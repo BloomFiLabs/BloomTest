@@ -376,29 +376,37 @@ export class MakerEfficiencyService implements OnModuleInit {
     const aggressiveOffset = isUrgent ? tickSize * 2 : tickSize;
 
     // Check if order is far from book (more than 2 ticks away)
+    // isFarFromBook: price is too PASSIVE (too low for long, too high for short)
     const isFarFromBook = activeOrder.side === 'LONG' 
       ? (currentPrice < bestBid - tickSize * 2)
       : (currentPrice > bestAsk + tickSize * 2);
 
+    // isFarInsideBook: price is too AGGRESSIVE (too high for long, too low for short)
+    // This often means the order has already filled but the exchange hasn't confirmed it,
+    // OR the market data is stale.
+    const isFarInsideBook = activeOrder.side === 'LONG'
+      ? (currentPrice > bestAsk + tickSize * 2)
+      : (currentPrice < bestBid - tickSize * 2);
+
     if (activeOrder.side === 'LONG') {
       // For BUY orders, we want to be bestBid + tick(s)
       // Always reprice if we're worse than or equal to the book (below or equal to bestBid)
-      // OR if we're far from the book
-      if (currentPrice <= bestBid || isFarFromBook) {
+      // OR if we're far from the book (too passive or too aggressive)
+      if (currentPrice <= bestBid || isFarFromBook || isFarInsideBook) {
         targetPrice = bestBid + aggressiveOffset;
       }
     } else {
       // For SELL orders, we want to be bestAsk - tick(s)
       // Always reprice if we're worse than or equal to the book (above or equal to bestAsk)
-      // OR if we're far from the book
-      if (currentPrice >= bestAsk || isFarFromBook) {
+      // OR if we're far from the book (too passive or too aggressive)
+      if (currentPrice >= bestAsk || isFarFromBook || isFarInsideBook) {
         targetPrice = bestAsk - aggressiveOffset;
       }
     }
 
     // 3. Reposition if target price changed significantly OR if forced
     const priceDiff = Math.abs(targetPrice - currentPrice);
-    const priceNeedsUpdate = priceDiff > (tickSize / 2) || force || isFarFromBook;
+    const priceNeedsUpdate = priceDiff > (tickSize / 2) || force || isFarFromBook || isFarInsideBook;
     if (priceNeedsUpdate || force) {
       // Ensure we don't cross the spread (don't buy above bestAsk or sell below bestBid)
       if (activeOrder.side === 'LONG' && targetPrice >= bestAsk) {

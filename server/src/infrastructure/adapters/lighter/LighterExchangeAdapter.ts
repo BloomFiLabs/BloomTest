@@ -2492,20 +2492,22 @@ const releaseMutex = await this.acquireOrderMutex();
           );
           
           if (matchingPosition) {
-            // If order is missing from open orders but a position exists, 
-            // it's highly likely it filled. We return FILLED to stop the repricer.
-            this.pendingOrdersMap.delete(orderId);
-            this.logger.log(
-              `✅ getOrderStatus: Order ${orderId.substring(0, 16)}... filled (detected via position existence, age: ${Math.round(orderAge / 1000)}s)`,
+            // Position exists but we have no tracking info
+            // This is ambiguous - could be from a different order
+            this.logger.warn(
+              `⚠️ getOrderStatus: Order ${orderId.substring(0, 16)}... has no tracking info. ` +
+              `Position exists for ${symbol} (${matchingPosition.side}, size: ${matchingPosition.size}) ` +
+              `but cannot confirm this order filled. Returning SUBMITTED to force position delta check.`
             );
+            // Return SUBMITTED instead of FILLED to force the caller to verify via position delta
             return new PerpOrderResponse(
               orderId,
-              OrderStatus.FILLED,
+              OrderStatus.SUBMITTED,
               symbol,
-              trackedOrder.side,
+              matchingPosition.side === OrderSide.LONG ? OrderSide.LONG : OrderSide.SHORT,
               undefined,
-              trackedOrder.size, // Use expected size as we assume full fill
-              trackedOrder.price,
+              0, // Don't report filled size - we don't know!
+              matchingPosition.entryPrice || matchingPosition.markPrice,
               undefined,
               new Date(),
             );

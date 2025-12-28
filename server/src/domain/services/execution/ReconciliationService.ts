@@ -252,20 +252,61 @@ export class ReconciliationService implements OnModuleInit {
       this.diagnosticsService.recordPositionDrift(symbol, long.exchangeType, short.exchangeType, Math.abs(long.size), Math.abs(short.size), long.markPrice || 0);
     }
 
+    // If imbalance is severe (>30%), attempt to rebalance before going nuclear
+    if (percent > 30 && percent < this.NUCLEAR_THRESHOLD_PERCENT) {
+      this.logger.log(`🛠️ Attempting proactive rebalancing for ${symbol} (${percent.toFixed(1)}% imbalance)...`);
+      await this.attemptHedgedRebalance(symbol, long, short);
+    }
+
     if (percent > this.NUCLEAR_THRESHOLD_PERCENT) {
       let status = this.hedgePairs.get(symbol);
       if (!status) {
         status = { symbol, longExchange: long.exchangeType, shortExchange: short.exchangeType, longSize: Math.abs(long.size), shortSize: Math.abs(short.size), imbalance: Math.abs(long.size - short.size), imbalancePercent: percent, isBalanced: false, lastReconciled: new Date(), firstImbalanceAt: new Date(), imbalanceCount: 1 };
         this.hedgePairs.set(symbol, status);
+        
+        // Try one proactive rebalance when first detected
+        await this.attemptHedgedRebalance(symbol, long, short);
       } else {
         status.imbalanceCount++;
         const durationMin = (Date.now() - status.firstImbalanceAt!.getTime()) / 60000;
+        
+        this.logger.warn(`⏳ Severe imbalance for ${symbol} persisting for ${durationMin.toFixed(1)}m (Nuclear at ${this.NUCLEAR_TIMEOUT_MINUTES}m)`);
+        
+        // Every 2 minutes, try to rebalance again
+        if (Math.floor(durationMin) % 2 === 0 && status.imbalanceCount % 4 === 0) {
+          await this.attemptHedgedRebalance(symbol, long, short);
+        }
+
         if (durationMin >= this.NUCLEAR_TIMEOUT_MINUTES) {
           this.logger.error(`☢️ NUCLEAR OPTION: Severe imbalance for ${symbol} persisted. Closing BOTH legs.`);
           await Promise.all([this.executeNuclearClose(long), this.executeNuclearClose(short)]);
           this.hedgePairs.delete(symbol);
         }
       }
+    }
+  }
+
+  private async attemptHedgedRebalance(symbol: string, long: PerpPosition, short: PerpPosition) {
+    if (!this.orchestrator) return;
+
+    try {
+      const longSize = Math.abs(long.size);
+      const shortSize = Math.abs(short.size);
+      const diff = Math.abs(longSize - shortSize);
+      
+      if (diff < 0.001) return;
+
+      if (longSize > shortSize) {
+        // Too much LONG - reduce LONG on Hyperliquid
+        this.logger.log(`⚖️ Rebalancing ${symbol}: Reducing LONG on ${long.exchangeType} by ${diff.toFixed(4)} to match SHORT on ${short.exchangeType}`);
+        await this.orchestrator.executePartialClose(long, diff, 'Imbalance Rebalancing');
+      } else {
+        // Too much SHORT - reduce SHORT on Lighter
+        this.logger.log(`⚖️ Rebalancing ${symbol}: Reducing SHORT on ${short.exchangeType} by ${diff.toFixed(4)} to match LONG on ${long.exchangeType}`);
+        await this.orchestrator.executePartialClose(short, diff, 'Imbalance Rebalancing');
+      }
+    } catch (error: any) {
+      this.logger.error(`Failed to execute proactive rebalance for ${symbol}: ${error.message}`);
     }
   }
 
