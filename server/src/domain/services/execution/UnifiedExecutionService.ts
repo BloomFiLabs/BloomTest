@@ -198,6 +198,20 @@ export class UnifiedExecutionService {
       // Dynamic Lighter-first logic
       const firstIsLong = (longExchange === ExchangeType.LIGHTER) || (shortExchange !== ExchangeType.LIGHTER);
       
+      // Update execution progress for TUI
+      if (this.executionLockService) {
+        this.executionLockService.setExecutionProgress({
+          symbol,
+          operation: 'SLICING',
+          currentSlice: sliceNumber,
+          totalSlices: numberOfSlices,
+          legAExchange: firstIsLong ? longExchange : shortExchange,
+          legBExchange: firstIsLong ? shortExchange : longExchange,
+          legAStatus: 'PENDING',
+          legBStatus: 'WAITING',
+        });
+      }
+      
       const sliceResult = await this.executeSequentialSlice(
         longAdapter,
         shortAdapter,
@@ -227,6 +241,11 @@ export class UnifiedExecutionService {
       if (i < numberOfSlices - 1) {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
+    }
+
+    // Clear execution progress
+    if (this.executionLockService) {
+      this.executionLockService.setExecutionProgress(null);
     }
 
     // 3. FINAL VALIDATION & EMERGENCY ROLLBACK
@@ -303,6 +322,19 @@ export class UnifiedExecutionService {
       
       // Register order with ExecutionLockService so Guardian knows we're tracking it
       const exchangeA = firstAdapter.getExchangeType();
+      
+      // Update progress: Placing Leg A
+      if (this.executionLockService) {
+        const currentProgress = this.executionLockService.getExecutionProgress();
+        if (currentProgress) {
+          this.executionLockService.setExecutionProgress({
+            ...currentProgress,
+            operation: 'FILLING_LEG_A',
+            legAStatus: 'PLACING',
+          });
+        }
+      }
+      
       const firstResp = await firstAdapter.placeOrder(firstOrder);
       
       if (!firstResp.isSuccess()) {
@@ -321,6 +353,15 @@ export class UnifiedExecutionService {
           firstPrice
         );
         this.executionLockService.updateOrderStatus(exchangeA, symbol, firstSide === OrderSide.LONG ? 'LONG' : 'SHORT', 'WAITING_FILL', firstResp.orderId);
+        
+        // Update progress: Waiting for Leg A fill
+        const currentProgress = this.executionLockService.getExecutionProgress();
+        if (currentProgress) {
+          this.executionLockService.setExecutionProgress({
+            ...currentProgress,
+            legAStatus: 'WAITING_FILL',
+          });
+        }
       }
 
       // --- STEP 3: Wait for Leg A Fill ---
@@ -338,6 +379,15 @@ export class UnifiedExecutionService {
       if (this.executionLockService && firstResp.orderId) {
         const status = firstFill.filledSize >= sliceSize * 0.99 ? 'FILLED' : (firstFill.filledSize > 0 ? 'FILLED' : 'CANCELLED');
         this.executionLockService.updateOrderStatus(exchangeA, symbol, firstSide === OrderSide.LONG ? 'LONG' : 'SHORT', status as any, firstResp.orderId);
+        
+        // Update progress: Leg A filled
+        const currentProgress = this.executionLockService.getExecutionProgress();
+        if (currentProgress) {
+          this.executionLockService.setExecutionProgress({
+            ...currentProgress,
+            legAStatus: status === 'FILLED' ? 'FILLED' : 'FAILED',
+          });
+        }
       }
       
       if (firstIsLong) {
@@ -356,6 +406,18 @@ export class UnifiedExecutionService {
 
       // --- STEP 3: Place Leg B (Matching actual fill of Leg A) ---
       const matchedSize = firstFill.filledSize;
+      
+      // Update progress: Moving to Leg B
+      if (this.executionLockService) {
+        const currentProgress = this.executionLockService.getExecutionProgress();
+        if (currentProgress) {
+          this.executionLockService.setExecutionProgress({
+            ...currentProgress,
+            operation: 'FILLING_LEG_B',
+            legBStatus: 'PLACING',
+          });
+        }
+      }
       
       // Get initial position size for Leg B BEFORE placing order
       let initialPositionSizeB = 0;
@@ -382,6 +444,19 @@ export class UnifiedExecutionService {
       if (!secondResp.isSuccess()) {
         // CRITICAL: Leg B failed to even place. Must rollback Leg A immediately.
         result.error = `Leg B (${secondSide}) placement failed. EMERGENCY ROLLBACK of Leg A.`;
+        
+        // Update progress: Rollback
+        if (this.executionLockService) {
+          const currentProgress = this.executionLockService.getExecutionProgress();
+          if (currentProgress) {
+            this.executionLockService.setExecutionProgress({
+              ...currentProgress,
+              operation: 'ROLLBACK',
+              legBStatus: 'FAILED',
+            });
+          }
+        }
+        
         try {
           await this.rollback(firstAdapter, symbol, matchedSize, firstSide);
           // Only reset filled size if rollback succeeded
@@ -404,6 +479,15 @@ export class UnifiedExecutionService {
           secondPrice
         );
         this.executionLockService.updateOrderStatus(exchangeB, symbol, secondSide === OrderSide.LONG ? 'LONG' : 'SHORT', 'WAITING_FILL', secondResp.orderId);
+        
+        // Update progress: Waiting for Leg B fill
+        const currentProgress = this.executionLockService.getExecutionProgress();
+        if (currentProgress) {
+          this.executionLockService.setExecutionProgress({
+            ...currentProgress,
+            legBStatus: 'WAITING_FILL',
+          });
+        }
       }
 
       // --- STEP 4: Wait for Leg B Fill ---

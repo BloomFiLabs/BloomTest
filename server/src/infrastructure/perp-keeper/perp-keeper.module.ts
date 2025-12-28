@@ -53,6 +53,7 @@ import { ProfitTracker } from '../services/ProfitTracker';
 import { RewardHarvester } from '../services/RewardHarvester';
 import { PerpKeeperController } from '../controllers/PerpKeeperController';
 import { FundingRateController } from '../controllers/FundingRateController';
+import { TuiController } from '../controllers/TuiController';
 import { KeeperStrategyEventListener } from '../adapters/blockchain/KeeperStrategyEventListener';
 import { WithdrawalFulfiller } from '../adapters/blockchain/WithdrawalFulfiller';
 import { NAVReporter } from '../adapters/blockchain/NAVReporter';
@@ -86,6 +87,7 @@ import {
   SlippageModelCalibrator,
 } from '../../domain/services/twap';
 import { TradeLoggingService } from '../services/TradeLoggingService';
+import { TuiLogService } from '../services/TuiLogService';
 import type { IEventBus } from '../../domain/events/DomainEvent';
 import type { IHistoricalFundingRateService } from '../../domain/ports/IHistoricalFundingRateService';
 import type { IPositionLossTracker } from '../../domain/ports/IPositionLossTracker';
@@ -113,7 +115,7 @@ import { PredictionAutoCalibrator } from '../../domain/services/prediction/Predi
  */
 @Module({
   imports: [ConfigModule, GraphModule, DomainModule],
-  controllers: [PerpKeeperController, FundingRateController],
+  controllers: [PerpKeeperController, FundingRateController, TuiController],
   providers: [
     // Exchange adapters - conditionally use mock adapters in test mode
     // Note: Mock adapters are created in PerpKeeperService, not here
@@ -840,6 +842,7 @@ import { PredictionAutoCalibrator } from '../../domain/services/prediction/Predi
       provide: 'IPerpKeeperPerformanceLogger',
       useExisting: PerpKeeperPerformanceLogger,
     },
+    TuiLogService,
     TradeLoggingService,
   ],
   exports: [

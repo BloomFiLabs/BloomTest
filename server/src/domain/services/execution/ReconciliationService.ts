@@ -8,6 +8,7 @@ import { DiagnosticsService } from '../../../infrastructure/services/Diagnostics
 import { ExecutionLockService } from '../../../infrastructure/services/ExecutionLockService';
 import { PerpKeeperService } from '../../../application/services/PerpKeeperService';
 import { OrderGuardianService } from './OrderGuardianService';
+import { PerpKeeperOrchestrator } from '../PerpKeeperOrchestrator';
 
 /**
  * PositionExpectation - What we expect a position to be
@@ -81,6 +82,7 @@ export class ReconciliationService implements OnModuleInit {
     @Optional() private readonly executionLockService?: ExecutionLockService,
     @Optional() private readonly keeperService?: PerpKeeperService,
     @Optional() @Inject(forwardRef(() => OrderGuardianService)) private readonly orderGuardian?: OrderGuardianService,
+    @Optional() @Inject(forwardRef(() => PerpKeeperOrchestrator)) private readonly orchestrator?: PerpKeeperOrchestrator,
   ) {}
 
   onModuleInit() {

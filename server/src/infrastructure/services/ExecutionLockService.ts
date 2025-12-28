@@ -65,6 +65,20 @@ export class ExecutionLockService {
   private readonly orderHistory: ActiveOrder[] = [];
   private readonly MAX_ORDER_HISTORY = 100;
 
+  // Active execution progress tracking for TUI
+  private currentExecution: {
+    symbol: string;
+    operation: string; // 'SLICING', 'FILLING_LEG_A', 'FILLING_LEG_B', 'ROLLBACK', 'COMPLETE'
+    currentSlice: number;
+    totalSlices: number;
+    legAExchange: string;
+    legBExchange: string;
+    legAStatus: string;
+    legBStatus: string;
+    startedAt: Date;
+    lastUpdate: Date;
+  } | null = null;
+
   // Timeout for stale locks (2 minutes - reduced from 5 to prevent long blocking)
   private readonly LOCK_TIMEOUT_MS = 2 * 60 * 1000;
 
@@ -831,6 +845,7 @@ export class ExecutionLockService {
       held: boolean;
       holder: string | null;
       durationMs: number | null;
+      queueLength: number;
     };
     symbolLocks: Array<{
       symbol: string;
@@ -840,11 +855,51 @@ export class ExecutionLockService {
     }>;
     activeOrders: ActiveOrder[];
     recentOrderHistory: ActiveOrder[];
+    currentExecution: typeof this.currentExecution;
   } {
+    const baseDiagnostics = this.getDiagnostics();
     return {
-      ...this.getDiagnostics(),
+      globalLock: {
+        ...baseDiagnostics.globalLock,
+        queueLength: this.lockQueue.length,
+      },
+      symbolLocks: baseDiagnostics.symbolLocks,
       activeOrders: this.getAllActiveOrders(),
       recentOrderHistory: this.getOrderHistory(20),
+      currentExecution: this.currentExecution,
     };
+  }
+
+  /**
+   * Set current execution progress (for TUI display)
+   */
+  setExecutionProgress(progress: {
+    symbol: string;
+    operation: string;
+    currentSlice: number;
+    totalSlices: number;
+    legAExchange: string;
+    legBExchange: string;
+    legAStatus: string;
+    legBStatus: string;
+  } | null): void {
+    if (progress === null) {
+      this.currentExecution = null;
+    } else {
+      this.currentExecution = {
+        ...progress,
+        startedAt: this.currentExecution?.symbol === progress.symbol 
+          ? this.currentExecution.startedAt 
+          : new Date(),
+        lastUpdate: new Date(),
+      };
+    }
+  }
+
+  /**
+   * Get current execution progress
+   */
+  getExecutionProgress() {
+    return this.currentExecution;
   }
 }
