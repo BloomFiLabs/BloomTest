@@ -1818,14 +1818,31 @@ export class LighterExchangeAdapter
           continue;
         }
 
-        // Not a nonce error or last attempt - throw
+        // Not a nonce error or last attempt
+        
+        // CRITICAL FALLBACK: If WASM signer doesn't support modifyOrder, use cancel + place
+        if (errorMsg.includes('modifyOrder not supported with WASM signer')) {
+          this.logger.warn(`⚠️ WASM signer does not support modifyOrder for ${request.symbol}. Falling back to cancel + place...`);
+          
+          try {
+            // 1. Cancel the existing order
+            await this.cancelOrder(orderId, request.symbol);
+            
+            // 2. Place a new order
+            return await this.placeOrder(request);
+          } catch (fallbackError: any) {
+            this.logger.error(`❌ Fallback cancel+place failed for ${request.symbol}: ${fallbackError.message}`);
+            throw fallbackError;
+          }
+        }
+
         this.logger.error(`Failed to modify order ${orderId}: ${errorMsg}`);
-      throw new ExchangeError(
+        throw new ExchangeError(
           `Failed to modify order: ${errorMsg}`,
-        ExchangeType.LIGHTER,
-        undefined,
-        error,
-      );
+          ExchangeType.LIGHTER,
+          undefined,
+          error,
+        );
     }
   }
 
@@ -2475,55 +2492,23 @@ const releaseMutex = await this.acquireOrderMutex();
           );
           
           if (matchingPosition) {
-            // CRITICAL: We need to verify the position size makes sense
-            // If the position size is LESS than what we tried to place, the order didn't fully fill
-            // If the position size is roughly equal to what we placed, it likely filled
-            const positionSize = Math.abs(matchingPosition.size);
-            
-            // NOTE: We can't reliably determine if THIS specific order filled
-            // without comparing to the position size BEFORE the order was placed.
-            // The UnifiedExecutionService tracks initialPositionSize for this reason.
-            // Here, we can only return a "best guess" status.
-            
-            // If order is older than 5 minutes and not in open orders, assume it either:
-            // - Filled (position exists)
-            // - Cancelled (but we can't distinguish from filled here)
-            if (orderAge >= 300000) {
-              this.pendingOrdersMap.delete(orderId);
-              this.logger.log(
-                `⚠️ getOrderStatus: Order ${orderId.substring(0, 16)}... not in open orders after ${Math.round(orderAge/1000)}s. ` +
-                `Position exists for ${symbol} (${matchingPosition.side}, size: ${positionSize}). ` +
-                `Assuming FILLED but UnifiedExecutionService should verify via position delta.`
-              );
-              return new PerpOrderResponse(
-                orderId,
-                OrderStatus.FILLED,
-                symbol,
-                matchingPosition.side === OrderSide.LONG ? OrderSide.LONG : OrderSide.SHORT,
-                undefined,
-                Math.abs(matchingPosition.size), // This might be wrong - caller must verify!
-                matchingPosition.entryPrice || matchingPosition.markPrice,
-                undefined,
-                new Date(),
-              );
-            } else {
-              // Order is between 5-30 seconds old - keep waiting
-              this.logger.debug(
-                `getOrderStatus: Order ${orderId.substring(0, 16)}... not in open orders ` +
-                `(age: ${orderAge}ms). Position exists but still waiting for confirmation.`
-              );
-              return new PerpOrderResponse(
-                orderId,
-                OrderStatus.SUBMITTED,
-                symbol,
-                trackedOrder.side,
-                undefined,
-                0,
-                trackedOrder.price,
-                undefined,
-                new Date(),
-              );
-            }
+            // If order is missing from open orders but a position exists, 
+            // it's highly likely it filled. We return FILLED to stop the repricer.
+            this.pendingOrdersMap.delete(orderId);
+            this.logger.log(
+              `✅ getOrderStatus: Order ${orderId.substring(0, 16)}... filled (detected via position existence, age: ${Math.round(orderAge / 1000)}s)`,
+            );
+            return new PerpOrderResponse(
+              orderId,
+              OrderStatus.FILLED,
+              symbol,
+              trackedOrder.side,
+              undefined,
+              trackedOrder.size, // Use expected size as we assume full fill
+              trackedOrder.price,
+              undefined,
+              new Date(),
+            );
           } else {
             // No matching position - order might have been cancelled or still processing
             if (orderAge >= 300000) {
