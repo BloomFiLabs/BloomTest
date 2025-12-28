@@ -1875,6 +1875,7 @@ export class OrderExecutor implements IOrderExecutor {
           opportunity.longExchange,
           opportunity.shortExchange!,
           this.unifiedExecutionConfig,
+          threadId,
         );
 
         if (unifiedResult.success) {
@@ -2410,6 +2411,7 @@ export class OrderExecutor implements IOrderExecutor {
                 opportunity.longExchange,
                 opportunity.shortExchange!,
                 this.unifiedExecutionConfig,
+                threadId,
               );
 
               if (unifiedResult.success) {

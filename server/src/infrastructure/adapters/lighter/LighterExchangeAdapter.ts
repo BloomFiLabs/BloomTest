@@ -2677,9 +2677,11 @@ const releaseMutex = await this.acquireOrderMutex();
         try {
           const marketIndex = await this.getMarketIndex(symbol);
           const wsBest = this.wsProvider.getBestBidAsk(marketIndex);
-          this.logger.debug(`🔍 getBestBidAsk: WebSocket best bid/ask for ${symbol}: bid=${wsBest?.bestBid.toFixed(4)}, ask=${wsBest?.bestAsk.toFixed(4)}`);
           if (wsBest) {
+            this.logger.debug(`🔍 getBestBidAsk: WebSocket best bid/ask for ${symbol}: bid=${wsBest.bestBid.toFixed(4)}, ask=${wsBest.bestAsk.toFixed(4)}`);
             return wsBest;
+          } else {
+            this.logger.debug(`🔍 getBestBidAsk: No WebSocket data yet for ${symbol}`);
           }
         } catch (e) {
           this.logger.warn(`⚠️ getBestBidAsk: WebSocket lookup failed for ${symbol}: ${e.message}`);
@@ -4518,7 +4520,7 @@ const releaseMutex = await this.acquireOrderMutex();
           const targetPrice = isSellOrder ? book.bestAsk : book.bestBid;
           
           // Get current order status to check if still open
-          const currentOpenOrders = await this.getOpenOrders().catch(() => []);
+          const currentOpenOrders = await this.getOpenOrders().catch(() => []) as any[];
           const ourOrder = currentOpenOrders.find(o => 
             o.symbol.toUpperCase() === symbol.toUpperCase() && 
             ((isSellOrder && o.side === 'sell') || (!isSellOrder && o.side === 'buy'))

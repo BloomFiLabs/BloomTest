@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { IPerpExchangeAdapter } from '../../ports/IPerpExchangeAdapter';
 import { ExchangeType } from '../../value-objects/ExchangeConfig';
+import { ExecutionLockService } from '../../../infrastructure/services/ExecutionLockService';
 import {
   PerpOrderRequest,
   PerpOrderResponse,
@@ -86,6 +87,10 @@ const DEFAULT_CONFIG: UnifiedExecutionConfig = {
 export class UnifiedExecutionService {
   private readonly logger = new Logger(UnifiedExecutionService.name);
 
+  constructor(
+    @Optional() private readonly executionLockService?: ExecutionLockService,
+  ) {}
+
   /**
    * Execute a hedged trade with unified safety-first logic
    */
@@ -99,8 +104,10 @@ export class UnifiedExecutionService {
     longExchange: ExchangeType,
     shortExchange: ExchangeType,
     config: Partial<UnifiedExecutionConfig> = {},
+    threadId?: string,
   ): Promise<UnifiedExecutionResult> {
     const cfg = { ...DEFAULT_CONFIG, ...config };
+    const effectiveThreadId = threadId || this.executionLockService?.generateThreadId() || `unified-${Date.now()}`;
     
     // 1. ANALYZE & PLAN
     const [longEquity, shortEquity] = await Promise.all([
@@ -200,7 +207,8 @@ export class UnifiedExecutionService {
         shortPrice,
         sliceNumber,
         cfg,
-        firstIsLong
+        firstIsLong,
+        effectiveThreadId
       );
 
       result.sliceResults.push(sliceResult);
@@ -248,7 +256,8 @@ export class UnifiedExecutionService {
     shortPrice: number,
     sliceNumber: number,
     cfg: UnifiedExecutionConfig,
-    firstIsLong: boolean
+    firstIsLong: boolean,
+    threadId: string,
   ): Promise<SliceResult> {
     const result: SliceResult = {
       sliceNumber,
@@ -291,11 +300,27 @@ export class UnifiedExecutionService {
 
       // --- STEP 2: Place Leg A ---
       const firstOrder = new PerpOrderRequest(symbol, firstSide, OrderType.LIMIT, sliceSize, firstPrice, TimeInForce.GTC);
+      
+      // Register order with ExecutionLockService so Guardian knows we're tracking it
+      const exchangeA = firstAdapter.getExchangeType();
       const firstResp = await firstAdapter.placeOrder(firstOrder);
       
       if (!firstResp.isSuccess()) {
         result.error = `Leg A (${firstSide}) placement failed: ${firstResp.error}`;
         return result;
+      }
+
+      if (this.executionLockService && firstResp.orderId) {
+        this.executionLockService.registerOrderPlacing(
+          firstResp.orderId,
+          symbol,
+          exchangeA,
+          firstSide === OrderSide.LONG ? 'LONG' : 'SHORT',
+          threadId,
+          sliceSize,
+          firstPrice
+        );
+        this.executionLockService.updateOrderStatus(exchangeA, symbol, firstSide === OrderSide.LONG ? 'LONG' : 'SHORT', 'WAITING_FILL', firstResp.orderId);
       }
 
       // --- STEP 3: Wait for Leg A Fill ---
@@ -308,6 +333,12 @@ export class UnifiedExecutionService {
         initialPositionSize, // Pass initial position to calculate delta
         firstSide // Pass side to find correct position in subsequent slices
       );
+      
+      // Update status in registry
+      if (this.executionLockService && firstResp.orderId) {
+        const status = firstFill.filledSize >= sliceSize * 0.99 ? 'FILLED' : (firstFill.filledSize > 0 ? 'FILLED' : 'CANCELLED');
+        this.executionLockService.updateOrderStatus(exchangeA, symbol, firstSide === OrderSide.LONG ? 'LONG' : 'SHORT', status as any, firstResp.orderId);
+      }
       
       if (firstIsLong) {
         result.longFilledSize = firstFill.filledSize;
@@ -345,6 +376,7 @@ export class UnifiedExecutionService {
       }
       
       const secondOrder = new PerpOrderRequest(symbol, secondSide, OrderType.LIMIT, matchedSize, secondPrice, TimeInForce.GTC);
+      const exchangeB = secondAdapter.getExchangeType();
       const secondResp = await secondAdapter.placeOrder(secondOrder);
 
       if (!secondResp.isSuccess()) {
@@ -361,6 +393,19 @@ export class UnifiedExecutionService {
         return result;
       }
 
+      if (this.executionLockService && secondResp.orderId) {
+        this.executionLockService.registerOrderPlacing(
+          secondResp.orderId,
+          symbol,
+          exchangeB,
+          secondSide === OrderSide.LONG ? 'LONG' : 'SHORT',
+          threadId,
+          matchedSize,
+          secondPrice
+        );
+        this.executionLockService.updateOrderStatus(exchangeB, symbol, secondSide === OrderSide.LONG ? 'LONG' : 'SHORT', 'WAITING_FILL', secondResp.orderId);
+      }
+
       // --- STEP 4: Wait for Leg B Fill ---
       const secondFill = await this.waitForFill(
         secondAdapter, 
@@ -371,6 +416,12 @@ export class UnifiedExecutionService {
         initialPositionSizeB, // Pass initial position for Leg B
         secondSide // Pass side to find correct position
       );
+      
+      // Update status in registry
+      if (this.executionLockService && secondResp.orderId) {
+        const status = secondFill.filledSize >= matchedSize * 0.99 ? 'FILLED' : (secondFill.filledSize > 0 ? 'FILLED' : 'CANCELLED');
+        this.executionLockService.updateOrderStatus(exchangeB, symbol, secondSide === OrderSide.LONG ? 'LONG' : 'SHORT', status as any, secondResp.orderId);
+      }
       
       if (firstIsLong) {
         result.shortFilledSize = secondFill.filledSize;

@@ -155,6 +155,13 @@ export class ReconciliationService implements OnModuleInit {
   }
 
   private async reconcileSymbolPositions(symbol: string) {
+    // CRITICAL: If the symbol is currently locked by an execution thread, 
+    // we should skip reconciliation to avoid "missfires" during sequential execution.
+    if (this.executionLockService?.isSymbolLocked(symbol)) {
+      this.logger.debug(`⏭️ Skipping reconciliation for ${symbol} - currently locked by an execution thread`);
+      return;
+    }
+
     const symbolPositions = Array.from(this.actualPositions.values()).filter(
       p => this.normalizeSymbol(p.symbol) === symbol
     );

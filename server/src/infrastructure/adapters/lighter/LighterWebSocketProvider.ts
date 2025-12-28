@@ -40,9 +40,11 @@ interface OrderBookLevel {
 interface OrderBookMessage {
   channel: string;
   type: string;
-  data: {
+  order_book: {
     bids: OrderBookLevel[];
     asks: OrderBookLevel[];
+    nonce?: number;
+    begin_nonce?: number;
   };
 }
 
@@ -87,6 +89,7 @@ interface WsMessage {
   channel?: string;
   type?: string;
   market_stats?: MarketStatsMessage['market_stats'];
+  order_book?: OrderBookMessage['order_book'];
   data?: any;
   market_id?: number;
   error?: { code: number; message: string };
@@ -126,8 +129,8 @@ export class LighterWebSocketProvider
   private subscribedMarkets: Set<number> = new Set();
   private actuallySubscribedMarkets: Set<number> = new Set(); // Markets we've SENT subscription for
   
-  // Cache for orderbook data (key: marketIndex, value: { bids, asks })
-  private orderbookCache: Map<number, { bids: OrderBookLevel[]; asks: OrderBookLevel[] }> = new Map();
+  // Cache for orderbook data (key: marketIndex, value: { bids: Map<price, size>, asks: Map<price, size> })
+  private orderbookCache: Map<number, { bids: Map<string, string>; asks: Map<string, string> }> = new Map();
   private subscribedOrderbooks: Set<number> = new Set();
 
   // Track if we've received initial data for each market
@@ -465,24 +468,55 @@ export class LighterWebSocketProvider
     }
 
     // Handle orderbook updates (channel format: order_book/{MARKET_INDEX})
-    if ((message.channel?.startsWith('order_book/') || message.channel?.startsWith('order_book:')) && message.data) {
+    // Support both 'order_book' property (from docs) and 'data' property (legacy/fallback)
+    if ((message.channel?.startsWith('order_book/') || message.channel?.startsWith('order_book:')) && (message.order_book || message.data)) {
       const marketIndex = parseInt(message.channel.split(/[:/]/)[1]);
       
       if (!isNaN(marketIndex)) {
-        const bids = message.data.bids || [];
-        const asks = message.data.asks || [];
+        const orderBookData = message.order_book || message.data;
+        const bids = orderBookData.bids || [];
+        const asks = orderBookData.asks || [];
         
-        this.orderbookCache.set(marketIndex, { bids, asks });
+        let cached = this.orderbookCache.get(marketIndex);
+        if (!cached) {
+          cached = { bids: new Map(), asks: new Map() };
+          this.orderbookCache.set(marketIndex, cached);
+        }
+
+        // Apply bid updates (snapshot or delta)
+        for (const level of bids) {
+          const price = level.price || (level as any).p;
+          const size = level.size || (level as any).s;
+          if (!price) continue;
+          
+          if (parseFloat(size || '0') <= 0) {
+            cached.bids.delete(price);
+          } else {
+            cached.bids.set(price, size);
+          }
+        }
+
+        // Apply ask updates (snapshot or delta)
+        for (const level of asks) {
+          const price = level.price || (level as any).p;
+          const size = level.size || (level as any).s;
+          if (!price) continue;
+          
+          if (parseFloat(size || '0') <= 0) {
+            cached.asks.delete(price);
+          } else {
+            cached.asks.set(price, size);
+          }
+        }
         
         // REACTIVE: Trigger callbacks for order book updates
         const callbacks = this.bookUpdateCallbacks.get(marketIndex);
-        if (callbacks && callbacks.length > 0 && bids.length > 0 && asks.length > 0) {
-          const bestBid = parseFloat(bids[0].price || bids[0].p || '0');
-          const bestAsk = parseFloat(asks[0].price || asks[0].p || '0');
-          if (bestBid > 0 && bestAsk > 0) {
+        if (callbacks && callbacks.length > 0) {
+          const bestBidAsk = this.getBestBidAsk(marketIndex);
+          if (bestBidAsk) {
             for (const callback of callbacks) {
               try {
-                callback(bestBid, bestAsk, marketIndex);
+                callback(bestBidAsk.bestBid, bestBidAsk.bestAsk, marketIndex);
               } catch (e: any) {
                 this.logger.error(`Error in book update callback for market ${marketIndex}: ${e.message}`);
               }
@@ -574,17 +608,34 @@ export class LighterWebSocketProvider
    */
   getBestBidAsk(marketIndex: number): { bestBid: number; bestAsk: number } | null {
     const book = this.orderbookCache.get(marketIndex);
-    if (!book || book.bids.length === 0 || book.asks.length === 0) {
+    if (!book || book.bids.size === 0 || book.asks.size === 0) {
       if (!this.subscribedOrderbooks.has(marketIndex)) {
         this.subscribeToOrderbook(marketIndex);
       }
-      this.logger.warn(`⚠️ No order book data for market ${marketIndex}`);
+      return null;
+    }
+
+    // Find best bid (highest price)
+    let bestBid = -1;
+    for (const priceStr of book.bids.keys()) {
+      const price = parseFloat(priceStr);
+      if (price > bestBid) bestBid = price;
+    }
+
+    // Find best ask (lowest price)
+    let bestAsk = Number.MAX_VALUE;
+    for (const priceStr of book.asks.keys()) {
+      const price = parseFloat(priceStr);
+      if (price < bestAsk) bestAsk = price;
+    }
+
+    if (bestBid === -1 || bestAsk === Number.MAX_VALUE) {
       return null;
     }
 
     return {
-      bestBid: parseFloat(book.bids[0].price),
-      bestAsk: parseFloat(book.asks[0].price)
+      bestBid,
+      bestAsk
     };
   }
 
@@ -697,6 +748,7 @@ export class LighterWebSocketProvider
     // Orderbook subscriptions will happen on-demand when needed
     if (this.subscribedOrderbooks.size > 0) {
       this.subscribedOrderbooks.clear();
+      this.orderbookCache.clear();
     }
 
     // Resubscribe to user orders if we were subscribed
