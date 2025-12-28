@@ -92,7 +92,7 @@ export class LighterExchangeAdapter
 
   // ==================== ORDER TRACKING ====================
   // Track placed orders by transaction hash to match with Lighter order index
-  // Key: transaction hash, Value: { symbol, side, size, price, placedAt }
+  // Key: normalized transaction hash, Value: { symbol, side, size, price, placedAt }
   private pendingOrdersMap: Map<string, {
     symbol: string;
     side: OrderSide;
@@ -101,6 +101,19 @@ export class LighterExchangeAdapter
     placedAt: Date;
   }> = new Map();
   private readonly PENDING_ORDER_TTL_MS = 300000; // 5 minutes TTL for pending orders
+
+  /**
+   * Normalize order ID / transaction hash for consistent Map lookups
+   * Removes 0x prefix and converts to lowercase
+   */
+  private normalizeOrderId(id: string): string {
+    if (!id) return '';
+    let normalized = id.trim().toLowerCase();
+    if (normalized.startsWith('0x')) {
+      normalized = normalized.slice(2);
+    }
+    return normalized;
+  }
 
   // ==================== ROBUST NONCE MANAGEMENT ====================
   // Local nonce tracking to handle stale API responses
@@ -1502,6 +1515,16 @@ export class LighterExchangeAdapter
     }
 
     const hash = result.mainOrder.hash;
+    const normalizedHash = this.normalizeOrderId(hash);
+
+    // Track this order for status matching
+    this.pendingOrdersMap.set(normalizedHash, {
+      symbol: request.symbol,
+      side: request.side,
+      size: request.size,
+      placedAt: new Date(),
+    });
+    this.cleanupPendingOrders();
 
     try {
       await this.signerClient!.waitForTransaction(hash, 30000, 2000);
@@ -1583,6 +1606,16 @@ export class LighterExchangeAdapter
     }
 
     const hash = result.mainOrder.hash;
+    const normalizedHash = this.normalizeOrderId(hash);
+
+    // Track this order for status matching
+    this.pendingOrdersMap.set(normalizedHash, {
+      symbol: request.symbol,
+      side: request.side,
+      size: request.size,
+      placedAt: new Date(),
+    });
+    this.cleanupPendingOrders();
 
     return new PerpOrderResponse(
       hash,
@@ -1634,9 +1667,10 @@ export class LighterExchangeAdapter
     }
 
     const hash = result.mainOrder.hash;
+    const normalizedHash = this.normalizeOrderId(hash);
 
     // Track this order for status matching (tx hash -> order details)
-    this.pendingOrdersMap.set(hash, {
+    this.pendingOrdersMap.set(normalizedHash, {
       symbol: request.symbol,
       side: request.side,
       size: request.size,
@@ -2413,7 +2447,8 @@ const releaseMutex = await this.acquireOrderMutex();
         
         // If no direct match and we have tracking info, match by symbol/side/size
         if (!orderStillOpen) {
-          const trackedOrder = this.pendingOrdersMap.get(orderId);
+          const normalizedId = this.normalizeOrderId(orderId);
+          const trackedOrder = this.pendingOrdersMap.get(normalizedId);
           if (trackedOrder) {
             // Find matching order by symbol and side
             const sideStr = trackedOrder.side === OrderSide.LONG ? 'buy' : 'sell';
@@ -2449,7 +2484,8 @@ const releaseMutex = await this.acquireOrderMutex();
         }
 
         // STEP 3: Order not in open orders - check if we have tracking info
-        const trackedOrder = this.pendingOrdersMap.get(orderId);
+        const normalizedId = this.normalizeOrderId(orderId);
+        const trackedOrder = this.pendingOrdersMap.get(normalizedId);
         
         // CRITICAL FIX: We can ONLY determine FILLED if:
         // 1. We have tracking info for this order (we know what we placed)
@@ -2492,29 +2528,27 @@ const releaseMutex = await this.acquireOrderMutex();
           );
           
           if (matchingPosition) {
-            // Position exists but we have no tracking info
-            // This is ambiguous - could be from a different order
-            this.logger.warn(
-              `⚠️ getOrderStatus: Order ${orderId.substring(0, 16)}... has no tracking info. ` +
-              `Position exists for ${symbol} (${matchingPosition.side}, size: ${matchingPosition.size}) ` +
-              `but cannot confirm this order filled. Returning SUBMITTED to force position delta check.`
+            // Order is missing from open orders but a position exists,
+            // it's highly likely it filled. We return FILLED to stop the repricer.
+            this.pendingOrdersMap.delete(normalizedId);
+            this.logger.log(
+              `✅ getOrderStatus: Order ${orderId.substring(0, 16)}... filled (detected via position existence, age: ${Math.round(orderAge / 1000)}s)`,
             );
-            // Return SUBMITTED instead of FILLED to force the caller to verify via position delta
             return new PerpOrderResponse(
               orderId,
-              OrderStatus.SUBMITTED,
+              OrderStatus.FILLED,
               symbol,
-              matchingPosition.side === OrderSide.LONG ? OrderSide.LONG : OrderSide.SHORT,
+              trackedOrder.side,
               undefined,
-              0, // Don't report filled size - we don't know!
-              matchingPosition.entryPrice || matchingPosition.markPrice,
+              trackedOrder.size, // Use expected size as we assume full fill
+              trackedOrder.price,
               undefined,
               new Date(),
             );
           } else {
             // No matching position - order might have been cancelled or still processing
             if (orderAge >= 300000) {
-              this.pendingOrdersMap.delete(orderId);
+              this.pendingOrdersMap.delete(normalizedId);
               this.logger.debug(
                 `getOrderStatus: Order ${orderId.substring(0, 16)}... not in open orders after ${Math.round(orderAge/1000)}s ` +
                 `and no position for ${symbol}. Assuming CANCELLED.`
@@ -4404,7 +4438,8 @@ const releaseMutex = await this.acquireOrderMutex();
     }
 
     // Get order details from pending orders map
-    const pendingOrder = this.pendingOrdersMap.get(orderId);
+    const normalizedId = this.normalizeOrderId(orderId);
+    const pendingOrder = this.pendingOrdersMap.get(normalizedId);
     const orderSide = pendingOrder?.side;
     const originalPrice = pendingOrder?.price;
 
