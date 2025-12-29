@@ -179,6 +179,7 @@ export class LighterWebSocketProvider
   
   private isPositionsSubscribed = false;
   private isOrdersSubscribed = false;
+  private hasReceivedPositionSnapshot = false; // True once we receive any position update (even empty)
 
   // Transaction sending support
   private pendingTransactions: Map<string, {
@@ -741,6 +742,9 @@ export class LighterWebSocketProvider
     this.actuallySubscribedMarkets.clear();
     this.isSubscribedToAllMarkets = false;
     
+    // Reset position/order snapshot flags - need fresh data after reconnect
+    this.hasReceivedPositionSnapshot = false;
+    
     // Use market_stats/all instead of individual subscriptions - much more efficient
     this.subscribeToAllMarkets();
 
@@ -755,6 +759,12 @@ export class LighterWebSocketProvider
     if (this.isUserSubscribed && this.accountAddress) {
       this.isUserSubscribed = false; // Reset to allow resubscription
       this.subscribeToUserOrders();
+    }
+    
+    // Resubscribe to positions if we were subscribed
+    if (this.isPositionsSubscribed && this.accountAddress) {
+      this.isPositionsSubscribed = false; // Reset to allow resubscription
+      this.subscribeToPositionUpdates();
     }
   }
 
@@ -1030,6 +1040,17 @@ export class LighterWebSocketProvider
   private handlePositionsUpdate(message: any): void {
     const positions = message.positions || {};
     
+    // Mark that we've received a position snapshot (even if empty)
+    this.hasReceivedPositionSnapshot = true;
+    
+    // Clear positions that are no longer in the update (closed positions)
+    const receivedMarketIds = new Set(Object.keys(positions).map(k => parseInt(k)));
+    for (const marketId of this.positionCache.keys()) {
+      if (!receivedMarketIds.has(marketId)) {
+        this.positionCache.delete(marketId);
+      }
+    }
+    
     for (const [marketIdStr, posData] of Object.entries(positions)) {
       const marketId = parseInt(marketIdStr);
       const pos = posData as any;
@@ -1038,6 +1059,12 @@ export class LighterWebSocketProvider
       
       const size = parseFloat(pos.position || '0');
       const sign = pos.sign || (size >= 0 ? 1 : -1);
+      
+      // Skip zero-size positions
+      if (Math.abs(size) < 0.0001) {
+        this.positionCache.delete(marketId);
+        continue;
+      }
       
       this.positionCache.set(marketId, {
         marketId,
@@ -1054,7 +1081,7 @@ export class LighterWebSocketProvider
       });
     }
     
-    this.logger.debug(`📊 Updated ${Object.keys(positions).length} positions from WebSocket`);
+    this.logger.debug(`📊 Updated ${this.positionCache.size} positions from WebSocket (received ${Object.keys(positions).length})`);
     
     // REACTIVE: Emit position update event
     this.emit('positions_update', Array.from(this.positionCache.values()));
@@ -1153,18 +1180,13 @@ export class LighterWebSocketProvider
 
   /**
    * Check if we have fresh position data from WebSocket
+   * Returns true if we've received at least one position snapshot (even if empty)
    */
   hasPositionData(): boolean {
     if (!this.isPositionsSubscribed) return false;
     
-    // Check if any position was updated in the last 30 seconds
-    const now = Date.now();
-    for (const pos of this.positionCache.values()) {
-      if (now - pos.lastUpdated.getTime() < 30000) {
-        return true;
-      }
-    }
-    return this.positionCache.size > 0;
+    // Return true if we've received any position snapshot from WS
+    return this.hasReceivedPositionSnapshot;
   }
 
   /**

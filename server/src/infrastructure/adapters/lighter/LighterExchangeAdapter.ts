@@ -189,10 +189,7 @@ export class LighterExchangeAdapter
       apiKeyIndex,
     );
 
-    // Removed adapter initialization log - only execution logs shown
-    if (this.wsProvider) {
-      this.wsProvider.subscribeToPositionUpdates();
-    }
+    // Position/order subscriptions are set up in ensureInitialized() after account index is known
   }
 
   /**
@@ -306,6 +303,10 @@ export class LighterExchangeAdapter
       // This enables WebSocket-based position updates, eliminating REST polling!
       if (this.wsProvider && this.config.accountIndex) {
         this.wsProvider.setAccountIndex(this.config.accountIndex);
+        // Subscribe to positions AFTER account index is set
+        this.wsProvider.subscribeToPositions();
+        this.wsProvider.subscribeToOrders();
+        this.logger.log(`📡 Lighter WebSocket position/order subscriptions enabled for account ${this.config.accountIndex}`);
       }
     }
   }
@@ -1209,42 +1210,49 @@ export class LighterExchangeAdapter
     try {
       await this.ensureInitialized();
 
-      // ========== NEW: Try WebSocket cache first to avoid REST call ==========
+      // ========== Try WebSocket cache first to avoid REST call ==========
       // This dramatically reduces rate limit usage!
-      if (this.wsProvider) {
-        const cachedPositions = this.wsProvider.getCachedPositions();
-        if (cachedPositions && cachedPositions.size > 0) {
-          this.logger.debug(`Using WebSocket cached positions (${cachedPositions.size} markets)`);
-          
-          const positions: PerpPosition[] = [];
-          for (const [marketId, pos] of cachedPositions) {
-            if (Math.abs(pos.size) < 0.0001) continue; // Skip zero positions
+      if (this.wsProvider && this.wsProvider.isSubscribedToPositions()) {
+        // Check if WS has received position data (even if empty means no positions)
+        if (this.wsProvider.hasPositionData()) {
+          const cachedPositions = this.wsProvider.getCachedPositions();
+          if (cachedPositions && cachedPositions.size > 0) {
+            this.logger.debug(`Using WebSocket cached positions (${cachedPositions.size} markets)`);
             
-            // Map to PerpPosition
-            const side = pos.sign > 0 ? OrderSide.LONG : OrderSide.SHORT;
-            const markPrice = this.wsProvider.getMarkPrice(marketId) || pos.avgEntryPrice;
+            const positions: PerpPosition[] = [];
+            for (const [marketId, pos] of cachedPositions) {
+              if (Math.abs(pos.size) < 0.0001) continue; // Skip zero positions
+              
+              // Map to PerpPosition
+              const side = pos.sign > 0 ? OrderSide.LONG : OrderSide.SHORT;
+              const markPrice = this.wsProvider.getMarkPrice(marketId) || pos.avgEntryPrice;
+              
+              positions.push(new PerpPosition(
+                ExchangeType.LIGHTER,
+                pos.symbol,
+                side,
+                Math.abs(pos.size),
+                pos.avgEntryPrice,
+                markPrice,
+                pos.unrealizedPnl,
+                1, // leverage - not provided by WS, use default
+              ));
+            }
             
-            positions.push(new PerpPosition(
-              ExchangeType.LIGHTER,
-              pos.symbol,
-              side,
-              Math.abs(pos.size),
-              pos.avgEntryPrice,
-              markPrice,
-              pos.unrealizedPnl,
-              1, // leverage - not provided by WS, use default
-            ));
+            if (positions.length > 0) {
+              this.logger.debug(`WebSocket returned ${positions.length} active positions`);
+              return positions;
+            }
           }
-          
-          if (positions.length > 0) {
-            this.logger.debug(`WebSocket returned ${positions.length} active positions`);
-            return positions;
-          }
+          // WS is subscribed and has data, but no positions - this is valid!
+          this.logger.debug(`WebSocket indicates no Lighter positions (subscribed and synced)`);
+          return [];
         }
       }
       // ========== End WebSocket cache check ==========
 
-      // Fallback to REST API
+      // Fallback to REST API only if WS not available or not synced
+      this.logger.debug(`📡 WS cache miss/unsynced. Falling back to Lighter REST API...`);
       // Use Lighter Explorer API to get positions
       // Endpoint: https://explorer.elliot.ai/api/accounts/{accountIndex}/positions
       const accountIndex = this.config.accountIndex!;

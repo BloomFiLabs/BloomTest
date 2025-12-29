@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { render, Box, Text, useApp, Newline } from 'ink';
 import axios from 'axios';
 
+// Clear console before starting
+console.clear();
+process.stdout.write('\x1B[2J\x1B[0f');
+
 const BASE_URL = 'http://localhost:3000/tui';
 
 const App = () => {
