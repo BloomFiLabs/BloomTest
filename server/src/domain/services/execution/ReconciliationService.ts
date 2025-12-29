@@ -72,9 +72,10 @@ export class ReconciliationService implements OnModuleInit {
   private readonly recentResults: ReconciliationResult[] = [];
 
   // Configuration
-  private readonly IMBALANCE_THRESHOLD_PERCENT = 5;
-  private readonly NUCLEAR_THRESHOLD_PERCENT = 20;
-  private readonly NUCLEAR_TIMEOUT_MINUTES = 1; // Reduced to 1 minute for faster recovery
+  private readonly IMBALANCE_THRESHOLD_PERCENT = 5;    // Log warning above this
+  private readonly NUCLEAR_THRESHOLD_PERCENT = 30;     // Consider nuclear above this (was 20)
+  private readonly NUCLEAR_TIMEOUT_MINUTES = 10;       // 10 minutes after execution completes (was 5)
+  private readonly COOLDOWN_AFTER_EXECUTION_MS = 60000; // Wait 1 minute after execution ends before considering nuclear
   private readonly MAX_RECOVERY_ATTEMPTS = 3;
 
   constructor(
@@ -161,6 +162,31 @@ export class ReconciliationService implements OnModuleInit {
     // we should skip reconciliation to avoid "missfires" during sequential execution.
     if (this.executionLockService?.isSymbolLocked(symbol)) {
       this.logger.debug(`⏭️ Skipping reconciliation for ${symbol} - currently locked by an execution thread`);
+      // Reset the imbalance timer since we're in active execution
+      this.hedgePairs.delete(symbol);
+      return;
+    }
+    
+    // Check if there are any active orders for this symbol (even if not locked)
+    // This catches the case where an order is placed but execution thread released the lock
+    if (this.executionLockService) {
+      const activeOrders = this.executionLockService.getAllActiveOrders();
+      const hasActiveOrder = activeOrders.some(o => 
+        this.normalizeSymbol(o.symbol) === symbol && 
+        (o.status === 'PLACING' || o.status === 'WAITING_FILL')
+      );
+      if (hasActiveOrder) {
+        this.logger.debug(`⏭️ Skipping reconciliation for ${symbol} - has active orders pending fill`);
+        // Don't reset timer here - just skip this cycle
+        return;
+      }
+    }
+    
+    // Check if we're in cooldown period after execution completed
+    if (this.executionLockService?.isInExecutionCooldown(symbol, this.COOLDOWN_AFTER_EXECUTION_MS)) {
+      const completedAt = this.executionLockService.getExecutionCompletedAt(symbol);
+      const remainingSec = completedAt ? Math.ceil((this.COOLDOWN_AFTER_EXECUTION_MS - (Date.now() - completedAt)) / 1000) : 0;
+      this.logger.debug(`⏭️ Skipping reconciliation for ${symbol} - in cooldown period (${remainingSec}s remaining)`);
       return;
     }
 
@@ -192,9 +218,19 @@ export class ReconciliationService implements OnModuleInit {
       this.hedgePairs.delete(symbol); // Balanced
     }
   }
+  
 
   private async handleSingleLeg(symbol: string, pos: PerpPosition) {
-    this.logger.error(`🚨 SINGLE LEG DETECTED: ${symbol} ${pos.side} on ${pos.exchangeType}`);
+    // Calculate position value to determine if this is worth worrying about
+    const positionUsd = Math.abs(pos.size) * (pos.markPrice || 0);
+    
+    // Very small single legs (< $10) might just be dust - log but don't panic
+    if (positionUsd < 10) {
+      this.logger.debug(`📊 Tiny single leg for ${symbol}: $${positionUsd.toFixed(2)} - may be dust`);
+      return;
+    }
+    
+    this.logger.warn(`⚠️ SINGLE LEG DETECTED: ${symbol} ${pos.side} on ${pos.exchangeType} ($${positionUsd.toFixed(2)})`);
     
     // Record in diagnostics for visibility
     if (this.diagnosticsService) {
@@ -214,34 +250,47 @@ export class ReconciliationService implements OnModuleInit {
       status = { symbol, longExchange: pos.exchangeType, shortExchange: pos.exchangeType, longSize: 0, shortSize: 0, imbalance: 100, imbalancePercent: 100, isBalanced: false, lastReconciled: new Date(), firstImbalanceAt: new Date(), imbalanceCount: 1 };
       this.hedgePairs.set(symbol, status);
       
-      // Try to open missing side immediately when first detected
-      if (this.orderGuardian) {
-        this.logger.log(`🛠️ Attempting to open missing side for ${symbol} ${pos.side} on ${pos.exchangeType}...`);
-        const opened = await this.orderGuardian.tryOpenMissingSide(pos);
-        if (opened) {
-          this.logger.log(`✅ Successfully initiated opening missing side for ${symbol}`);
-          return; // Give it time to fill before checking again
-        } else {
-          this.logger.warn(`⚠️ Failed to open missing side for ${symbol}, will retry next cycle`);
-        }
-      }
+      // First detection - this might be mid-execution, so just log and wait
+      this.logger.log(`📝 Single leg ${symbol} first detected - will monitor for ${this.NUCLEAR_TIMEOUT_MINUTES}m before action`);
       return;
     }
 
     status.imbalanceCount++;
     const durationMin = (Date.now() - status.firstImbalanceAt!.getTime()) / 60000;
+    
+    this.logger.warn(`⏳ Single leg ${symbol} persisting for ${durationMin.toFixed(1)}m (count: ${status.imbalanceCount})`);
 
-    // Try to open missing side again if we haven't exceeded retries
-    if (this.orderGuardian && durationMin < this.NUCLEAR_TIMEOUT_MINUTES) {
-      const opened = await this.orderGuardian.tryOpenMissingSide(pos);
-      if (opened) {
-        this.logger.log(`✅ Retry: Successfully initiated opening missing side for ${symbol}`);
-        return; // Give it time to fill
+    // After 2 minutes, try to open missing side
+    if (durationMin >= 2 && this.orderGuardian && durationMin < this.NUCLEAR_TIMEOUT_MINUTES) {
+      // Only try every 2 minutes to avoid spam
+      if (status.imbalanceCount % 4 === 0) {
+        this.logger.log(`🛠️ Attempting to open missing side for ${symbol}...`);
+        const opened = await this.orderGuardian.tryOpenMissingSide(pos);
+        if (opened) {
+          this.logger.log(`✅ Successfully initiated opening missing side for ${symbol}`);
+          return; // Give it time to fill
+        } else {
+          this.logger.warn(`⚠️ Failed to open missing side for ${symbol}, will retry`);
+        }
       }
     }
 
+    // NUCLEAR: Only after 10+ minutes AND final safety checks
     if (durationMin >= this.NUCLEAR_TIMEOUT_MINUTES) {
-      this.logger.error(`☢️ NUCLEAR OPTION: Single leg ${symbol} persisted ${durationMin.toFixed(1)}m. Closing...`);
+      // Final safety check: make absolutely sure no execution is happening
+      if (this.executionLockService?.isSymbolLocked(symbol)) {
+        this.logger.warn(`⏭️ Nuclear deferred for single-leg ${symbol} - execution in progress`);
+        return;
+      }
+      
+      const activeOrders = this.executionLockService?.getAllActiveOrders() || [];
+      const hasActiveOrder = activeOrders.some(o => this.normalizeSymbol(o.symbol) === symbol);
+      if (hasActiveOrder) {
+        this.logger.warn(`⏭️ Nuclear deferred for single-leg ${symbol} - has active orders`);
+        return;
+      }
+      
+      this.logger.error(`☢️ NUCLEAR OPTION: Single leg ${symbol} ($${positionUsd.toFixed(2)}) persisted ${durationMin.toFixed(1)}m with no active execution. Closing...`);
       await this.executeNuclearClose(pos);
       this.hedgePairs.delete(symbol);
     }
@@ -254,36 +303,79 @@ export class ReconciliationService implements OnModuleInit {
       this.diagnosticsService.recordPositionDrift(symbol, long.exchangeType, short.exchangeType, Math.abs(long.size), Math.abs(short.size), long.markPrice || 0);
     }
 
-    // If imbalance is severe (>30%), attempt to rebalance before going nuclear
-    if (percent > 30 && percent < this.NUCLEAR_THRESHOLD_PERCENT) {
-      this.logger.log(`🛠️ Attempting proactive rebalancing for ${symbol} (${percent.toFixed(1)}% imbalance)...`);
-      await this.attemptHedgedRebalance(symbol, long, short);
+    // Calculate the imbalance in USD terms to determine severity
+    const imbalanceSize = Math.abs(Math.abs(long.size) - Math.abs(short.size));
+    const imbalanceUsd = imbalanceSize * (long.markPrice || short.markPrice || 0);
+    
+    // Small imbalances (< $50 or < 10%) are tolerable - just log and move on
+    // These can happen naturally due to partial fills, rounding, etc.
+    if (percent < 10 || imbalanceUsd < 50) {
+      this.logger.debug(`📊 Minor imbalance for ${symbol}: ${percent.toFixed(1)}% ($${imbalanceUsd.toFixed(2)}) - within tolerance`);
+      return;
     }
 
-    if (percent > this.NUCLEAR_THRESHOLD_PERCENT) {
+    // Medium imbalances (10-30%) - try to rebalance but don't panic
+    if (percent >= 10 && percent < this.NUCLEAR_THRESHOLD_PERCENT) {
       let status = this.hedgePairs.get(symbol);
       if (!status) {
-        status = { symbol, longExchange: long.exchangeType, shortExchange: short.exchangeType, longSize: Math.abs(long.size), shortSize: Math.abs(short.size), imbalance: Math.abs(long.size - short.size), imbalancePercent: percent, isBalanced: false, lastReconciled: new Date(), firstImbalanceAt: new Date(), imbalanceCount: 1 };
+        status = { symbol, longExchange: long.exchangeType, shortExchange: short.exchangeType, longSize: Math.abs(long.size), shortSize: Math.abs(short.size), imbalance: imbalanceSize, imbalancePercent: percent, isBalanced: false, lastReconciled: new Date(), firstImbalanceAt: new Date(), imbalanceCount: 1 };
         this.hedgePairs.set(symbol, status);
-        
-        // Try one proactive rebalance when first detected
-        await this.attemptHedgedRebalance(symbol, long, short);
       } else {
         status.imbalanceCount++;
-        const durationMin = (Date.now() - status.firstImbalanceAt!.getTime()) / 60000;
-        
-        this.logger.warn(`⏳ Severe imbalance for ${symbol} persisting for ${durationMin.toFixed(1)}m (Nuclear at ${this.NUCLEAR_TIMEOUT_MINUTES}m)`);
-        
-        // Every 2 minutes, try to rebalance again
-        if (Math.floor(durationMin) % 2 === 0 && status.imbalanceCount % 4 === 0) {
-          await this.attemptHedgedRebalance(symbol, long, short);
-        }
+      }
+      
+      // Try to rebalance every 2 minutes if imbalance persists
+      const durationMin = (Date.now() - status.firstImbalanceAt!.getTime()) / 60000;
+      if (durationMin >= 2 && status.imbalanceCount % 4 === 0) {
+        this.logger.log(`🛠️ Attempting rebalancing for ${symbol} (${percent.toFixed(1)}% imbalance, persisted ${durationMin.toFixed(1)}m)...`);
+        await this.attemptHedgedRebalance(symbol, long, short);
+      }
+      return;
+    }
 
-        if (durationMin >= this.NUCLEAR_TIMEOUT_MINUTES) {
-          this.logger.error(`☢️ NUCLEAR OPTION: Severe imbalance for ${symbol} persisted. Closing BOTH legs.`);
-          await Promise.all([this.executeNuclearClose(long), this.executeNuclearClose(short)]);
-          this.hedgePairs.delete(symbol);
+    // Severe imbalances (>30%) - track and potentially go nuclear, but be patient
+    if (percent >= this.NUCLEAR_THRESHOLD_PERCENT) {
+      let status = this.hedgePairs.get(symbol);
+      if (!status) {
+        status = { symbol, longExchange: long.exchangeType, shortExchange: short.exchangeType, longSize: Math.abs(long.size), shortSize: Math.abs(short.size), imbalance: imbalanceSize, imbalancePercent: percent, isBalanced: false, lastReconciled: new Date(), firstImbalanceAt: new Date(), imbalanceCount: 1 };
+        this.hedgePairs.set(symbol, status);
+        
+        // First detection - try to rebalance once
+        this.logger.warn(`⚠️ Severe imbalance detected for ${symbol}: ${percent.toFixed(1)}% ($${imbalanceUsd.toFixed(2)}). Attempting rebalance...`);
+        await this.attemptHedgedRebalance(symbol, long, short);
+        return; // Give rebalance time to work
+      }
+      
+      status.imbalanceCount++;
+      const durationMin = (Date.now() - status.firstImbalanceAt!.getTime()) / 60000;
+      
+      this.logger.warn(`⏳ Severe imbalance for ${symbol}: ${percent.toFixed(1)}% persisting for ${durationMin.toFixed(1)}m (Nuclear at ${this.NUCLEAR_TIMEOUT_MINUTES}m)`);
+      
+      // Try to rebalance every 3 minutes
+      if (Math.floor(durationMin) % 3 === 0 && status.imbalanceCount % 6 === 0) {
+        this.logger.log(`🛠️ Retry rebalancing for ${symbol}...`);
+        await this.attemptHedgedRebalance(symbol, long, short);
+      }
+
+      // NUCLEAR OPTION: Only after 10+ minutes of persistent severe imbalance
+      // AND only if we're not in any execution-related state
+      if (durationMin >= this.NUCLEAR_TIMEOUT_MINUTES) {
+        // Final safety check: make absolutely sure no execution is happening
+        if (this.executionLockService?.isSymbolLocked(symbol)) {
+          this.logger.warn(`⏭️ Nuclear deferred for ${symbol} - execution in progress`);
+          return;
         }
+        
+        const activeOrders = this.executionLockService?.getAllActiveOrders() || [];
+        const hasActiveOrder = activeOrders.some(o => this.normalizeSymbol(o.symbol) === symbol);
+        if (hasActiveOrder) {
+          this.logger.warn(`⏭️ Nuclear deferred for ${symbol} - has active orders`);
+          return;
+        }
+        
+        this.logger.error(`☢️ NUCLEAR OPTION: Severe imbalance for ${symbol} (${percent.toFixed(1)}%) persisted ${durationMin.toFixed(1)}m with no active execution. Closing BOTH legs.`);
+        await Promise.all([this.executeNuclearClose(long), this.executeNuclearClose(short)]);
+        this.hedgePairs.delete(symbol);
       }
     }
   }

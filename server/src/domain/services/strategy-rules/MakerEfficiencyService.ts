@@ -495,6 +495,10 @@ export class MakerEfficiencyService implements OnModuleInit {
   /**
    * When an order disappears (modify fails), check position to determine if it was filled or cancelled.
    * NEVER trust error messages - only trust position changes.
+   * 
+   * IMPORTANT: If we don't have initial position data, we CANNOT reliably determine
+   * if the order was filled. In that case, we should NOT force clear - let the 
+   * normal execution flow handle it (waitForOrderFill will eventually timeout or detect via other means).
    */
   private async handleDisappearedOrder(
     exchange: ExchangeType,
@@ -502,14 +506,24 @@ export class MakerEfficiencyService implements OnModuleInit {
     activeOrder: ActiveOrder
   ): Promise<void> {
     try {
+      // If we don't have initial position size, we can't reliably determine fill status
+      // Don't force clear - the execution service's waitForOrderFill will handle it
+      if (activeOrder.initialPositionSize === undefined) {
+        this.logger.warn(
+          `⚠️ Order ${activeOrder.orderId} for ${symbol} disappeared but no initialPositionSize tracked. ` +
+          `Leaving order in tracking - waitForOrderFill will handle via position delta check.`
+        );
+        return;
+      }
+      
       // Get current position to check if order was filled
       const adapter = this.keeperService.getExchangeAdapter(exchange);
       const positions = await adapter.getPositions();
-      const position = positions.find(p => p.symbol === symbol);
+      const position = positions.find(p => p.symbol === symbol && p.side === (activeOrder.side === 'LONG' ? 'LONG' : 'SHORT'));
       
       const currentSize = position ? Math.abs(position.size) : 0;
       const expectedSize = activeOrder.size || 0;
-      const initialSize = activeOrder.initialPositionSize ?? 0;
+      const initialSize = activeOrder.initialPositionSize;
       
       // Calculate position delta since order was placed
       const positionDelta = currentSize - initialSize;
@@ -532,6 +546,8 @@ export class MakerEfficiencyService implements OnModuleInit {
           activeOrder.orderId
         );
       } else {
+        // Only force clear if we're confident the order was NOT filled
+        // This means: we have initial position data AND delta is near zero
         this.logger.warn(
           `🗑️ Order ${activeOrder.orderId} for ${symbol} CANCELLED (no position change: ` +
           `delta=${positionDelta.toFixed(4)}, initial=${initialSize.toFixed(4)}, current=${currentSize.toFixed(4)})`
@@ -544,12 +560,10 @@ export class MakerEfficiencyService implements OnModuleInit {
       }
     } catch (positionError: any) {
       this.logger.error(`Failed to check position for ${symbol}: ${positionError.message}`);
-      // If we can't check position, force clear the order to prevent stuck state
-      // Better to restart the order than be stuck forever
-      this.executionLockService.forceClearOrder(
-        exchange,
-        symbol,
-        activeOrder.side as 'LONG' | 'SHORT'
+      // If we can't check position, DON'T force clear - let waitForOrderFill handle it
+      // Force clearing could cause us to lose track of a filled order
+      this.logger.warn(
+        `⚠️ Cannot determine fill status for ${activeOrder.orderId}. Leaving in tracking.`
       );
     }
   }

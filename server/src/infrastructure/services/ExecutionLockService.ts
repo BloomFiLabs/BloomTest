@@ -65,6 +65,9 @@ export class ExecutionLockService {
   // Order history for debugging (last 100 orders)
   private readonly orderHistory: ActiveOrder[] = [];
   private readonly MAX_ORDER_HISTORY = 100;
+  
+  // Track when execution last completed for each symbol (for reconciliation cooldown)
+  private readonly executionCompletedAt: Map<string, number> = new Map();
 
   // Active execution progress tracking for TUI
   private currentExecution: {
@@ -445,6 +448,10 @@ export class ExecutionLockService {
     }
 
     this.executingSymbols.delete(normalizedSymbol);
+    
+    // Track when execution completed for this symbol (for reconciliation cooldown)
+    this.executionCompletedAt.set(normalizedSymbol, Date.now());
+    
     this.logger.debug(
       `🔓 Lock released for ${normalizedSymbol} by ${threadId}`,
     );
@@ -467,6 +474,38 @@ export class ExecutionLockService {
     }
 
     return true;
+  }
+  
+  /**
+   * Get the timestamp when execution last completed for a symbol
+   * Returns undefined if no execution has completed or it was too long ago
+   */
+  getExecutionCompletedAt(symbol: string): number | undefined {
+    const normalizedSymbol = this.normalizeSymbol(symbol);
+    const completedAt = this.executionCompletedAt.get(normalizedSymbol);
+    
+    // Only return if it was within the last hour (for memory cleanup)
+    if (completedAt && (Date.now() - completedAt) < 3600000) {
+      return completedAt;
+    }
+    
+    // Clean up old entries
+    if (completedAt) {
+      this.executionCompletedAt.delete(normalizedSymbol);
+    }
+    
+    return undefined;
+  }
+  
+  /**
+   * Check if a symbol is in cooldown period after execution completed
+   * @param symbol The symbol to check
+   * @param cooldownMs The cooldown period in milliseconds
+   */
+  isInExecutionCooldown(symbol: string, cooldownMs: number): boolean {
+    const completedAt = this.getExecutionCompletedAt(symbol);
+    if (!completedAt) return false;
+    return (Date.now() - completedAt) < cooldownMs;
   }
 
   /**
