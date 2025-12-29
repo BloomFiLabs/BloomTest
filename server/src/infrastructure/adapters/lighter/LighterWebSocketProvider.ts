@@ -524,16 +524,18 @@ export class LighterWebSocketProvider
     }
 
     // Handle account_all_positions updates (from WebSocket docs)
-    // Channel: account_all_positions:{ACCOUNT_ID}
+    // Channel format can be account_all_positions/{ACCOUNT_ID} or account_all_positions:{ACCOUNT_ID}
     if (message.type === 'update/account_all_positions' || 
+        message.channel?.startsWith('account_all_positions/') ||
         message.channel?.startsWith('account_all_positions:')) {
       this.handlePositionsUpdate(message);
       return;
     }
 
     // Handle account_all_orders updates (from WebSocket docs)
-    // Channel: account_all_orders:{ACCOUNT_ID}
+    // Channel format can be account_all_orders/{ACCOUNT_ID} or account_all_orders:{ACCOUNT_ID}
     if (message.type === 'update/account_all_orders' || 
+        message.channel?.startsWith('account_all_orders/') ||
         message.channel?.startsWith('account_all_orders:')) {
       this.handleOrdersUpdate(message);
       return;
@@ -1029,9 +1031,12 @@ export class LighterWebSocketProvider
    */
   private handlePositionsUpdate(message: any): void {
     const positions = message.positions || {};
+    const positionCount = Object.keys(positions).length;
     
     // Mark that we've received a position snapshot (even if empty)
     this.hasReceivedPositionSnapshot = true;
+    
+    this.logger.debug(`📊 Lighter WS position update: ${positionCount} positions received (snapshot flag set)`);
     
     // Clear positions that are no longer in the update (closed positions)
     const receivedMarketIds = new Set(Object.keys(positions).map(k => parseInt(k)));
